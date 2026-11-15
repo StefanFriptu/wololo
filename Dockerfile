@@ -20,12 +20,6 @@ RUN bun install --frozen-lockfile --production --ignore-scripts
 FROM oven/bun:${BUN_VERSION}-slim AS bun
 
 FROM debian:${DEBIAN_RELEASE}-slim
-ARG VERSION=dev
-LABEL org.opencontainers.image.title="Wololo" \
-      org.opencontainers.image.description="Self-hosted *arr companion that converts media so every TV direct-plays it" \
-      org.opencontainers.image.licenses="GPL-3.0-only" \
-      org.opencontainers.image.version="${VERSION}"
-
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg mkvtoolnix 7zip ca-certificates tzdata \
  && rm -rf /var/lib/apt/lists/* \
@@ -54,8 +48,7 @@ COPY --from=web /app/web/build web/build
 COPY --chmod=0755 docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY docker/healthcheck.ts /app/docker/healthcheck.ts
 
-ENV WOLOLO_VERSION=${VERSION} \
-    PUID=1000 \
+ENV PUID=1000 \
     PGID=1000 \
     UMASK=002 \
     TZ=Etc/UTC \
@@ -64,6 +57,14 @@ ENV WOLOLO_VERSION=${VERSION} \
     WOLOLO_DOCKER=1 \
     WOLOLO_CONFIG_DIR=/config \
     WOLOLO_WEB_DIR=/app/web/build
+
+# Last, so a new version only changes these metadata layers and every RUN layer above stays cached.
+ARG VERSION=dev
+ENV WOLOLO_VERSION=${VERSION}
+LABEL org.opencontainers.image.title="Wololo" \
+      org.opencontainers.image.description="Self-hosted *arr companion that converts media so every TV direct-plays it" \
+      org.opencontainers.image.licenses="GPL-3.0-only" \
+      org.opencontainers.image.version="${VERSION}"
 
 EXPOSE 8585
 STOPSIGNAL SIGTERM

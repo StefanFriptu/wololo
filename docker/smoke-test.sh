@@ -98,7 +98,9 @@ docker exec "${NAME}" mkvmerge --version
 docker exec "${NAME}" 7z i > /dev/null || fail "7z missing"
 api "${BASE}/api/v1/system/status" | jq -e '[.tools[] | .available] | all' > /dev/null ||
   fail "system status reports a missing tool: $(api "${BASE}/api/v1/system/status" | jq -c '.tools')"
-api "${BASE}/api/v1/system/health" | jq -e 'map(select(.source == "tools" or .source == "docker" or .source == "config")) | length == 0' > /dev/null ||
+# Config warnings (low free space on the runner's disk) say nothing about the image; config errors do.
+api "${BASE}/api/v1/system/health" |
+  jq -e 'map(select(.source == "tools" or .source == "docker" or (.source == "config" and .level == "error"))) | length == 0' > /dev/null ||
   fail "health checks: $(api "${BASE}/api/v1/system/health" | jq -c '.')"
 
 step "backup and OpenAPI"
