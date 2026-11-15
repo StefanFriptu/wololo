@@ -19,7 +19,7 @@ Stack: TypeScript on Bun, Hono, SQLite with Drizzle, SvelteKit SPA, `bun test`, 
 
 ## Structure and naming
 
-- One export per file, named exactly like the file (`getFoo.ts` exports `getFoo`). Tests and barrel files are exempt.
+- One export per file, named exactly like the file (`getFoo.ts` exports `getFoo`). Tests and barrel files are exempt. Exception: a file may group the functions of one concern, with the types and constants they share (the queries of one table in a `*Query.ts` file, the pure functions ARCHITECTURE.md assigns to one file); split it once it holds a second concern.
 - Local non-exported helpers and types are fine. Move one to its own file once a second file needs it.
 - Extract a step only when a second module reuses it, when it is a unit worth naming, or when its edge cases need their own test table. Otherwise keep it in the caller.
 - Name files after what they export: PascalCase for types, schemas and enums, camelCase for functions.
