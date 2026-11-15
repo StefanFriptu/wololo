@@ -1,34 +1,340 @@
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import type { AppContext } from '../../app/context.ts';
-import type { JobsService } from '../../contracts/jobs.ts';
-import { notImplemented } from '../../core/errors.ts';
-import type { QueueState } from '../../shared/domain.ts';
+import type { JobsService, NewJob } from '../../contracts/jobs.ts';
+import { AppError, errorMessage, notFound } from '../../core/errors.ts';
+import type { JobRow } from '../../db/schema.ts';
+import type { EnqueueRequest, EnqueueResponse, MediaFileSummary, PageQuery } from '../../shared/api-types.ts';
+import { JOB_STATES, type JobState, type JobSummary } from '../../shared/domain.ts';
+import { createAudioExecutor } from './audioExecutor.ts';
+import {
+  deleteJobRow,
+  existingJobIds,
+  findActiveJobForMedia,
+  finishedJobIdsBefore,
+  getJobRow,
+  idleJobsWithTempPath,
+  insertJobRow,
+  jobsInState,
+  listHistoryRows,
+  listJobRows,
+  type PageWindow,
+  queueRows,
+  updateJobRow,
+} from './jobQueries.ts';
+import { createJobLifecycle } from './lifecycle.ts';
+import { toHistoryEntry, toJobDetail, toJobSummary } from './mappers.ts';
+import { jobTitleFor } from './paths.ts';
+import { deleteTempPath, resolveInterruptedJob } from './recover.ts';
+import { createWorker } from './worker.ts';
+
+const ENQUEUE_PAGE_SIZE = 500;
+const QUEUE_ITEMS_LIMIT = 500;
+const JOB_LOG_RETENTION_DAYS = 30;
+const JOB_LOG_NAME = /^(\d+)\.txt$/;
+
+function pageWindow(query: PageQuery): PageWindow {
+  return {
+    page: Math.max(1, query.page ?? 1),
+    pageSize: Math.min(500, Math.max(1, query.pageSize ?? 50)),
+    sortDir: query.sortDir ?? 'desc',
+  };
+}
+
+function parseStates(value: string | undefined): JobState[] | undefined {
+  if (!value) return undefined;
+  const states = value.split(',').map((state) => state.trim());
+  return states.filter((state): state is JobState => (JOB_STATES as readonly string[]).includes(state));
+}
+
+function chunks<T>(items: T[], size: number): T[][] {
+  return Array.from({ length: Math.ceil(items.length / size) }, (_, i) => items.slice(i * size, (i + 1) * size));
+}
 
 export function createJobsService(ctx: AppContext): JobsService {
-  const idleState = (): QueueState => ({
-    paused: false,
-    pauseReasons: [],
-    running: 0,
-    queued: 0,
-    concurrency: ctx.settings.section('processing').concurrency,
+  const log = ctx.logs.logger('jobs');
+  const { db } = ctx;
+  const lifecycle = createJobLifecycle(ctx, { log, onChange: () => worker.wake() });
+  const audioExecutor = createAudioExecutor({
+    services: ctx.services,
+    ffmpegPath: () => ctx.config.get().tools.ffmpeg,
+    recycleBinEnabled: () => ctx.settings.section('recycleBin').enabled,
+    recordPlan: (jobId, plan, before) => {
+      updateJobRow(db, jobId, {
+        plan,
+        beforeStreams: before,
+        rulesKey: plan.rulesKey,
+        lostFeatures: plan.lostFeatures,
+      });
+    },
+    log,
   });
+  const worker = createWorker({
+    ctx,
+    log,
+    lifecycle,
+    executorFor: (type) => (type === 'audio' ? audioExecutor : ctx.services.bdmv.execute),
+  });
+
+  const summary = (row: JobRow): JobSummary => toJobSummary(row, worker.live(row.id));
+  const mustGet = (id: number): JobRow => {
+    const row = getJobRow(db, id);
+    if (!row) throw notFound(`job ${id}`);
+    return row;
+  };
+
+  const enqueue = async (job: NewJob): Promise<JobSummary> => {
+    const existing = findActiveJobForMedia(db, job.mediaFileId);
+    if (existing) return summary(existing);
+    const media = await ctx.services.media.get(job.mediaFileId);
+    const raced = findActiveJobForMedia(db, job.mediaFileId);
+    if (raced) return summary(raced);
+    const row = insertJobRow(db, {
+      type: job.type,
+      trigger: job.trigger,
+      mediaFileId: job.mediaFileId,
+      libraryId: media.libraryId,
+      priority: job.priority ?? 0,
+      title: job.title ?? jobTitleFor(media.path, media.kind),
+      sourcePath: media.path,
+      plan: job.plan ?? null,
+      bdmvPlan: job.bdmvPlan ?? null,
+      rulesKey: job.plan?.rulesKey ?? null,
+      lostFeatures: job.plan?.lostFeatures ?? [],
+      bytesBefore: media.sizeBytes,
+    });
+    lifecycle.addHistory({
+      event: 'queued',
+      path: row.sourcePath,
+      message: `queued (${row.trigger})`,
+      jobId: row.id,
+      mediaFileId: row.mediaFileId,
+    });
+    ctx.events.emit('job.queued', { job: toJobSummary(row) });
+    worker.wake();
+    return toJobSummary(row);
+  };
+
+  const enqueueOne = async (
+    media: MediaFileSummary,
+    request: EnqueueRequest,
+    plan: NewJob['plan'],
+  ): Promise<{ job: JobSummary } | { reason: string }> => {
+    if (!request.force && media.status !== 'needs_work') return { reason: `status is ${media.status}` };
+    const base = { trigger: 'manual' as const, mediaFileId: media.id, priority: request.priority };
+    if (media.kind === 'file') return { job: await enqueue({ ...base, type: 'audio', plan }) };
+    const evaluation = await ctx.services.bdmv.evaluate(media.id);
+    if (!evaluation.plan) return { reason: evaluation.reason ?? `disc is ${evaluation.status}` };
+    return { job: await enqueue({ ...base, type: 'bdmv', bdmvPlan: evaluation.plan }) };
+  };
+
+  const enqueueMany = async (request: EnqueueRequest): Promise<EnqueueResponse> => {
+    if (!ctx.settings.section('processing').enabled)
+      throw new AppError(
+        'precondition_failed',
+        'processing is disabled (dry-run mode); turn it on before queueing jobs',
+      );
+    const response: EnqueueResponse = { jobs: [], skipped: [] };
+    const consider = async (media: MediaFileSummary, plan: NewJob['plan']) => {
+      try {
+        const result = await enqueueOne(media, request, plan);
+        if ('job' in result) response.jobs.push(result.job);
+        else response.skipped.push({ mediaFileId: media.id, reason: result.reason });
+      } catch (error) {
+        log.warn('cannot queue media file', { mediaFileId: media.id, error: errorMessage(error) });
+        response.skipped.push({ mediaFileId: media.id, reason: errorMessage(error) });
+      }
+    };
+
+    if (request.mediaFileIds) {
+      for (const id of request.mediaFileIds) {
+        try {
+          const detail = await ctx.services.media.get(id);
+          await consider(detail, detail.plan);
+        } catch (error) {
+          const reason = error instanceof AppError && error.code === 'not_found' ? 'not found' : errorMessage(error);
+          response.skipped.push({ mediaFileId: id, reason });
+        }
+      }
+      return response;
+    }
+    const filter = request.filter ?? {};
+    for (let page = 1; ; page++) {
+      const result = await ctx.services.media.list({
+        libraryId: filter.libraryId,
+        status: filter.status ?? 'needs_work',
+        failingCodec: filter.failingCodec,
+        kind: filter.kind,
+        profileId: filter.profileId,
+        page,
+        pageSize: ENQUEUE_PAGE_SIZE,
+        sortDir: 'asc',
+      });
+      for (const item of result.items) await consider(item, null);
+      if (result.items.length === 0 || page * ENQUEUE_PAGE_SIZE >= result.total) break;
+    }
+    return response;
+  };
+
+  const recover: JobsService['recover'] = async () => {
+    const counts = { requeued: 0, completed: 0, tempFilesDeleted: 0 };
+    const { maxAttempts } = ctx.settings.section('processing');
+    for (const row of jobsInState(db, 'running')) {
+      try {
+        const resolution = resolveInterruptedJob(db, row, (line) => log.info(line, { jobId: row.id }));
+        if (resolution.kind === 'completed') {
+          await lifecycle.completedAfterInterruption(row, resolution.outputPath, 'completed during crash recovery');
+          counts.completed += 1;
+          continue;
+        }
+        if (resolution.kind === 'source_missing') {
+          await lifecycle.failed(row, 'source file missing after an interrupted replace');
+          continue;
+        }
+        if (resolution.tempDeleted) counts.tempFilesDeleted += 1;
+        const cleared = updateJobRow(db, row.id, { tempPath: null }) ?? row;
+        if (cleared.attempts >= maxAttempts) {
+          await lifecycle.failed(cleared, `interrupted ${cleared.attempts} times, not retrying automatically`);
+          continue;
+        }
+        await lifecycle.requeued(cleared, 'recovery', 'interrupted by a restart, re-queued');
+        counts.requeued += 1;
+      } catch (error) {
+        log.error('crash recovery failed', { jobId: row.id, path: row.sourcePath, error: errorMessage(error) });
+        await lifecycle.failed(row, `crash recovery failed: ${errorMessage(error)}`);
+      }
+    }
+    for (const row of idleJobsWithTempPath(db)) {
+      if (deleteTempPath(row.tempPath)) counts.tempFilesDeleted += 1;
+      updateJobRow(db, row.id, { tempPath: null });
+    }
+    return counts;
+  };
+
+  const housekeeping = async (): Promise<string> => {
+    let temps = 0;
+    for (const row of idleJobsWithTempPath(db)) {
+      try {
+        if (deleteTempPath(row.tempPath)) temps += 1;
+        updateJobRow(db, row.id, { tempPath: null });
+      } catch (error) {
+        log.warn('cannot delete temp path', { jobId: row.id, path: row.tempPath, error: errorMessage(error) });
+      }
+    }
+    const logDir = ctx.config.get().jobLogDir;
+    const files = existsSync(logDir) ? readdirSync(logDir) : [];
+    const byId = new Map<number, string>();
+    for (const name of files) {
+      const match = JOB_LOG_NAME.exec(name);
+      if (match) byId.set(Number(match[1]), name);
+    }
+    const cutoff = new Date(Date.now() - JOB_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    let logs = 0;
+    for (const ids of chunks([...byId.keys()], 500)) {
+      const existing = existingJobIds(db, ids);
+      const expired = finishedJobIdsBefore(db, ids, cutoff);
+      for (const id of ids) {
+        if (existing.has(id) && !expired.has(id)) continue;
+        rmSync(join(logDir, byId.get(id) as string), { force: true });
+        logs += 1;
+      }
+    }
+    return `deleted ${temps} temp file(s) and ${logs} job log(s)`;
+  };
+
   return {
-    enqueue: async () => notImplemented('jobs.enqueue'),
-    enqueueMany: async () => notImplemented('jobs.enqueueMany'),
-    list: async () => notImplemented('jobs.list'),
-    get: async () => notImplemented('jobs.get'),
-    log: async () => notImplemented('jobs.log'),
-    cancel: async () => notImplemented('jobs.cancel'),
-    retry: async () => notImplemented('jobs.retry'),
-    remove: async () => notImplemented('jobs.remove'),
-    queue: async () => notImplemented('jobs.queue'),
-    state: idleState,
-    pause: () => notImplemented('jobs.pause'),
-    resume: () => notImplemented('jobs.resume'),
-    history: async () => notImplemented('jobs.history'),
-    addHistory: async () => notImplemented('jobs.addHistory'),
-    recover: async () => ({ requeued: 0, completed: 0, tempFilesDeleted: 0 }),
-    housekeeping: async () => notImplemented('jobs.housekeeping'),
-    start: async () => {},
-    stop: async () => {},
+    enqueue,
+    enqueueMany,
+
+    list: async (query) => {
+      const window = pageWindow(query);
+      const { rows, total } = listJobRows(
+        db,
+        { states: parseStates(query.state), type: query.type, mediaFileId: query.mediaFileId },
+        window,
+      );
+      return { page: window.page, pageSize: window.pageSize, total, items: rows.map(summary) };
+    },
+
+    get: async (id) => {
+      const row = mustGet(id);
+      return toJobDetail(row, { hasLog: row.logPath !== null && existsSync(row.logPath), live: worker.live(id) });
+    },
+
+    log: async (id) => {
+      const row = mustGet(id);
+      if (!row.logPath || !existsSync(row.logPath)) return null;
+      return readFileSync(row.logPath, 'utf8');
+    },
+
+    cancel: async (id) => {
+      const row = mustGet(id);
+      if (row.state === 'queued') return summary(await lifecycle.cancelled(row));
+      if (row.state !== 'running') throw new AppError('conflict', `job ${id} is ${row.state}`);
+      if (!(await worker.cancel(id))) return summary(await lifecycle.cancelled(row));
+      return summary(mustGet(id));
+    },
+
+    retry: async (id) => {
+      const row = mustGet(id);
+      if (row.state !== 'failed' && row.state !== 'cancelled')
+        throw new AppError('conflict', `only failed or cancelled jobs can be retried (job ${id} is ${row.state})`);
+      const active = row.mediaFileId === null ? undefined : findActiveJobForMedia(db, row.mediaFileId);
+      if (active) throw new AppError('conflict', `job ${active.id} is already ${active.state} for this file`);
+      const updated =
+        updateJobRow(db, id, {
+          state: 'queued',
+          step: 'waiting',
+          trigger: 'retry',
+          progress: 0,
+          speed: null,
+          etaSec: null,
+          error: null,
+          verification: null,
+          outputPath: null,
+          startedAt: null,
+          finishedAt: null,
+        }) ?? row;
+      lifecycle.addHistory({
+        event: 'retried',
+        path: row.sourcePath,
+        message: 'retry requested',
+        jobId: id,
+        mediaFileId: row.mediaFileId,
+      });
+      ctx.events.emit('job.queued', { job: toJobSummary(updated) });
+      worker.wake();
+      return summary(updated);
+    },
+
+    remove: async (id) => {
+      const row = mustGet(id);
+      if (row.state === 'queued' || row.state === 'running')
+        throw new AppError('conflict', `job ${id} is ${row.state}; cancel it first`);
+      if (row.logPath) rmSync(row.logPath, { force: true });
+      deleteJobRow(db, id);
+      ctx.events.emit('job.removed', { jobId: id });
+    },
+
+    queue: async () => ({ state: worker.state(), items: queueRows(db, QUEUE_ITEMS_LIMIT).map(summary) }),
+    state: () => worker.state(),
+    pause: (reason) => worker.pause(reason),
+    resume: (reason) => worker.resume(reason),
+
+    history: async (query) => {
+      const window = pageWindow(query);
+      const { rows, total } = listHistoryRows(
+        db,
+        { event: query.event, mediaFileId: query.mediaFileId, jobId: query.jobId },
+        window,
+      );
+      return { page: window.page, pageSize: window.pageSize, total, items: rows.map(toHistoryEntry) };
+    },
+
+    addHistory: async (entry) => lifecycle.addHistory(entry),
+    recover,
+    housekeeping,
+    start: () => worker.start(),
+    stop: () => worker.stop(),
   };
 }
