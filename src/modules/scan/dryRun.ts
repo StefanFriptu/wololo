@@ -124,10 +124,13 @@ export function createDryRunService(ctx: AppContext): DryRunService {
     const margin = settings.processing.freeSpaceMarginPercent;
     const tempBytes = [...largestOutputPerRoot.values()].reduce((sum, bytes) => sum + peakTempBytes(bytes, margin), 0);
     const sorted = [...groups.values()].sort((a, b) => b.files - a.files || a.codec.localeCompare(b.codec));
-    for (const group of sorted) group.durationSec = Math.round(group.durationSec);
+    for (const group of sorted) {
+      group.durationSec = Math.round(group.durationSec);
+      group.estimatedSeconds = Math.round(group.estimatedSeconds);
+    }
     return {
       groups: sorted,
-      estimatedSeconds,
+      estimatedSeconds: Math.round(estimatedSeconds),
       estimatedExtraBytes: tempBytes + discOutputBytes + largestIsoExtract + recycleBytes,
       estimatedRecycleBytes: recycleBytes,
     };
@@ -196,6 +199,7 @@ export function createDryRunService(ctx: AppContext): DryRunService {
       }
     }
     row.durationSec = Math.round(row.durationSec);
+    row.estimatedSeconds = Math.round(row.estimatedSeconds);
     return row;
   };
 

@@ -4,12 +4,13 @@ import { COPY_BYTES_PER_SECOND, estimateJobSeconds, estimateOutputBytes, peakTem
 const GB = 1024 * 1024 * 1024;
 
 test.each([
-  ['convert, encode bound', 'convert', 7200, 4 * GB, null, 7.7, Math.round(7200 / 7.7)],
-  ['convert, I/O bound', 'convert', 600, 40 * GB, null, 7.7, Math.round((40 * GB) / COPY_BYTES_PER_SECOND)],
-  ['remux never encodes', 'remux', 7200, 4 * GB, null, 7.7, Math.round((4 * GB) / COPY_BYTES_PER_SECOND)],
-  ['larger output dominates I/O', 'remux', null, GB, 2 * GB, 7.7, Math.round((2 * GB) / COPY_BYTES_PER_SECOND)],
-  ['unknown duration', 'convert', null, GB, null, 7.7, Math.round(GB / COPY_BYTES_PER_SECOND)],
+  ['convert, encode bound', 'convert', 7200, 4 * GB, null, 7.7, 7200 / 7.7],
+  ['convert, I/O bound', 'convert', 600, 40 * GB, null, 7.7, (40 * GB) / COPY_BYTES_PER_SECOND],
+  ['remux never encodes', 'remux', 7200, 4 * GB, null, 7.7, (4 * GB) / COPY_BYTES_PER_SECOND],
+  ['larger output dominates I/O', 'remux', null, GB, 2 * GB, 7.7, (2 * GB) / COPY_BYTES_PER_SECOND],
+  ['unknown duration', 'convert', null, GB, null, 7.7, GB / COPY_BYTES_PER_SECOND],
   ['zero speed factor', 'convert', 7200, 0, null, 0, 0],
+  ['short file keeps its fraction of a second', 'convert', 3, 0, null, 7.7, 3 / 7.7],
 ] as const)('estimateJobSeconds - %s', (_label, planAction, durationSec, sizeBytes, outputBytes, speed, expected) => {
   expect(estimateJobSeconds({ planAction, durationSec, sizeBytes, estimatedOutputBytes: outputBytes }, speed)).toBe(
     expected,

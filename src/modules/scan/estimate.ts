@@ -18,7 +18,7 @@ export function estimateJobSeconds(input: EstimateInput, speedFactor: number): n
   const ioSeconds = Math.max(input.sizeBytes, input.estimatedOutputBytes ?? 0) / COPY_BYTES_PER_SECOND;
   const encodes = input.planAction === 'convert';
   const encodeSeconds = encodes && input.durationSec && speedFactor > 0 ? input.durationSec / speedFactor : 0;
-  return Math.round(Math.max(ioSeconds, encodeSeconds));
+  return Math.max(ioSeconds, encodeSeconds);
 }
 
 export function estimateOutputBytes(input: EstimateInput): number {

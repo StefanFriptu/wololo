@@ -205,7 +205,7 @@ test('dryRun.report - totals, groups per failing codec, time and space for the w
       samplePaths: ['/data/a/4.mkv'],
     },
   ]);
-  expect(report.estimatedSeconds).toBe(935 + 468 + 768 + 234);
+  expect(report.estimatedSeconds).toBe(Math.round((7200 + 3600 + 1800) / 7.7 + 768));
   expect(report.estimatedRecycleBytes).toBe(7 * GB);
   expect(report.estimatedExtraBytes).toBe(Math.round(3.5 * GB * 1.05) + Math.round(GB * 1.05) + 30 * GB + 7 * GB);
 });
