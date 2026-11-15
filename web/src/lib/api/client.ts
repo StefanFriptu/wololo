@@ -9,18 +9,10 @@ import {
   type RouteResponse,
   splitRouteKey,
 } from '#lib/shared.ts';
-
-export class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: string,
-    message: string,
-    readonly details?: unknown,
-  ) {
-    super(message);
-    this.name = 'ApiError';
-  }
-}
+import { ApiError } from './ApiError.ts';
+import { auth } from './auth.svelte.ts';
+import { buildPath } from './buildPath.ts';
+import { buildQuery } from './buildQuery.ts';
 
 type ParamsOption<K extends RouteKey> =
   RouteParams<K> extends undefined ? { params?: never } : { params: RouteParams<K> };
@@ -29,7 +21,7 @@ type BodyOption<K extends RouteKey> = RouteBody<K> extends undefined ? { body?: 
 
 export type RequestOptions<K extends RouteKey> = ParamsOption<K> &
   QueryOption<K> &
-  BodyOption<K> & { signal?: AbortSignal };
+  BodyOption<K> & { signal?: AbortSignal; apiKey?: string };
 
 type RequiredKeys<T> = {
   [P in keyof T]-?: undefined extends T[P] ? never : P;
@@ -37,38 +29,31 @@ type RequiredKeys<T> = {
 type OptionsArgs<K extends RouteKey> =
   RequiredKeys<RequestOptions<K>> extends never ? [options?: RequestOptions<K>] : [options: RequestOptions<K>];
 
-export function buildPath(path: string, params?: Record<string, string | number>): string {
-  return path.replace(/:([A-Za-z]+)/g, (_, name: string) => {
-    const value = params?.[name];
-    if (value === undefined) throw new Error(`missing path parameter ${name}`);
-    return encodeURIComponent(String(value));
-  });
-}
-
-export function buildQuery(query?: Record<string, unknown>): string {
-  if (!query) return '';
-  const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(query)) {
-    if (value === undefined || value === null || value === '') continue;
-    search.set(key, String(value));
+async function send(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (error) {
+    if (init.signal?.aborted) throw error;
+    throw new ApiError(0, 'network', error instanceof Error ? error.message : String(error));
   }
-  const text = search.toString();
-  return text ? `?${text}` : '';
 }
 
-/** Typed call against the shared route map: api('GET /api/v1/jobs/:id', { params: { id: 1 } }). */
+/**
+ * Typed call against the shared route map: api('GET /api/v1/jobs/:id', { params: { id: 1 } }).
+ * A 401 forgets the stored key so the layout shows the API key prompt; `apiKey` overrides the key for one call.
+ */
 export async function api<K extends RouteKey>(key: K, ...args: OptionsArgs<K>): Promise<RouteResponse<K>> {
   const options = (args[0] ?? {}) as {
     params?: Record<string, string | number>;
     query?: Record<string, unknown>;
     body?: unknown;
     signal?: AbortSignal;
+    apiKey?: string;
   };
   const { method, path } = splitRouteKey(key);
-  const config = runtimeConfig();
-  const url = `${config.urlBase}${buildPath(path, options.params)}${buildQuery(options.query)}`;
+  const url = `${runtimeConfig().urlBase}${buildPath(path, options.params)}${buildQuery(options.query)}`;
   const headers: Record<string, string> = {
-    'X-Api-Key': config.apiKey,
+    'X-Api-Key': options.apiKey ?? auth.key,
     Accept: 'application/json',
   };
   let body: BodyInit | undefined;
@@ -79,14 +64,10 @@ export async function api<K extends RouteKey>(key: K, ...args: OptionsArgs<K>): 
     body = JSON.stringify(options.body);
   }
 
-  const response = await fetch(url, {
-    method,
-    headers,
-    body,
-    signal: options.signal,
-  });
+  const response = await send(url, { method, headers, body, signal: options.signal });
   if (!response.ok) {
     const error = (await response.json().catch(() => null)) as ApiErrorBody | null;
+    if (response.status === 401 && options.apiKey === undefined) auth.reject();
     throw new ApiError(
       response.status,
       error?.error ?? 'http_error',
