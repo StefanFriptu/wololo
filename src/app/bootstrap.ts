@@ -21,7 +21,7 @@ export interface RuntimeOptions {
 export interface Runtime {
   ctx: AppContext;
   app: Hono<AppEnv>;
-  /** Starts services (profiles seed, crash recovery, worker, scheduler) and the HTTP server. */
+  /** Starts services (profile seed, crash recovery, scheduler with its task rows, worker) and the HTTP server. */
   start(): Promise<Server<undefined>>;
   stop(reason: string): Promise<void>;
 }
@@ -63,8 +63,8 @@ export function createRuntime(options: RuntimeOptions): Runtime {
     await services.profiles.ensureDefaults();
     const recovery = await services.jobs.recover();
     if (recovery.requeued || recovery.completed || recovery.tempFilesDeleted) log.info('crash recovery', recovery);
-    await services.jobs.start();
     await services.scheduler.start();
+    await services.jobs.start();
 
     const current = ctx.config.get();
     server = Bun.serve({

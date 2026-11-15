@@ -1,6 +1,7 @@
 /**
  * Test-only stand-ins for services other modules implement (probe, rules.plan, ffmpeg args and progress), backed by
- * real ffprobe/ffmpeg so the jobs module can prove its pipeline end to end before those modules are merged.
+ * real ffprobe/ffmpeg, so jobs tests pin verify/replace/recover behaviour independently of the rules engine. The run
+ * with every real service is test/integration/pipeline.test.ts.
  */
 import { statSync } from 'node:fs';
 import { z } from 'zod';
