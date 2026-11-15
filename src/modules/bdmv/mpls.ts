@@ -65,12 +65,15 @@ function readStreamAttributes(reader: ByteReader, offset: number): StreamAttribu
   return { codingType, language: language?.replace(/[\0\s]+/g, '') ?? null };
 }
 
-/** Stream entry: stream_type 1 = play item (pid), 2/4 = sub path + sub clip (pid), 3 = sub path (pid). */
+/**
+ * Stream entry, as libbluray >= 1.2.1 (mpls_parse.c _parse_stream): stream_type 1 = play item (pid), 2 = sub path +
+ * sub clip (pid), 3 and 4 = sub path (pid). Type 4 (Dolby Vision enhancement layer) shares the type 3 layout.
+ */
 function readStreamEntryPid(reader: ByteReader, offset: number): number {
   const streamType = reader.u8(offset + 1);
   if (streamType === 1) return reader.u16(offset + 2);
-  if (streamType === 2 || streamType === 4) return reader.u16(offset + 4);
-  if (streamType === 3) return reader.u16(offset + 3);
+  if (streamType === 2) return reader.u16(offset + 4);
+  if (streamType === 3 || streamType === 4) return reader.u16(offset + 3);
   return 0;
 }
 

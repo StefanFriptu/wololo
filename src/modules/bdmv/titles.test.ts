@@ -51,9 +51,78 @@ test('dedupePlaylists - empty input', () => {
   expect(dedupePlaylists([])).toEqual({ unique: [], duplicateOf: {} });
 });
 
-test('hasLoops - repeated clip is a loop', () => {
-  expect(hasLoops(playlist('00001.mpls', ['00001', '00001']))).toBe(true);
-  expect(hasLoops(playlist('00002.mpls', ['00001', '00002']))).toBe(false);
+/** Play items as [clipId, inSec, outSec]. */
+function ranged(name: string, items: readonly [string, number, number][]): MplsPlaylist {
+  const playItems = items.map(([clipId, inSec, outSec]) => ({
+    clipId,
+    inTime: inSec * 45_000,
+    outTime: outSec * 45_000,
+    durationSec: outSec - inSec,
+    angleClipIds: [],
+    connectionCondition: 5,
+  }));
+  return { ...playlist(name, []), playItems, durationSec: playItems.reduce((sum, item) => sum + item.durationSec, 0) };
+}
+
+test.each<[string, [string, number, number][], boolean]>([
+  [
+    'same clip, same range',
+    [
+      ['00001', 0, 600],
+      ['00001', 0, 600],
+    ],
+    true,
+  ],
+  [
+    'same clip, overlapping ranges',
+    [
+      ['00001', 0, 600],
+      ['00001', 300, 900],
+    ],
+    true,
+  ],
+  [
+    'same clip, disjoint ranges (seamless branching)',
+    [
+      ['00001', 0, 3600],
+      ['00002', 0, 300],
+      ['00001', 3600, 7200],
+    ],
+    false,
+  ],
+  [
+    'same clip, touching ranges',
+    [
+      ['00001', 0, 600],
+      ['00001', 600, 1200],
+    ],
+    false,
+  ],
+  [
+    'different clips',
+    [
+      ['00001', 0, 600],
+      ['00002', 0, 600],
+    ],
+    false,
+  ],
+])('hasLoops - %s -> %p', (_label, items, loops) => {
+  expect(hasLoops(ranged('00001.mpls', items))).toBe(loops);
+});
+
+test('pickMainTitle - a branching cut that reuses one m2ts in two ranges still wins over a short extra', () => {
+  const pick = pickMainTitle(
+    [
+      ranged('00800.mpls', [
+        ['00001', 0, 3600],
+        ['00002', 0, 1800],
+        ['00001', 3600, 7200],
+      ]),
+      ranged('00801.mpls', [['00003', 0, 1200]]),
+    ],
+    OPTIONS,
+  );
+  expect(pick.main?.name).toBe('00800.mpls');
 });
 
 test('pickMainTitle - longest unique playlist wins and is not ambiguous', () => {

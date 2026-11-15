@@ -33,10 +33,21 @@ export const dedupePlaylists: DedupePlaylists = (playlists) => {
   return { unique, duplicateOf };
 };
 
-/** A playlist that plays the same clip twice is a menu/background loop (BDInfo's "filter looping playlists"). */
+/**
+ * A playlist that plays the same part of a clip twice is a menu/background loop (BDInfo's "filter looping playlists").
+ * Disjoint ranges of one clip are seamless branching (an extended cut reusing the feature m2ts), not a loop.
+ */
 export function hasLoops(playlist: MplsPlaylist): boolean {
-  const clips = playlist.playItems.map((item) => item.clipId);
-  return new Set(clips).size !== clips.length;
+  const items = playlist.playItems;
+  return items.some((a, i) =>
+    items
+      .slice(i + 1)
+      .some(
+        (b) =>
+          a.clipId === b.clipId &&
+          ((a.inTime === b.inTime && a.outTime === b.outTime) || (a.inTime < b.outTime && b.inTime < a.outTime)),
+      ),
+  );
 }
 
 const byDurationDesc = (a: MplsPlaylist, b: MplsPlaylist) => b.durationSec - a.durationSec || byName(a, b);

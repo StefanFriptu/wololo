@@ -93,8 +93,8 @@ const AUDIO = new Set([0x03, 0x04, 0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0xa
 
 function streamEntry(spec: StreamSpec): ByteWriter {
   const body = new ByteWriter().u8(spec.entryType ?? 1);
-  if (spec.entryType === 2 || spec.entryType === 4) body.u8(1).u8(0).u16(spec.pid);
-  else if (spec.entryType === 3) body.u8(1).u16(spec.pid);
+  if (spec.entryType === 2) body.u8(1).u8(0).u16(spec.pid);
+  else if (spec.entryType === 3 || spec.entryType === 4) body.u8(1).u16(spec.pid);
   else body.u16(spec.pid);
   body.zeros(9 - body.length);
   return new ByteWriter().u8(body.length).append(body);

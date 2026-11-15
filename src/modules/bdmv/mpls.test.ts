@@ -118,12 +118,15 @@ test('parseMpls - secondary audio, secondary video, PiP PG and Dolby Vision stre
           pg: [{ pid: 0x1200, codingType: 0x90, language: 'en' }],
           pipPg: [{ pid: 0x1201, codingType: 0x90, language: 'fra' }],
           secondaryAudio: [{ pid: 0x1a00, codingType: 0xa1, language: 'eng', entryType: 2 }],
-          secondaryVideo: [{ pid: 0x1b00, codingType: 0x1b, entryType: 3 }],
-          dolbyVision: [{ pid: 0x1015, codingType: 0x24 }],
+          secondaryVideo: [{ pid: 0x1b00, codingType: 0x1b, entryType: 4 }],
+          dolbyVision: [{ pid: 0x1015, codingType: 0x24, entryType: 4 }],
         },
       },
     ],
   });
+  const typeFourEntry = [0x09, 0x04, 0x01, 0x10, 0x15, 0x00];
+  const at = bytes.findIndex((_, i) => typeFourEntry.every((byte, j) => bytes[i + j] === byte));
+  expect(at).toBeGreaterThan(0);
   const streams = parseMpls('00004.mpls', bytes).streams;
   expect(streams.map((s) => [s.kind, s.pid, s.codec, s.language, s.secondaryVideo])).toEqual([
     ['video', 0x1011, 'hevc', null, false],
@@ -134,6 +137,15 @@ test('parseMpls - secondary audio, secondary video, PiP PG and Dolby Vision stre
     ['video', 0x1b00, 'h264', null, true],
     ['video', 0x1015, 'hevc', null, true],
   ]);
+});
+
+test.each([1, 2, 3, 4])('parseMpls - stream entry type %d yields its PID', (entryType) => {
+  const bytes = writeMpls({
+    playItems: [
+      { clipId: '00001', inTime: 0, outTime: T, stn: { video: [{ pid: 0x1011, codingType: 0x24, entryType }] } },
+    ],
+  });
+  expect(parseMpls('00001.mpls', bytes).streams[0]?.pid).toBe(0x1011);
 });
 
 test('parseMpls - MVC dependent view is secondary video', () => {
