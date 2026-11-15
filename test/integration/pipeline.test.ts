@@ -236,4 +236,20 @@ describe.skipIf(!ffmpegAvailable())('real services: dry run -> processing -> rec
     expect(history.total).toBe(1);
     expect((await call<QueueResponse>('/api/v1/queue')).state).toMatchObject({ queued: 0, pauseReasons: ['user'] });
   });
+
+  test('step 8 - recovery and housekeeping sweep orphaned temp paths under the real library roots', async () => {
+    const leftover = join(movies, 'Dts Movie (2020)', 'Leftover.wololo-tmp.mkv');
+    const discTemp = join(movies, '.wololo-tmp-999');
+    mkdirSync(discTemp);
+    writeFileSync(join(discTemp, 'part.mkv'), 'partial');
+    expect(existsSync(leftover)).toBe(true);
+
+    const recovered = await runtime.ctx.services.jobs.recover();
+    expect(recovered.tempFilesDeleted).toBe(1);
+    expect(existsSync(discTemp)).toBe(false);
+    expect(existsSync(leftover)).toBe(true);
+
+    await runtime.ctx.services.jobs.housekeeping();
+    expect(existsSync(leftover)).toBe(false);
+  });
 });
