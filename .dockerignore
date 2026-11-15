@@ -1,0 +1,13 @@
+**/node_modules
+web/build
+web/.svelte-kit
+config
+dist
+test/.cache
+.git
+.github
+coverage
+*.log
+.env
+.env.*
+.DS_Store

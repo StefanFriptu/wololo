@@ -1,0 +1,12 @@
+node_modules/
+web/node_modules/
+web/build/
+web/.svelte-kit/
+/config/
+/dist/
+test/.cache/
+*.log
+.DS_Store
+.env
+.env.*
+coverage/

@@ -1,0 +1,784 @@
+/**
+ * REST API contract shared by the backend route handlers and the web client.
+ * Every key of ApiRoutes is "<METHOD> <path>" with Hono-style ":param" segments, without the configurable URL base.
+ * API_ROUTE_META (src/shared/api-routes.ts) lists the same keys with owner module, auth and response type.
+ */
+import type {
+  ArrInstance,
+  ArrKind,
+  BdmvDecision,
+  BdmvDecisionChoice,
+  BdmvDecisionState,
+  BdmvTitleCandidate,
+  ConversionPlan,
+  DeviceProfile,
+  DeviceProfileDefinition,
+  DownloadClientConnection,
+  HistoryEntry,
+  HistoryEventType,
+  IsoDateTime,
+  JobDetail,
+  JobSummary,
+  JobType,
+  Library,
+  LibraryKind,
+  LibraryMode,
+  LogEntry,
+  LogLevel,
+  MediaFileKind,
+  MediaFileStatus,
+  PathMapping,
+  PathMappingScope,
+  PlanAction,
+  PlexConnection,
+  PlexSection,
+  PlexServer,
+  ProbeResult,
+  QueueState,
+  RecycleBinEntry,
+  ScheduledTaskInfo,
+  TaskName,
+} from './domain.ts';
+import type { ScanStats } from './events.ts';
+import type { DeepPartial, GeneralConfig, Settings } from './settings.ts';
+
+export interface ApiErrorBody {
+  /** Stable machine code: "not_found", "validation", "conflict", "unauthorized", "not_implemented", "internal". */
+  error: string;
+  message: string;
+  details?: unknown;
+}
+
+/** Successful write with nothing to return: HTTP 204, no body. */
+export type NoContent = undefined;
+
+export interface PageQuery {
+  /** 1-based. Default 1. */
+  page?: number;
+  /** Default 50, max 500. */
+  pageSize?: number;
+  sortDir?: 'asc' | 'desc';
+}
+
+export interface Paginated<T> {
+  page: number;
+  pageSize: number;
+  total: number;
+  items: T[];
+}
+
+export interface IdParams {
+  id: number;
+}
+
+export interface ConnectionTestResult {
+  ok: boolean;
+  message: string;
+  version: string | null;
+}
+
+// ---------- system / platform ----------
+
+export interface HealthResponse {
+  status: 'ok';
+  version: string;
+}
+
+export interface ToolInfo {
+  name: 'ffmpeg' | 'ffprobe' | 'mkvmerge' | 'nice' | 'ionice';
+  path: string | null;
+  version: string | null;
+  available: boolean;
+}
+
+export interface SystemStatus {
+  appName: 'Wololo';
+  version: string;
+  instanceName: string;
+  startTime: IsoDateTime;
+  uptimeSec: number;
+  runtime: string;
+  os: string;
+  arch: string;
+  isDocker: boolean;
+  configDir: string;
+  databasePath: string;
+  databaseSizeBytes: number;
+  memoryRssBytes: number;
+  urlBase: string;
+  tools: ToolInfo[];
+}
+
+export interface HealthCheck {
+  source: string;
+  level: 'notice' | 'warning' | 'error';
+  message: string;
+}
+
+export interface TaskUpdate {
+  intervalMinutes?: number;
+  enabled?: boolean;
+}
+
+export interface LogQuery {
+  level?: LogLevel;
+  module?: string;
+  /** Only entries with id greater than this (for polling). */
+  afterId?: number;
+  /** Default 200, max 1000 (ring buffer size). */
+  limit?: number;
+}
+
+export interface LogFileInfo {
+  name: string;
+  sizeBytes: number;
+  modifiedAt: IsoDateTime;
+}
+
+export interface BackupInfo {
+  name: string;
+  sizeBytes: number;
+  createdAt: IsoDateTime;
+  kind: 'manual' | 'scheduled' | 'pre_restore';
+}
+
+export interface RestoreResult {
+  restartRequired: boolean;
+}
+
+// ---------- settings ----------
+
+export type SettingsUpdate = DeepPartial<Settings>;
+
+export interface GeneralConfigView extends GeneralConfig {
+  restartRequired: boolean;
+}
+
+export type GeneralConfigUpdate = Partial<Omit<GeneralConfig, 'apiKey'>>;
+
+// ---------- libraries / media / scan / dry run ----------
+
+export interface LibraryInput {
+  name: string;
+  kind: LibraryKind;
+  enabled?: boolean;
+  roots: string[];
+  profileIds: number[];
+  mode?: LibraryMode;
+  keepLanguages?: string[];
+  keepOriginalLanguage?: boolean;
+  keepUndetermined?: boolean;
+  arrInstanceId?: number | null;
+  bdmvEnabled?: boolean;
+}
+
+export interface FilesystemQuery {
+  path?: string;
+  includeFiles?: boolean;
+}
+
+export interface FilesystemEntry {
+  name: string;
+  path: string;
+  type: 'dir' | 'file';
+  sizeBytes: number | null;
+}
+
+export interface FilesystemListing {
+  path: string;
+  parent: string | null;
+  entries: FilesystemEntry[];
+}
+
+export type MediaSortKey =
+  | 'path'
+  | 'size'
+  | 'status'
+  | 'updatedAt'
+  | 'duration';
+
+export interface MediaQuery extends PageQuery {
+  sortKey?: MediaSortKey;
+  /** One status or a comma separated list. */
+  status?: string;
+  libraryId?: number;
+  profileId?: number;
+  /** Matches any stream codec (ffprobe name). */
+  codec?: string;
+  /** Matches failing codecs only. */
+  failingCodec?: string;
+  kind?: MediaFileKind;
+  /** Case-insensitive substring of the path. */
+  search?: string;
+}
+
+export interface MediaFileSummary {
+  id: number;
+  libraryId: number;
+  path: string;
+  relativePath: string;
+  kind: MediaFileKind;
+  sizeBytes: number;
+  durationSec: number | null;
+  status: MediaFileStatus;
+  statusReason: string | null;
+  videoCodec: string | null;
+  audioCodecs: string[];
+  subtitleLanguages: string[];
+  failingCodecs: string[];
+  planAction: PlanAction | null;
+  lastJobId: number | null;
+  probedAt: IsoDateTime | null;
+  updatedAt: IsoDateTime;
+}
+
+export interface MediaFileDetail extends MediaFileSummary {
+  probe: ProbeResult | null;
+  plan: ConversionPlan | null;
+  rulesKey: string | null;
+  originalLanguage: string | null;
+  arr: {
+    instanceId: number;
+    kind: ArrKind;
+    itemId: number;
+    fileId: number | null;
+  } | null;
+  jobs: JobSummary[];
+}
+
+export interface MediaIgnoreBody {
+  ignored: boolean;
+}
+
+export interface MediaStats {
+  total: number;
+  totalBytes: number;
+  byStatus: Record<MediaFileStatus, number>;
+  byFailingCodec: { codec: string; count: number }[];
+}
+
+export interface ScanRequest {
+  libraryId?: number;
+  /** Re-probe every file, ignoring the size+mtime+rulesKey change detection. */
+  force?: boolean;
+}
+
+export interface ScanStatus {
+  scanId: string;
+  libraryId: number | null;
+  running: boolean;
+  startedAt: IsoDateTime;
+  finishedAt: IsoDateTime | null;
+  currentPath: string | null;
+  stats: ScanStats;
+  error: string | null;
+}
+
+export interface DryRunQuery {
+  libraryId?: number;
+}
+
+export interface DryRunGroup {
+  /** Failing codec (ffprobe name) or "video:<codec>" / "bdmv" for non-audio work. */
+  codec: string;
+  files: number;
+  durationSec: number;
+  sizeBytes: number;
+  estimatedSeconds: number;
+  estimatedOutputBytes: number;
+  samplePaths: string[];
+}
+
+export interface DryRunReport {
+  generatedAt: IsoDateTime;
+  libraryId: number | null;
+  processingEnabled: boolean;
+  totals: {
+    files: number;
+    compatible: number;
+    needsWork: number;
+    blocked: number;
+    failed: number;
+    pending: number;
+    ignored: number;
+  };
+  groups: DryRunGroup[];
+  estimatedSeconds: number;
+  /** Peak extra disk space: largest output + 5% margin per root, plus recycle-bin copies kept for the retention period. */
+  estimatedExtraBytes: number;
+  estimatedRecycleBytes: number;
+}
+
+// ---------- profiles ----------
+
+export interface ProfileInput {
+  name: string;
+  description?: string;
+  definition: DeviceProfileDefinition;
+}
+
+export interface ProfileCloneBody {
+  name: string;
+}
+
+export interface CodecInfo {
+  codec: string;
+  label: string;
+  kind: 'audio' | 'video' | 'subtitle';
+  lossless: boolean;
+}
+
+export interface CodecCatalog {
+  audio: CodecInfo[];
+  video: CodecInfo[];
+  subtitle: CodecInfo[];
+}
+
+export interface ProfileWithUsage extends DeviceProfile {
+  libraryIds: number[];
+}
+
+// ---------- jobs / queue / history / recycle bin ----------
+
+export interface QueueResponse {
+  state: QueueState;
+  items: JobSummary[];
+}
+
+export interface JobQuery extends PageQuery {
+  /** One state or a comma separated list. */
+  state?: string;
+  type?: JobType;
+  mediaFileId?: number;
+}
+
+export interface EnqueueRequest {
+  mediaFileIds: number[];
+  priority?: number;
+  /** Queue even when the file was evaluated as compatible (re-run rules). */
+  force?: boolean;
+}
+
+export interface EnqueueResponse {
+  jobs: JobSummary[];
+  skipped: { mediaFileId: number; reason: string }[];
+}
+
+export interface HistoryQuery extends PageQuery {
+  event?: HistoryEventType;
+  mediaFileId?: number;
+  jobId?: number;
+}
+
+export interface RecycleBinPurgeRequest {
+  /** true = purge everything, false/omitted = only expired entries. */
+  all?: boolean;
+}
+
+export interface RecycleBinPurgeResult {
+  purged: number;
+  freedBytes: number;
+}
+
+// ---------- integrations ----------
+
+export interface ArrInstanceInput {
+  kind: ArrKind;
+  name: string;
+  url: string;
+  /** Send "********" to keep the stored key on update/test. */
+  apiKey: string;
+  enabled?: boolean;
+}
+
+export interface ArrTestRequest extends ArrInstanceInput {
+  /** Existing instance id, so a masked apiKey can be resolved. */
+  id?: number;
+}
+
+export interface ArrRootFolder {
+  id: number;
+  path: string;
+  localPath: string | null;
+  accessible: boolean;
+  freeBytes: number | null;
+}
+
+/** Subset of Radarr's webhook payload (Settings > Connect > Webhook). Unknown fields are ignored. */
+export interface RadarrWebhookPayload {
+  eventType:
+    | 'Test'
+    | 'Grab'
+    | 'Download'
+    | 'Rename'
+    | 'MovieDelete'
+    | 'MovieFileDelete'
+    | string;
+  instanceName?: string;
+  applicationUrl?: string;
+  isUpgrade?: boolean;
+  movie?: {
+    id: number;
+    title: string;
+    year?: number;
+    folderPath?: string;
+    tmdbId?: number;
+    imdbId?: string;
+    originalLanguage?: { id: number; name: string };
+  };
+  movieFile?: {
+    id: number;
+    relativePath?: string;
+    path?: string;
+    size?: number;
+  };
+  downloadClient?: string;
+  downloadClientType?: string;
+  downloadId?: string;
+}
+
+/** Subset of Sonarr's webhook payload. */
+export interface SonarrWebhookPayload {
+  eventType:
+    | 'Test'
+    | 'Grab'
+    | 'Download'
+    | 'Rename'
+    | 'SeriesDelete'
+    | 'EpisodeFileDelete'
+    | string;
+  instanceName?: string;
+  applicationUrl?: string;
+  isUpgrade?: boolean;
+  series?: {
+    id: number;
+    title: string;
+    path?: string;
+    tvdbId?: number;
+    originalLanguage?: { id: number; name: string };
+  };
+  episodes?: {
+    id: number;
+    episodeNumber: number;
+    seasonNumber: number;
+    title?: string;
+  }[];
+  episodeFile?: {
+    id: number;
+    relativePath?: string;
+    path?: string;
+    size?: number;
+  };
+  episodeFiles?: { id: number; relativePath?: string; path?: string }[];
+  downloadClient?: string;
+  downloadId?: string;
+}
+
+export interface WebhookResponse {
+  accepted: boolean;
+  action:
+    | 'test'
+    | 'ignored'
+    | 'compatible'
+    | 'queued'
+    | 'dry_run'
+    | 'unknown_path'
+    | 'error';
+  mediaFileIds: number[];
+  message: string;
+}
+
+export interface PlexConnectionUpdate {
+  serverMachineId?: string;
+  serverUrl?: string;
+  enabled?: boolean;
+  partialScan?: boolean;
+  pauseWhileStreaming?: boolean;
+}
+
+export interface PlexPin {
+  id: number;
+  code: string;
+  /** https://app.plex.tv/auth#?clientID=...&code=...&context[device][product]=Wololo */
+  authUrl: string;
+  expiresAt: IsoDateTime;
+}
+
+export interface PlexPinStatus {
+  authenticated: boolean;
+  expired: boolean;
+  connection: PlexConnection;
+}
+
+export interface PlexSessions {
+  active: number;
+  sessions: {
+    title: string;
+    user: string | null;
+    state: string;
+    transcoding: boolean;
+  }[];
+}
+
+export type DownloadClientInput = DownloadClientConnection;
+
+export interface PathMappingInput {
+  scope: PathMappingScope;
+  instanceId?: number | null;
+  remotePath: string;
+  localPath: string;
+}
+
+// ---------- bdmv ----------
+
+export interface BdmvDecisionQuery {
+  state?: BdmvDecisionState;
+}
+
+export interface BdmvPlaylistView extends BdmvTitleCandidate {
+  duplicateOf: string | null;
+  role: 'main' | 'candidate' | 'extra' | 'ignored';
+}
+
+export interface BdmvDiscInfo {
+  mediaFileId: number;
+  path: string;
+  kind: 'bdmv' | 'iso';
+  encrypted: boolean;
+  encryptionMarkers: string[];
+  volumeLabel: string | null;
+  playlists: BdmvPlaylistView[];
+  mainPlaylist: string | null;
+  needsDecision: boolean;
+}
+
+// ---------- route map ----------
+
+export interface ApiRoutes {
+  'GET /health': { response: HealthResponse };
+  'GET /api/v1/events': { response: never };
+
+  'GET /api/v1/system/status': { response: SystemStatus };
+  'GET /api/v1/system/health': { response: HealthCheck[] };
+  'GET /api/v1/system/tasks': { response: ScheduledTaskInfo[] };
+  'PUT /api/v1/system/tasks/:name': {
+    params: { name: TaskName };
+    body: TaskUpdate;
+    response: ScheduledTaskInfo;
+  };
+  'POST /api/v1/system/tasks/:name/run': {
+    params: { name: TaskName };
+    response: ScheduledTaskInfo;
+  };
+  'GET /api/v1/system/logs': { query: LogQuery; response: LogEntry[] };
+  'GET /api/v1/system/logs/files': { response: LogFileInfo[] };
+  'GET /api/v1/system/logs/files/:name': {
+    params: { name: string };
+    response: string;
+  };
+  'GET /api/v1/system/backups': { response: BackupInfo[] };
+  'POST /api/v1/system/backups': { response: BackupInfo };
+  'GET /api/v1/system/backups/:name': {
+    params: { name: string };
+    response: Blob;
+  };
+  'DELETE /api/v1/system/backups/:name': {
+    params: { name: string };
+    response: NoContent;
+  };
+  'POST /api/v1/system/backups/:name/restore': {
+    params: { name: string };
+    response: RestoreResult;
+  };
+  /** multipart/form-data with a "file" field containing a backup zip. */
+  'POST /api/v1/system/backups/restore': {
+    body: FormData;
+    response: RestoreResult;
+  };
+  'POST /api/v1/system/restart': { response: NoContent };
+  'GET /api/v1/openapi.json': { response: Record<string, unknown> };
+  'GET /api/v1/docs': { response: string };
+
+  'GET /api/v1/settings': { response: Settings };
+  'PUT /api/v1/settings': { body: SettingsUpdate; response: Settings };
+  'GET /api/v1/settings/general': { response: GeneralConfigView };
+  'PUT /api/v1/settings/general': {
+    body: GeneralConfigUpdate;
+    response: GeneralConfigView;
+  };
+  'POST /api/v1/settings/general/apikey': { response: GeneralConfigView };
+
+  'GET /api/v1/libraries': { response: Library[] };
+  'POST /api/v1/libraries': { body: LibraryInput; response: Library };
+  'GET /api/v1/libraries/:id': { params: IdParams; response: Library };
+  'PUT /api/v1/libraries/:id': {
+    params: IdParams;
+    body: LibraryInput;
+    response: Library;
+  };
+  'DELETE /api/v1/libraries/:id': { params: IdParams; response: NoContent };
+  'GET /api/v1/filesystem': {
+    query: FilesystemQuery;
+    response: FilesystemListing;
+  };
+  'GET /api/v1/media': {
+    query: MediaQuery;
+    response: Paginated<MediaFileSummary>;
+  };
+  'GET /api/v1/media/stats': {
+    query: { libraryId?: number };
+    response: MediaStats;
+  };
+  'GET /api/v1/media/:id': { params: IdParams; response: MediaFileDetail };
+  'POST /api/v1/media/:id/probe': {
+    params: IdParams;
+    response: MediaFileDetail;
+  };
+  'GET /api/v1/media/:id/plan': { params: IdParams; response: ConversionPlan };
+  'PUT /api/v1/media/:id/ignore': {
+    params: IdParams;
+    body: MediaIgnoreBody;
+    response: MediaFileSummary;
+  };
+  'POST /api/v1/scans': { body: ScanRequest; response: ScanStatus };
+  'GET /api/v1/scans/current': { response: ScanStatus | null };
+  'DELETE /api/v1/scans/current': { response: NoContent };
+  'GET /api/v1/dryrun': { query: DryRunQuery; response: DryRunReport };
+
+  'GET /api/v1/profiles': { response: ProfileWithUsage[] };
+  'POST /api/v1/profiles': { body: ProfileInput; response: ProfileWithUsage };
+  'GET /api/v1/profiles/codecs': { response: CodecCatalog };
+  'GET /api/v1/profiles/:id': { params: IdParams; response: ProfileWithUsage };
+  'PUT /api/v1/profiles/:id': {
+    params: IdParams;
+    body: ProfileInput;
+    response: ProfileWithUsage;
+  };
+  'DELETE /api/v1/profiles/:id': { params: IdParams; response: NoContent };
+  'POST /api/v1/profiles/:id/clone': {
+    params: IdParams;
+    body: ProfileCloneBody;
+    response: ProfileWithUsage;
+  };
+
+  'GET /api/v1/queue': { response: QueueResponse };
+  'POST /api/v1/queue/pause': { response: QueueState };
+  'POST /api/v1/queue/resume': { response: QueueState };
+  'GET /api/v1/jobs': { query: JobQuery; response: Paginated<JobSummary> };
+  'POST /api/v1/jobs': { body: EnqueueRequest; response: EnqueueResponse };
+  'GET /api/v1/jobs/:id': { params: IdParams; response: JobDetail };
+  'GET /api/v1/jobs/:id/log': { params: IdParams; response: string };
+  'POST /api/v1/jobs/:id/cancel': { params: IdParams; response: JobSummary };
+  'POST /api/v1/jobs/:id/retry': { params: IdParams; response: JobSummary };
+  'DELETE /api/v1/jobs/:id': { params: IdParams; response: NoContent };
+  'GET /api/v1/history': {
+    query: HistoryQuery;
+    response: Paginated<HistoryEntry>;
+  };
+  'GET /api/v1/recyclebin': {
+    query: PageQuery;
+    response: Paginated<RecycleBinEntry>;
+  };
+  'POST /api/v1/recyclebin/:id/restore': {
+    params: IdParams;
+    response: RecycleBinEntry;
+  };
+  'DELETE /api/v1/recyclebin/:id': { params: IdParams; response: NoContent };
+  'POST /api/v1/recyclebin/purge': {
+    body: RecycleBinPurgeRequest;
+    response: RecycleBinPurgeResult;
+  };
+
+  'GET /api/v1/arr': { response: ArrInstance[] };
+  'POST /api/v1/arr': { body: ArrInstanceInput; response: ArrInstance };
+  'POST /api/v1/arr/test': {
+    body: ArrTestRequest;
+    response: ConnectionTestResult;
+  };
+  'GET /api/v1/arr/:id': { params: IdParams; response: ArrInstance };
+  'PUT /api/v1/arr/:id': {
+    params: IdParams;
+    body: ArrInstanceInput;
+    response: ArrInstance;
+  };
+  'DELETE /api/v1/arr/:id': { params: IdParams; response: NoContent };
+  'GET /api/v1/arr/:id/rootfolders': {
+    params: IdParams;
+    response: ArrRootFolder[];
+  };
+  'POST /api/v1/webhook/radarr': {
+    body: RadarrWebhookPayload;
+    response: WebhookResponse;
+  };
+  'POST /api/v1/webhook/sonarr': {
+    body: SonarrWebhookPayload;
+    response: WebhookResponse;
+  };
+  'GET /api/v1/plex': { response: PlexConnection };
+  'PUT /api/v1/plex': { body: PlexConnectionUpdate; response: PlexConnection };
+  'DELETE /api/v1/plex': { response: PlexConnection };
+  'POST /api/v1/plex/pin': { response: PlexPin };
+  'GET /api/v1/plex/pin/:id': { params: IdParams; response: PlexPinStatus };
+  'GET /api/v1/plex/servers': { response: PlexServer[] };
+  'GET /api/v1/plex/sections': { response: PlexSection[] };
+  'POST /api/v1/plex/test': { response: ConnectionTestResult };
+  'GET /api/v1/plex/sessions': { response: PlexSessions };
+  'GET /api/v1/downloadclient': { response: DownloadClientConnection | null };
+  'PUT /api/v1/downloadclient': {
+    body: DownloadClientInput;
+    response: DownloadClientConnection;
+  };
+  'DELETE /api/v1/downloadclient': { response: NoContent };
+  'POST /api/v1/downloadclient/test': {
+    body: DownloadClientInput;
+    response: ConnectionTestResult;
+  };
+  'GET /api/v1/pathmappings': { response: PathMapping[] };
+  'POST /api/v1/pathmappings': {
+    body: PathMappingInput;
+    response: PathMapping;
+  };
+  'PUT /api/v1/pathmappings/:id': {
+    params: IdParams;
+    body: PathMappingInput;
+    response: PathMapping;
+  };
+  'DELETE /api/v1/pathmappings/:id': { params: IdParams; response: NoContent };
+
+  'GET /api/v1/bdmv/decisions': {
+    query: BdmvDecisionQuery;
+    response: BdmvDecision[];
+  };
+  'GET /api/v1/bdmv/decisions/:id': {
+    params: IdParams;
+    response: BdmvDecision;
+  };
+  'POST /api/v1/bdmv/decisions/:id/resolve': {
+    params: IdParams;
+    body: BdmvDecisionChoice;
+    response: BdmvDecision;
+  };
+  'POST /api/v1/bdmv/decisions/:id/dismiss': {
+    params: IdParams;
+    response: BdmvDecision;
+  };
+  'GET /api/v1/bdmv/discs/:id': { params: IdParams; response: BdmvDiscInfo };
+}
+
+export type RouteKey = keyof ApiRoutes;
+export type RouteParams<K extends RouteKey> = ApiRoutes[K] extends {
+  params: infer P;
+}
+  ? P
+  : undefined;
+export type RouteQuery<K extends RouteKey> = ApiRoutes[K] extends {
+  query: infer Q;
+}
+  ? Q
+  : undefined;
+export type RouteBody<K extends RouteKey> = ApiRoutes[K] extends {
+  body: infer B;
+}
+  ? B
+  : undefined;
+export type RouteResponse<K extends RouteKey> = ApiRoutes[K]['response'];

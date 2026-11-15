@@ -1,0 +1,16 @@
+services:
+  wololo:
+    image: ghcr.io/OWNER/wololo:latest
+    container_name: wololo
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+      - UMASK=002
+    volumes:
+      - ./wololo/config:/config
+      # Mount media at the same path Radarr/Sonarr use so renames stay atomic.
+      - /path/to/data:/data
+    ports:
+      - 8585:8585
+    restart: unless-stopped

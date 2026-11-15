@@ -1,0 +1,32 @@
+{
+  "name": "wololo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hosted *arr companion that converts media so every TV direct-plays it",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "build": "cd web && bun run build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "test": "bun test",
+    "db:generate": "drizzle-kit generate",
+    "fixtures": "bun test/helpers/generate-fixtures.ts"
+  },
+  "dependencies": {
+    "@hono/zod-validator": "^0.9.1",
+    "drizzle-orm": "^0.45.4",
+    "fflate": "^0.8.3",
+    "hono": "^4.13.18",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.8",
+    "@types/bun": "^1.4.4",
+    "drizzle-kit": "^0.31.11",
+    "typescript": "^7.0.2"
+  }
+}
