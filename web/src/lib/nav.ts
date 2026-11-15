@@ -1,11 +1,11 @@
+import type { IconName } from '#lib/components/icons.ts';
+
 export interface NavItem {
   label: string;
   href: string;
   icon: IconName;
   children?: { label: string; href: string }[];
 }
-
-export type IconName = 'library' | 'activity' | 'profiles' | 'settings' | 'system';
 
 export const NAV: NavItem[] = [
   {
@@ -25,6 +25,7 @@ export const NAV: NavItem[] = [
     children: [
       { label: 'Queue', href: '/activity/queue' },
       { label: 'History', href: '/activity/history' },
+      { label: 'Recycle bin', href: '/activity/recyclebin' },
     ],
   },
   { label: 'Profiles', href: '/profiles', icon: 'profiles' },
@@ -53,6 +54,17 @@ export const NAV: NavItem[] = [
   },
 ];
 
+/** "/library/12" -> "/library": the sidebar section a path belongs to (path relative to the URL base). */
 export function sectionOf(pathname: string): string {
   return `/${pathname.split('/')[1] ?? ''}`;
+}
+
+/** Is this child link the current page? Nested pages (/library/12) keep their section's first link active. */
+export function isActiveChild(pathname: string, childHref: string, siblings: readonly { href: string }[]): boolean {
+  if (pathname === childHref) return true;
+  if (siblings.some((sibling) => sibling.href === pathname)) return false;
+  const longest = siblings
+    .filter((sibling) => pathname.startsWith(`${sibling.href}/`))
+    .sort((a, b) => b.href.length - a.href.length)[0];
+  return longest?.href === childHref;
 }
