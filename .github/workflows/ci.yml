@@ -76,7 +76,10 @@ jobs:
           key: fixtures-${{ runner.os }}-${{ hashFiles('test/helpers/fixtures.ts', 'test/helpers/generate-fixtures.ts') }}
       - name: Generate fixtures
         run: bun run fixtures
-      - run: bun test
+      - name: Tests (the BDMV end-to-end test must run, not skip)
+        run: bun test
+        env:
+          WOLOLO_REQUIRE_BDMV_E2E: "1"
 
   web:
     name: web check and build
