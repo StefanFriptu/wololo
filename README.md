@@ -152,19 +152,20 @@ From then on, every changed file triggers a partial scan of its folder only. Opt
 Wololo starts with **processing off**. In this dry-run mode it checks files and reports, but never writes a media file. Keep it that way until you have seen the report.
 
 1. Run a scan: **System > Tasks > Library scan > Run now**. The scheduled scan runs every 6 hours anyway.
-2. Open the **dry-run report**. It lists files per failing codec, with estimated time and disk space for the conversion.
+2. Open the dry-run report under **Library > Dry run**. It lists files per failing codec, with estimated time and disk space for the conversion. Files marked **Blocked** need work Wololo cannot do (for example a video codec your TVs cannot play); they are never queued.
 3. Check the device profile under **Profiles**. "Samsung Tizen" is the default; clone and edit it if your TVs decode more.
-4. Try one file first. Open it in **Library**, check the planned changes, and queue it. Watch **Activity > Queue**, then play the result on the TV.
-5. Turn processing on in **Settings > Media**. Then press **Process all needs-work** on the **Library > Dry run** page, or wait for the next scan.
+4. Turn processing on in **Settings > Media**. Jobs can only be queued from then on.
+5. Try one file first. Open it in **Library > Files**, check the planned changes, and queue it. Watch **Activity > Queue**, then play the result on the TV.
+6. Press **Process all needs-work** on the **Library > Dry run** page, or wait for the next scan.
 
-The target on a Raspberry Pi 4 is under 20 minutes per 2-hour movie, so a big backlog takes days. One job at a time, at low CPU and disk priority, is the default. **Replaced originals stay in the recycle bin for 7 days** (`<root>/.wololo-recycle`). Restore one from the recycle bin under **Settings > Media** if a rule was wrong.
+The target on a Raspberry Pi 4 is under 20 minutes per 2-hour movie, so a big backlog takes days. One job at a time, at low CPU and disk priority, is the default. **Replaced originals stay in the recycle bin for 7 days** (`<root>/.wololo-recycle`). Restore one under **Activity > Recycle bin** if a rule was wrong; the restored file is then marked **Ignored** so the next scan leaves it alone.
 
 ## Backup and restore
 
 What a backup holds: a consistent snapshot of the database (libraries, profiles, history, connections) and `config.json`, which includes the API key. Media is not included.
 
 - **Automatic:** weekly (task **Backup** under **System > Tasks**). The newest 8 are kept.
-- **Manual:** **System > Backup > Backup now**. Manual backups are never deleted automatically.
+- **Manual:** **System > Backup > Back up now**. Manual backups are never deleted automatically.
 - **Download:** every backup is a `.zip` under `/config/backups`, also downloadable from the UI.
 
 To restore:
