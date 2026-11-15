@@ -488,4 +488,26 @@ describe.skipIf(!ffmpegAvailable())('audio job end to end', () => {
     const history = await t.ctx.services.jobs.history({ jobId: job.id });
     expect(history.items[0]?.event).toBe('skipped');
   }, 60_000);
+
+  test('audio job - a plan that turned blocked since queueing skips the file and marks it blocked, not failed', async () => {
+    const s = await setup({
+      plan: (probe) => ({ ...ac3Plan(probe), action: 'blocked', reasons: ['video h264 not decoded by profile'] }),
+    });
+    t = s.t;
+    const before = await sha256(s.source);
+
+    const { state, job } = await runOneJob(t, s.mediaFileId);
+
+    expect(state).toBe('completed');
+    expect(await sha256(s.source)).toBe(before);
+    expect(s.recorder.results[0]?.update).toMatchObject({
+      status: 'blocked',
+      reason: 'blocked: video h264 not decoded by profile',
+    });
+    const history = await t.ctx.services.jobs.history({ jobId: job.id });
+    expect(history.items[0]).toMatchObject({
+      event: 'skipped',
+      message: 'blocked: video h264 not decoded by profile; nothing written',
+    });
+  }, 60_000);
 });

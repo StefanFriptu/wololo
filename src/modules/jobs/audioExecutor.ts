@@ -135,11 +135,11 @@ export function createAudioExecutor(deps: AudioExecutorDeps): JobExecutor {
     deps.recordPlan(job.id, plan, probe.streams);
     ctx.log.line(`plan: ${plan.action}; ${plan.reasons.join('; ') || 'no reasons'}`);
 
-    if (plan.action === 'blocked') throw new AppError('unprocessable', `blocked: ${plan.reasons.join('; ')}`);
-    if (plan.action === 'skip') {
+    if (plan.action === 'skip' || plan.action === 'blocked') {
+      const blocked = plan.action === 'blocked' ? `blocked: ${plan.reasons.join('; ')}` : null;
       await services.media.recordJobResult(media.id, {
-        status: 'compatible',
-        reason: null,
+        status: blocked ? 'blocked' : 'compatible',
+        reason: blocked,
         lastJobId: job.id,
         probe,
       });
@@ -151,7 +151,7 @@ export function createAudioExecutor(deps: AudioExecutorDeps): JobExecutor {
         verification: null,
         bytesAfter: null,
         recycleBinEntryId: null,
-        message: 'already compatible, nothing written',
+        message: blocked ? `${blocked}; nothing written` : 'already compatible, nothing written',
       } satisfies JobOutcome;
     }
 
