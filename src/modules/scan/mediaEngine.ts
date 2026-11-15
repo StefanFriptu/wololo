@@ -6,6 +6,7 @@ import { errorMessage, notFound } from '../../core/errors.ts';
 import { arrInstances, type MediaFileRow, mediaFiles } from '../../db/schema.ts';
 import type {
   ArrItemRef,
+  BdmvJobPlan,
   ConversionPlan,
   EffectiveProfile,
   Library,
@@ -13,6 +14,7 @@ import type {
   PlanAction,
   ProbeResult,
 } from '../../shared/domain.ts';
+import { eligibilityRules, exclusionReason } from './eligibility.ts';
 import { statEntry } from './entries.ts';
 import { checkActionFor, statusFromPlan, summarizeProbe } from './evaluation.ts';
 import { libraryQuery } from './libraryQuery.ts';
@@ -34,6 +36,8 @@ export interface EvaluateOptions {
   entry?: DiscoveredEntry;
   /** Precomputed per library by the scanner. */
   rules?: RulesContext;
+  /** Apply the scanner's eligibility rules (enabled library, extensions, hidden/temp/recycle-bin paths, ignore globs). */
+  screen?: boolean;
   signal?: AbortSignal;
 }
 
@@ -51,6 +55,7 @@ interface Evaluation {
   failingCodecs: string[];
   decisionId?: number | null;
   probe?: ProbeResult | null;
+  bdmvPlan?: BdmvJobPlan | null;
 }
 
 function jobTitle(path: string): string {
@@ -145,12 +150,13 @@ export function createMediaEngine(ctx: AppContext) {
         probe = await ctx.services.probe.probe(row.path, { signal: options.signal });
         probed = true;
       } catch (error) {
+        if (options.signal?.aborted) throw error;
         return {
           probed: true,
           evaluation: {
             status: 'failed',
             reason: `probe failed: ${errorMessage(error)}`,
-            rulesKey: rules.rulesKey,
+            rulesKey: null,
             plan: null,
             planAction: null,
             failingCodecs: [],
@@ -177,7 +183,9 @@ export function createMediaEngine(ctx: AppContext) {
 
   const evaluateDisc = async (row: MediaFileRow, rules: RulesContext): Promise<Evaluation> => {
     const result = await ctx.services.bdmv.evaluate(row.id);
-    const plan = result.plan?.audioPlan ?? null;
+    const audioPlan = result.plan?.audioPlan ?? null;
+    const plan =
+      audioPlan && result.plan ? { ...audioPlan, estimatedOutputBytes: result.plan.estimatedOutputBytes } : audioPlan;
     const needsWork = result.status === 'needs_work';
     const workAction: PlanAction = plan?.action === 'convert' ? 'convert' : 'remux';
     return {
@@ -188,6 +196,7 @@ export function createMediaEngine(ctx: AppContext) {
       planAction: needsWork ? workAction : result.status === 'compatible' ? 'skip' : (plan?.action ?? null),
       failingCodecs: needsWork ? ['bdmv'] : [],
       decisionId: result.decisionId,
+      bdmvPlan: result.plan,
     };
   };
 
@@ -217,13 +226,14 @@ export function createMediaEngine(ctx: AppContext) {
   };
 
   const enqueue = async (row: MediaFileRow, evaluation: Evaluation, refs: MediaRefs) => {
-    const plan = row.kind === 'file' ? evaluation.plan : null;
+    const isFile = row.kind === 'file';
     const job = await ctx.services.jobs.enqueue({
-      type: row.kind === 'file' ? 'audio' : 'bdmv',
+      type: isFile ? 'audio' : 'bdmv',
       trigger: refs.trigger,
       mediaFileId: row.id,
       title: jobTitle(row.path),
-      plan,
+      plan: isFile ? evaluation.plan : null,
+      ...(isFile ? {} : { bdmvPlan: evaluation.bdmvPlan ?? null }),
     });
     return job.id;
   };
@@ -241,6 +251,7 @@ export function createMediaEngine(ctx: AppContext) {
     const row = ctx.db
       .insert(mediaFiles)
       .values({ ...values, path: entry.path, status: 'pending', createdAt: now, updatedAt: now })
+      .onConflictDoUpdate({ target: mediaFiles.path, set: { ...values, updatedAt: now } })
       .returning()
       .get();
     emitUpdated(row);
@@ -261,10 +272,9 @@ export function createMediaEngine(ctx: AppContext) {
   ): Promise<EvaluateOutcome> => {
     const found = await ctx.services.libraries.findRootForPath(path);
     if (!found) return { probed: false, result: outcome('unknown_path', null, `${path} is not inside a library root`) };
-    const { library, rootId } = found;
-    const existing = ctx.db.select().from(mediaFiles).where(eq(mediaFiles.path, path)).get();
-
+    const { library, rootId, rootPath } = found;
     const entry = options.entry ?? (await statEntry(path));
+    const existing = ctx.db.select().from(mediaFiles).where(eq(mediaFiles.path, path)).get();
     if (!entry) {
       if (existing && existing.status !== 'ignored' && existing.status !== 'processing')
         update(existing.id, { status: 'failed', statusReason: 'file not found' });
@@ -272,6 +282,12 @@ export function createMediaEngine(ctx: AppContext) {
     }
     if (entry.kind !== 'file' && !(library.bdmvEnabled && ctx.settings.section('bdmv').enabled))
       return { probed: false, result: outcome('ignored', existing ?? null, 'disc handling is disabled') };
+    if (options.screen) {
+      const excluded = library.enabled
+        ? exclusionReason(rootPath, path, entry.kind, eligibilityRules(ctx.settings.get(), library))
+        : 'library is disabled';
+      if (excluded) return { probed: false, result: outcome('ignored', existing ?? null, `not checked: ${excluded}`) };
+    }
     if (existing?.status === 'processing' && !options.force)
       return {
         probed: false,
@@ -311,6 +327,12 @@ export function createMediaEngine(ctx: AppContext) {
         evaluation = await evaluateDisc(row, rules);
       }
     } catch (error) {
+      if (options.signal?.aborted) {
+        const restored = existing
+          ? update(row.id, { sizeBytes: existing.sizeBytes, mtimeMs: existing.mtimeMs, kind: existing.kind })
+          : row;
+        return { probed, result: outcome('failed', restored, 'check cancelled') };
+      }
       log.error('evaluation failed', { path, error: errorMessage(error) });
       const failed = keepStatus
         ? row

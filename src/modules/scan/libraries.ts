@@ -1,11 +1,19 @@
 import { readdir, stat, statfs } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { and, eq, inArray, notInArray } from 'drizzle-orm';
+import { and, eq, inArray, notInArray, or } from 'drizzle-orm';
 import type { AppContext } from '../../app/context.ts';
 import type { LibraryService } from '../../contracts/probe-scan.ts';
 import { AppError, errorMessage, notFound } from '../../core/errors.ts';
 import type { Db } from '../../db/client.ts';
-import { arrInstances, deviceProfiles, jobs, libraries, libraryProfiles, libraryRoots } from '../../db/schema.ts';
+import {
+  arrInstances,
+  deviceProfiles,
+  jobs,
+  libraries,
+  libraryProfiles,
+  libraryRoots,
+  mediaFiles,
+} from '../../db/schema.ts';
 import type { FilesystemEntry, FilesystemListing, FilesystemQuery, LibraryInput } from '../../shared/api-types.ts';
 import type { Library, LibraryRoot, LibraryRuleSettings } from '../../shared/domain.ts';
 import { normalizeLanguage } from '../../shared/language.ts';
@@ -227,12 +235,26 @@ export function createLibraryService(ctx: AppContext): LibraryService {
 
     remove: async (id) => {
       load(id);
-      const running = ctx.db
-        .select({ id: jobs.id })
+      const libraryMedia = ctx.db.select({ id: mediaFiles.id }).from(mediaFiles).where(eq(mediaFiles.libraryId, id));
+      const active = ctx.db
+        .select({ id: jobs.id, state: jobs.state })
         .from(jobs)
-        .where(and(eq(jobs.libraryId, id), eq(jobs.state, 'running')))
-        .get();
+        .where(
+          and(
+            or(eq(jobs.libraryId, id), inArray(jobs.mediaFileId, libraryMedia)),
+            inArray(jobs.state, ['queued', 'running']),
+          ),
+        )
+        .all();
+      const running = active.find((job) => job.state === 'running');
       if (running) throw new AppError('conflict', `job ${running.id} is running for this library`);
+      for (const job of active) {
+        try {
+          await ctx.services.jobs.cancel(job.id);
+        } catch (error) {
+          throw new AppError('conflict', `could not cancel queued job ${job.id}: ${errorMessage(error)}`);
+        }
+      }
       ctx.db.delete(libraries).where(eq(libraries.id, id)).run();
       log.info('library removed', { libraryId: id });
     },

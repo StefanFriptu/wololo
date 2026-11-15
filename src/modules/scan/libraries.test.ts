@@ -5,10 +5,12 @@ import { eq } from 'drizzle-orm';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
 import { insertArrInstance, insertJob, insertMediaFile, insertProfile } from '../../../test/helpers/seed.ts';
 import { stubService } from '../../../test/helpers/stubs.ts';
+import type { JobsService } from '../../contracts/jobs.ts';
 import type { MediaService } from '../../contracts/probe-scan.ts';
 import { AppError, type ErrorCode } from '../../core/errors.ts';
 import { jobs, mediaFiles } from '../../db/schema.ts';
 import type { LibraryInput } from '../../shared/api-types.ts';
+import type { JobSummary } from '../../shared/domain.ts';
 import { TEST_DEFINITION } from './test-fakes.ts';
 
 let t: TestContext;
@@ -143,6 +145,31 @@ test('libraries.remove - deletes the library and its rows, refuses while a job r
   expect(await t.ctx.services.libraries.list()).toEqual([]);
   expect(t.ctx.db.select().from(mediaFiles).all()).toEqual([]);
   expect((await errorOf(t.ctx.services.libraries.remove(created.id))).code).toBe('not_found');
+});
+
+test("libraries.remove - cancels the library's queued jobs first; a failed cancel keeps the library", async () => {
+  const created = await t.ctx.services.libraries.create(input({ roots: ['/data/a'] }));
+  const seeded = { libraryId: created.id, rootIds: [created.roots[0]?.id as number] };
+  const row = insertMediaFile(t.ctx.db, seeded, { path: '/data/a/x.mkv' });
+  const byLibrary = insertJob(t.ctx.db, { sourcePath: row.path, libraryId: created.id, state: 'queued' });
+  const byMedia = insertJob(t.ctx.db, { sourcePath: row.path, mediaFileId: row.id, state: 'queued' });
+  const cancelled: number[] = [];
+  let failCancel = true;
+  t.ctx.services.jobs = stubService<JobsService>('jobs', {
+    cancel: async (id) => {
+      if (failCancel) throw new Error('queue busy');
+      cancelled.push(id);
+      t.ctx.db.update(jobs).set({ state: 'cancelled' }).where(eq(jobs.id, id)).run();
+      return { id, state: 'cancelled' } as JobSummary;
+    },
+  });
+  expect((await errorOf(t.ctx.services.libraries.remove(created.id))).code).toBe('conflict');
+  expect(await t.ctx.services.libraries.list()).toHaveLength(1);
+
+  failCancel = false;
+  await t.ctx.services.libraries.remove(created.id);
+  expect(cancelled.sort()).toEqual([byLibrary.id, byMedia.id].sort());
+  expect(await t.ctx.services.libraries.list()).toEqual([]);
 });
 
 test('libraries.findRootForPath - longest matching root across libraries', async () => {

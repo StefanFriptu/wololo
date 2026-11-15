@@ -18,6 +18,9 @@ test.each([
   ['/data/media/movies2/a.mkv', '/data/media/movies', false],
   ['/data/media', '/data/media/movies', false],
   ['/anything', '/', true],
+  ['/data/media/Recycle', '/data/media/Recycle/', true],
+  ['/data/media/Recycle/old.mkv', '/data/media/Recycle/', true],
+  ['/data/media/Recycled', '/data/media/Recycle/', false],
 ])('isWithin - %s in %s -> %p', (path, root, expected) => {
   expect(isWithin(path, root)).toBe(expected);
 });

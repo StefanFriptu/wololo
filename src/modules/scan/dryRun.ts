@@ -90,6 +90,7 @@ export function createDryRunService(ctx: AppContext): DryRunService {
     const largestOutputPerRoot = new Map<number, number>();
     let estimatedSeconds = 0;
     let discOutputBytes = 0;
+    let largestIsoExtract = 0;
     let recycleBytes = 0;
 
     for (const row of workRows(scope)) {
@@ -119,6 +120,7 @@ export function createDryRunService(ctx: AppContext): DryRunService {
         if (recycling) recycleBytes += row.sizeBytes;
       } else {
         discOutputBytes += outputBytes;
+        if (row.kind === 'iso') largestIsoExtract = Math.max(largestIsoExtract, outputBytes);
       }
     }
 
@@ -129,7 +131,7 @@ export function createDryRunService(ctx: AppContext): DryRunService {
     return {
       groups: sorted,
       estimatedSeconds,
-      estimatedExtraBytes: tempBytes + discOutputBytes + recycleBytes,
+      estimatedExtraBytes: tempBytes + discOutputBytes + largestIsoExtract + recycleBytes,
       estimatedRecycleBytes: recycleBytes,
     };
   };

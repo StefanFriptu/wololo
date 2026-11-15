@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, rmSync, utimesSync } from 'node:fs';
-import { join } from 'node:path';
+import { chmodSync, mkdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
 import { ensureFixtureCopy, FIXTURES, ffmpegAvailable } from '../../../test/helpers/fixtures.ts';
+import { audioStream, probeResult, videoStream } from '../../../test/helpers/probe.ts';
 import { insertMediaFile } from '../../../test/helpers/seed.ts';
 import { stubService } from '../../../test/helpers/stubs.ts';
 import type { ProbeService } from '../../contracts/probe-scan.ts';
@@ -69,6 +70,26 @@ const stats = (overrides: Partial<ScanStats>): ScanStats => ({
 
 const statusOf = (path: string) =>
   t.ctx.db.select({ status: mediaFiles.status }).from(mediaFiles).where(eq(mediaFiles.path, path)).get()?.status;
+const rowOf = (path: string) => t.ctx.db.select().from(mediaFiles).where(eq(mediaFiles.path, path)).get();
+const seeded = () => ({ libraryId: library.id, rootIds: [library.roots[0]?.id as number] });
+
+function file(relativePath: string): string {
+  const path = join(root, relativePath);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, 'x');
+  return path;
+}
+
+/** Compatible probe for any path, or the given behaviour; counts calls in probeCalls. */
+function fakeProbe(behaviour?: (path: string, signal: AbortSignal | undefined) => Promise<void>) {
+  t.ctx.services.probe = {
+    probe: async (path, options) => {
+      probeCalls += 1;
+      await behaviour?.(path, options?.signal);
+      return probeResult([videoStream(), audioStream({ codec: 'ac3' })], { path, sizeBytes: statSync(path).size });
+    },
+  } satisfies ProbeService;
+}
 
 test('scan.start - no libraries finishes with empty stats', async () => {
   await t.ctx.services.libraries.remove(library.id);
@@ -100,6 +121,123 @@ test('scan.start - libraries without an effective profile are skipped with an er
   });
   const finished = await runScan();
   expect(finished.error).toContain('Movies: no profile available');
+});
+
+test('scan - an empty root keeps its rows and reports it; a force scan removes them', async () => {
+  insertMediaFile(t.ctx.db, seeded(), { path: join(root, 'A/A.mkv'), status: 'compatible' });
+  insertMediaFile(t.ctx.db, seeded(), { path: join(root, 'B/B.mkv'), status: 'ignored' });
+  const finished = await runScan();
+  expect(finished.error).toContain('looks empty (not mounted?), kept 2 file(s)');
+  expect(finished.stats.filesRemoved).toBe(0);
+  expect(statusOf(join(root, 'B/B.mkv'))).toBe('ignored');
+
+  const forced = await runScan({ force: true });
+  expect(forced.stats.filesRemoved).toBe(2);
+  expect(forced.error).toBeNull();
+});
+
+test('scan - files the settings now exclude: disc rows and ignored rows stay, other rows go', async () => {
+  fakeProbe();
+  const keep = file('Keep/Keep.mkv');
+  const disc = file('Disc/BDMV/index.bdmv').replace('/BDMV/index.bdmv', '');
+  const image = file('Image/Movie.iso');
+  const ignored = file('Old/ignored.avi');
+  const excluded = file('Old/other.avi');
+  const gone = join(root, 'Gone/Gone.mkv');
+  insertMediaFile(t.ctx.db, seeded(), {
+    path: disc,
+    kind: 'bdmv',
+    status: 'compatible',
+    statusReason: 'converted to x',
+  });
+  insertMediaFile(t.ctx.db, seeded(), { path: image, kind: 'iso', status: 'needs_work' });
+  insertMediaFile(t.ctx.db, seeded(), { path: ignored, status: 'ignored' });
+  insertMediaFile(t.ctx.db, seeded(), { path: excluded, status: 'needs_work' });
+  insertMediaFile(t.ctx.db, seeded(), { path: gone, status: 'ignored' });
+  t.ctx.settings.update({ bdmv: { enabled: false }, media: { extensions: ['.mkv', '.iso'] } });
+
+  const finished = await runScan();
+  expect(finished.error).toBeNull();
+  expect(finished.stats).toMatchObject({ filesSeen: 1, filesRemoved: 2 });
+  expect(statusOf(keep)).toBe('compatible');
+  expect(rowOf(disc)).toMatchObject({ status: 'compatible', statusReason: 'converted to x' });
+  expect(statusOf(image)).toBe('needs_work');
+  expect(statusOf(ignored)).toBe('ignored');
+  expect(rowOf(excluded)).toBeUndefined();
+  expect(rowOf(gone)).toBeUndefined();
+});
+
+test.skipIf(process.getuid?.() === 0)(
+  'scan - a file that cannot be stat-ed keeps its row; the scan reports it',
+  async () => {
+    fakeProbe();
+    file('Keep/Keep.mkv');
+    const locked = file('Locked/Locked.mkv');
+    insertMediaFile(t.ctx.db, seeded(), { path: locked, status: 'ignored' });
+    chmodSync(join(root, 'Locked'), 0o444);
+    try {
+      const finished = await runScan();
+      expect(finished.error).toContain('1 file(s) under');
+      expect(finished.stats.filesRemoved).toBe(0);
+      expect(statusOf(locked)).toBe('ignored');
+    } finally {
+      chmodSync(join(root, 'Locked'), 0o755);
+    }
+  },
+);
+
+test('scan - a probe failure is retried by the next scan', async () => {
+  let failures = 1;
+  fakeProbe(async () => {
+    if (failures-- > 0) throw new AppError('upstream', 'ffprobe timed out');
+  });
+  const path = file('Movie/Movie.mkv');
+  const first = await runScan();
+  expect(first.stats).toMatchObject({ filesProbed: 1, probeErrors: 1 });
+  expect(rowOf(path)).toMatchObject({ status: 'failed', rulesKey: null });
+
+  const second = await runScan();
+  expect(second.stats).toMatchObject({ filesProbed: 1, probeErrors: 0 });
+  expect(rowOf(path)).toMatchObject({ status: 'compatible', rulesKey: '1@1|replace|' });
+});
+
+test('scan - cancelling during a probe leaves the row for the next scan', async () => {
+  const path = file('Movie/Movie.mkv');
+  const before = insertMediaFile(t.ctx.db, seeded(), {
+    path,
+    sizeBytes: 999,
+    status: 'compatible',
+    statusReason: 'checked before',
+    rulesKey: '1@1|replace|',
+  });
+  let probing: () => void = () => {};
+  const started = new Promise<void>((resolve) => {
+    probing = resolve;
+  });
+  fakeProbe(
+    (_path, signal) =>
+      new Promise((_resolve, reject) => {
+        probing();
+        signal?.addEventListener('abort', () => reject(new AppError('upstream', 'ffprobe aborted')));
+      }),
+  );
+  const done = runScan();
+  await started;
+  await t.ctx.services.scan.cancel();
+  const cancelled = await done;
+  expect(cancelled.error).toBe('cancelled');
+  expect(cancelled.stats.probeErrors).toBe(0);
+  expect(rowOf(path)).toMatchObject({
+    status: 'compatible',
+    statusReason: 'checked before',
+    sizeBytes: before.sizeBytes,
+    mtimeMs: before.mtimeMs,
+  });
+
+  fakeProbe();
+  const next = await runScan();
+  expect(next.stats).toMatchObject({ filesChanged: 1, filesProbed: 1, probeErrors: 0 });
+  expect(rowOf(path)).toMatchObject({ status: 'compatible', sizeBytes: 1 });
 });
 
 describe.skipIf(!ffmpegAvailable())('scans over fixture files', () => {

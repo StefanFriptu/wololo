@@ -67,7 +67,14 @@ export function createMediaService(ctx: AppContext): MediaService {
       return row ? toSummary(row as MediaSummaryRow) : null;
     },
 
-    checkPath: async (path, refs) => (await engine.evaluatePath(path, refs)).result,
+    checkPath: async (path, refs) => {
+      try {
+        return (await engine.evaluatePath(path, refs, { screen: true })).result;
+      } catch (error) {
+        log.error('check failed', { path, error: errorMessage(error) });
+        return { action: 'failed', mediaFile: null, jobId: null, message: `check failed: ${errorMessage(error)}` };
+      }
+    },
 
     reprobe: async (id) => {
       const row = engine.rowById(id);
@@ -152,6 +159,8 @@ export function createMediaService(ctx: AppContext): MediaService {
           log.error('could not re-plan after a job', { mediaFileId: id, error: errorMessage(error) });
           Object.assign(values, { rulesKey: null });
         }
+      } else if (result.status === 'compatible') {
+        Object.assign(values, { plan: null, planAction: 'skip', failingCodecs: [] });
       }
       engine.update(id, values);
     },

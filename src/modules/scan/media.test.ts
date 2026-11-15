@@ -13,7 +13,7 @@ import type { ProbeService } from '../../contracts/probe-scan.ts';
 import type { AppError } from '../../core/errors.ts';
 import { mediaFiles } from '../../db/schema.ts';
 import type { MediaQuery } from '../../shared/api-types.ts';
-import type { ArrItemRef, Library } from '../../shared/domain.ts';
+import type { ArrItemRef, BdmvJobPlan, ConversionPlan, Library } from '../../shared/domain.ts';
 import type { EventMap } from '../../shared/events.ts';
 import { fakeJobs, fakeRules, TEST_DEFINITION } from './test-fakes.ts';
 
@@ -71,6 +71,33 @@ beforeEach(async () => {
 
 afterEach(() => t.cleanup());
 
+const DISC_AUDIO_PLAN: ConversionPlan = {
+  action: 'convert',
+  reasons: ['truehd not decoded by profile'],
+  failingCodecs: ['truehd'],
+  streams: [],
+  dropped: [],
+  lostFeatures: [],
+  videoNotes: [],
+  estimatedOutputBytes: 1000,
+  rulesKey: '1@1|replace',
+};
+
+function discPlan(sourcePath: string): BdmvJobPlan {
+  return {
+    sourcePath,
+    sourceKind: 'bdmv',
+    movie: { title: 'Disc', year: 2020, tmdbId: 1, imdbId: null, score: 1, radarrMovieId: null },
+    radarrInstanceId: 1,
+    rootFolderPath: '/movies',
+    titles: [],
+    audioPlan: DISC_AUDIO_PLAN,
+    dolbyVision: 'drop_hdr10',
+    estimatedOutputBytes: 25_000,
+    extractBytes: 0,
+  };
+}
+
 const media = () => t.ctx.services.media;
 const rowOf = (path: string) => t.ctx.db.select().from(mediaFiles).where(eq(mediaFiles.path, path)).get();
 
@@ -107,9 +134,12 @@ test('media.checkPath - disc folders go through bdmv.evaluate and queue a bdmv j
   expect(arrLookups).toEqual([]);
 
   t.ctx.settings.update({ processing: { enabled: true } });
+  discEvaluation = { ...discEvaluation, plan: discPlan(disc) };
   const queued = await media().checkPath(disc, { trigger: 'scan' });
   expect(queued.action).toBe('queued');
-  expect(jobs.calls).toMatchObject([{ type: 'bdmv', trigger: 'scan', title: 'Disc' }]);
+  expect(jobs.calls).toMatchObject([{ type: 'bdmv', trigger: 'scan', title: 'Disc', plan: null }]);
+  expect(jobs.calls[0]?.bdmvPlan).toEqual(discPlan(disc));
+  expect(rowOf(disc)?.plan).toEqual({ ...DISC_AUDIO_PLAN, estimatedOutputBytes: 25_000 });
 
   discEvaluation = { status: 'pending', reason: 'pick the main title', plan: null, decisionId: 7 };
   const decision = await media().checkPath(disc, { trigger: 'scan' });
@@ -123,6 +153,56 @@ test('media.checkPath - discs are ignored when disc handling is disabled', async
   t.ctx.settings.update({ bdmv: { enabled: false } });
   expect((await media().checkPath(disc, { trigger: 'scan' })).action).toBe('ignored');
   expect(rowOf(disc)).toBeUndefined();
+});
+
+test.each([
+  ['.wololo-recycle/old.mkv', 'hidden or temporary path'],
+  ['Recycle/old.mkv', 'inside the recycle bin'],
+  ['Movie/Movie.wololo-tmp.mkv', 'hidden or temporary path'],
+  ['Movie/notes.txt', 'not a media file extension'],
+  ['Movie/Sample/sample.mkv', 'matches an ignore pattern'],
+])('media.checkPath - %s is not checked (%s): no row, no probe, no job', async (relativePath, reason) => {
+  t.ctx.settings.update({ processing: { enabled: true }, recycleBin: { path: `${root}/Recycle/` } });
+  const path = join(root, relativePath);
+  mkdirSync(join(path, '..'), { recursive: true });
+  writeFileSync(path, 'x');
+  const result = await media().checkPath(path, { trigger: 'webhook' });
+  expect(result).toEqual({ action: 'ignored', mediaFile: null, jobId: null, message: `not checked: ${reason}` });
+  expect(rowOf(path)).toBeUndefined();
+  expect(probeCalls).toEqual([]);
+  expect(jobs.calls).toEqual([]);
+});
+
+test('media.checkPath - files of a disabled library are not checked', async () => {
+  const otherRoot = join(t.dir, 'disabled');
+  mkdirSync(otherRoot, { recursive: true });
+  await t.ctx.services.libraries.create({
+    name: 'Off',
+    kind: 'movies',
+    roots: [otherRoot],
+    profileIds: [],
+    enabled: false,
+  });
+  const path = join(otherRoot, 'Movie.mkv');
+  writeFileSync(path, 'x');
+  t.ctx.settings.update({ processing: { enabled: true } });
+  const result = await media().checkPath(path, { trigger: 'webhook' });
+  expect(result).toMatchObject({ action: 'ignored', message: 'not checked: library is disabled' });
+  expect(rowOf(path)).toBeUndefined();
+  expect(jobs.calls).toEqual([]);
+});
+
+test('media.checkPath - an unexpected error is reported as failed instead of thrown', async () => {
+  t.ctx.services.libraries = {
+    ...t.ctx.services.libraries,
+    findRootForPath: async () => Promise.reject(new Error('db gone')),
+  };
+  expect(await media().checkPath(join(root, 'A.mkv'), { trigger: 'webhook' })).toEqual({
+    action: 'failed',
+    mediaFile: null,
+    jobId: null,
+    message: 'check failed: db gone',
+  });
 });
 
 describe.skipIf(!ffmpegAvailable())('with ffprobe fixtures', () => {
@@ -203,13 +283,25 @@ describe.skipIf(!ffmpegAvailable())('with ffprobe fixtures', () => {
     expect(jobs.calls).toEqual([]);
   });
 
-  test('media.checkPath - a broken file fails with the probe error and keeps the rules key', async () => {
+  test('media.checkPath - a probe failure is stored without a rules key, so the next check probes again', async () => {
     const path = join(root, 'broken.mkv');
     writeFileSync(path, 'not a video');
     const result = await media().checkPath(path, { trigger: 'scan' });
     expect(result.action).toBe('failed');
     expect(result.mediaFile?.statusReason).toStartWith('probe failed: ffprobe failed');
-    expect(rowOf(path)?.rulesKey).toBe('1@1|replace|');
+    expect(rowOf(path)?.rulesKey).toBeNull();
+    await media().checkPath(path, { trigger: 'scan' });
+    expect(probeCalls).toHaveLength(2);
+  });
+
+  test('media.checkPath - concurrent checks of one new file both succeed on a single row', async () => {
+    const path = await ensureFixtureCopy(FIXTURES.dts51, root, 'Movie.mkv');
+    const results = await Promise.all([
+      media().checkPath(path, { trigger: 'webhook' }),
+      media().checkPath(path, { trigger: 'webhook' }),
+    ]);
+    expect(results.map((result) => result.action)).toEqual(['dry_run', 'dry_run']);
+    expect(t.ctx.db.select().from(mediaFiles).where(eq(mediaFiles.path, path)).all()).toHaveLength(1);
   });
 
   test('media.checkPath - an unchanged file reuses the stored probe; a touched file is probed again', async () => {
@@ -470,6 +562,25 @@ describe('media rows without files', () => {
     expect(rowOf('/x/ignored')?.status).toBe('ignored');
     expect(rowOf('/x/processing')?.status).toBe('processing');
     expect(await media().invalidateRules({})).toBe(0);
+  });
+
+  test('media.recordJobResult - a converted disc clears its plan and failing codecs', async () => {
+    const disc = insertMediaFile(t.ctx.db, seeded(), {
+      path: join(root, 'Disc'),
+      kind: 'bdmv',
+      status: 'needs_work',
+      plan: DISC_AUDIO_PLAN,
+      planAction: 'remux',
+      failingCodecs: ['bdmv'],
+    });
+    await media().recordJobResult(disc.id, {
+      status: 'compatible',
+      reason: 'converted to /movies/Disc.mkv',
+      lastJobId: 4,
+    });
+    expect(rowOf(disc.path)).toMatchObject({ status: 'compatible', plan: null, planAction: 'skip', failingCodecs: [] });
+    expect((await media().stats()).byFailingCodec).toEqual([]);
+    expect((await media().list({ failingCodec: 'bdmv' })).total).toBe(0);
   });
 
   test('media.previewPlan - disc rows return their stored plan or 422', async () => {

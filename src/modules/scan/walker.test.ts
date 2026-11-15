@@ -4,8 +4,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { DiscoveredEntry } from '../../contracts/probe-scan.ts';
 import { DEFAULT_SETTINGS } from '../../shared/settings.ts';
+import { isIgnored, skipPathsFor } from './eligibility.ts';
 import { statEntry } from './entries.ts';
-import { isIgnored, type WalkOptions, walkRoot } from './walker.ts';
+import { type WalkOptions, walkRoot } from './walker.ts';
 
 let root: string;
 
@@ -21,6 +22,7 @@ const OPTIONS: WalkOptions = {
   ignorePatterns: DEFAULT_SETTINGS.media.ignorePatterns,
   discs: true,
 };
+const RECYCLE = DEFAULT_SETTINGS.recycleBin;
 
 async function walk(options: Partial<WalkOptions> = {}) {
   const report = { unreadable: [] as string[] };
@@ -58,6 +60,14 @@ test('walkRoot - finds media files, discs and images; skips ignored, hidden, tem
   expect(relative.sort()).toEqual(
     ['Disc Movie', 'Image/Movie.iso', 'Movie (2020)/Movie (2020).mkv', 'Other/Clip.MP4', 'Other/Linked.mkv'].sort(),
   );
+});
+
+test('walkRoot - a skip path with a trailing slash still keeps the recycle bin out', async () => {
+  const { relative } = await walk({
+    skipPaths: skipPathsFor({ recycleBin: { ...RECYCLE, path: `${root}/Recycle/` } }),
+  });
+  expect(relative).not.toContain('Recycle/x.mkv');
+  expect(relative).toContain('Other/Clip.MP4');
 });
 
 test('walkRoot - disc entries carry the stream size and index.bdmv mtime', async () => {

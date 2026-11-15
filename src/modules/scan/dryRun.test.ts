@@ -253,6 +253,31 @@ test('dryRun.report - recycle bin disabled needs no recycle space', async () => 
   expect(report.estimatedExtraBytes).toBe(Math.round(3.5 * GB * 1.05) + Math.round(GB * 1.05) + 30 * GB);
 });
 
+test('dryRun.report - discs use their planned output; an .iso also needs room to extract its largest title', async () => {
+  t.ctx.settings.update({ recycleBin: { enabled: false } });
+  const before = await t.ctx.services.dryRun.report({ libraryId: libraryB.libraryId });
+  const disc = { kind: 'bdmv' as const, status: 'needs_work' as const, planAction: 'remux' as const };
+  insertMediaFile(t.ctx.db, libraryB, {
+    ...disc,
+    path: '/data/b/Folder Disc',
+    sizeBytes: 40 * GB,
+    failingCodecs: ['bdmv'],
+    plan: plan('convert', ['truehd'], 25 * GB),
+  });
+  insertMediaFile(t.ctx.db, libraryB, {
+    ...disc,
+    kind: 'iso',
+    path: '/data/b/Image.iso',
+    sizeBytes: 45 * GB,
+    failingCodecs: ['bdmv'],
+    plan: plan('convert', ['truehd'], 20 * GB),
+  });
+  const report = await t.ctx.services.dryRun.report({ libraryId: libraryB.libraryId });
+  expect(report.estimatedExtraBytes - before.estimatedExtraBytes).toBe(25 * GB + 20 * GB + 20 * GB);
+  const group = report.groups.find((candidate) => candidate.codec === 'bdmv');
+  expect(group?.estimatedOutputBytes).toBe(30 * GB + 25 * GB + 20 * GB);
+});
+
 test('dryRun.report - a failing profile service leaves byProfile empty, the rest of the report intact', async () => {
   profilesFail = true;
   const report = await t.ctx.services.dryRun.report({});

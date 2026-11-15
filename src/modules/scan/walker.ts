@@ -1,37 +1,18 @@
 import type { Dirent } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { extname, join, relative } from 'node:path';
-import { TEMP_FILE_MARKER } from '../../contracts/jobs.ts';
 import type { DiscoveredEntry } from '../../contracts/probe-scan.ts';
 import { classifyEntry } from './change-detection.ts';
+import { type EligibilityRules, hasMediaExtension, isIgnored, isSkippedPath, skippedName } from './eligibility.ts';
 import { directoryChildNames, statEntry } from './entries.ts';
-import { isWithin } from './paths.ts';
 
-export interface WalkOptions {
-  /** Lower-case extensions with dot. */
-  extensions: readonly string[];
-  /** Globs relative to the root (settings.media.ignorePatterns). */
-  ignorePatterns: readonly string[];
-  /** Disc folders and .iso images are reported (false: skipped entirely). */
-  discs: boolean;
-  /** Absolute paths never entered (e.g. a recycle bin inside the root). */
-  skipPaths?: readonly string[];
+export interface WalkOptions extends EligibilityRules {
   signal?: AbortSignal;
 }
 
 export interface WalkReport {
   /** Directories that could not be read; rows below them must not be treated as removed. */
   unreadable: string[];
-}
-
-/** Pure: does a relative path match an ignore glob? Directories are matched with a trailing slash. */
-export function isIgnored(relativePath: string, isDirectory: boolean, globs: readonly Bun.Glob[]): boolean {
-  const candidate = isDirectory ? `${relativePath}/` : relativePath;
-  return globs.some((glob) => glob.match(candidate));
-}
-
-function skippedName(name: string): boolean {
-  return name.startsWith('.') || name.includes(TEMP_FILE_MARKER);
 }
 
 async function resolveType(dir: string, dirent: Dirent): Promise<'file' | 'dir' | null> {
@@ -85,13 +66,11 @@ export async function* walkRoot(
       if (isIgnored(relative(root, full), type === 'dir', globs)) continue;
       if (type === 'dir') {
         const isOrphanBdmv = dirent.name.toUpperCase() === 'BDMV';
-        const skipped = options.skipPaths?.some((path) => isWithin(full, path)) ?? false;
-        if (!isOrphanBdmv && !skipped) subdirs.push(full);
+        if (!isOrphanBdmv && !isSkippedPath(full, options.skipPaths)) subdirs.push(full);
         continue;
       }
-      const ext = extname(dirent.name).toLowerCase();
-      if (!extensions.has(ext)) continue;
-      if (ext === '.iso' && !options.discs) continue;
+      if (!hasMediaExtension(dirent.name, extensions)) continue;
+      if (extname(dirent.name).toLowerCase() === '.iso' && !options.discs) continue;
       files.push(full);
     }
 

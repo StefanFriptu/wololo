@@ -1,13 +1,15 @@
 import { randomUUID } from 'node:crypto';
+import { stat } from 'node:fs/promises';
 import { eq } from 'drizzle-orm';
 import type { AppContext } from '../../app/context.ts';
 import type { ScanService } from '../../contracts/probe-scan.ts';
 import { errorMessage, notFound } from '../../core/errors.ts';
 import { mediaFiles } from '../../db/schema.ts';
 import type { ScanRequest, ScanStatus } from '../../shared/api-types.ts';
-import type { Library, LibraryRoot } from '../../shared/domain.ts';
+import type { Library, LibraryRoot, MediaFileKind, MediaFileStatus } from '../../shared/domain.ts';
 import type { ScanStats } from '../../shared/events.ts';
 import { needsRecheck } from './change-detection.ts';
+import { eligibilityRules } from './eligibility.ts';
 import { rootDiskInfo } from './libraries.ts';
 import { libraryQuery } from './libraryQuery.ts';
 import { createMediaEngine, type RulesContext } from './mediaEngine.ts';
@@ -16,6 +18,28 @@ import { isWithin } from './paths.ts';
 import { walkRoot } from './walker.ts';
 
 const PROGRESS_INTERVAL_MS = 1000;
+
+type Presence = 'missing' | 'present' | 'unknown';
+
+async function presenceOf(path: string): Promise<Presence> {
+  try {
+    await stat(path);
+    return 'present';
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === 'ENOENT' || code === 'ENOTDIR' ? 'missing' : 'unknown';
+  }
+}
+
+/**
+ * Pure: may a stored row the walk did not yield be deleted? Only when its path is gone, or when it still exists but the
+ * settings now exclude it, unless it carries state a re-add would lose (the user's ignore flag, a disc's conversion).
+ */
+export function removable(row: { kind: MediaFileKind; status: MediaFileStatus }, presence: Presence): boolean {
+  if (presence === 'missing') return true;
+  if (presence === 'unknown') return false;
+  return row.status !== 'ignored' && row.kind === 'file';
+}
 
 function emptyStats(): ScanStats {
   return {
@@ -96,21 +120,13 @@ export function createScanService(ctx: AppContext): ScanService {
         .all()
         .map((row) => [row.path, row]),
     );
-    const settings = ctx.settings.get();
-    const recycleBin = settings.recycleBin.path;
     const report = { unreadable: [] as string[] };
     const seen = new Set<string>();
     const backlog: { id: number; kind: string; path: string }[] = [];
 
     const entries = walkRoot(
       root.path,
-      {
-        extensions: settings.media.extensions,
-        ignorePatterns: settings.media.ignorePatterns,
-        discs: settings.bdmv.enabled && library.bdmvEnabled,
-        skipPaths: recycleBin ? [recycleBin] : [],
-        signal: options.signal,
-      },
+      { ...eligibilityRules(ctx.settings.get(), library), signal: options.signal },
       report,
     );
     for await (const entry of entries) {
@@ -128,6 +144,7 @@ export function createScanService(ctx: AppContext): ScanService {
         { trigger: 'scan' },
         { entry, rules, force: options.force, forceProbe: options.force, signal: options.signal },
       );
+      if (options.signal.aborted) break;
       if (!row) scan.stats.filesNew += 1;
       else if (row.sizeBytes !== entry.sizeBytes || row.mtimeMs !== entry.mtimeMs) scan.stats.filesChanged += 1;
       if (probed) scan.stats.filesProbed += 1;
@@ -136,14 +153,32 @@ export function createScanService(ctx: AppContext): ScanService {
     }
     if (options.signal.aborted) return null;
 
-    const removed = [...stored.values()].filter(
+    const candidates = [...stored.values()].filter(
       (row) =>
         !seen.has(row.path) && row.status !== 'processing' && !report.unreadable.some((dir) => isWithin(row.path, dir)),
     );
-    engine.deleteRows(removed.map((row) => row.id));
-    scan.stats.filesRemoved += removed.length;
+    const problems: string[] = [];
+    if (seen.size === 0 && candidates.length > 0 && !options.force) {
+      log.warn('library root looks empty, rows kept', { root: root.path, rows: candidates.length });
+      problems.push(
+        `root ${root.path} looks empty (not mounted?), kept ${candidates.length} file(s); force scan removes them`,
+      );
+    } else {
+      const removed: number[] = [];
+      let unchecked = 0;
+      for (const row of candidates) {
+        const presence = await presenceOf(row.path);
+        if (presence === 'unknown') unchecked += 1;
+        if (removable(row, presence)) removed.push(row.id);
+      }
+      engine.deleteRows(removed);
+      scan.stats.filesRemoved += removed.length;
+      if (unchecked > 0) problems.push(`${unchecked} file(s) under ${root.path} could not be checked`);
+    }
     await enqueueBacklog(scan, backlog);
-    return report.unreadable.length > 0 ? `${report.unreadable.length} folder(s) under ${root.path} unreadable` : null;
+    if (report.unreadable.length > 0)
+      problems.push(`${report.unreadable.length} folder(s) under ${root.path} unreadable`);
+    return problems.length > 0 ? problems.join('; ') : null;
   };
 
   const run = async (scan: ScanStatus, libraries: Library[], force: boolean, signal: AbortSignal) => {
