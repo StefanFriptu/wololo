@@ -43,3 +43,35 @@ Entry format:
 - Change: `/** Output layout: the source layout when channels are kept, else "5.1" / "stereo" / "mono" for the downmix target. ffmpeg's ac3/eac3 encoders label 6 channels "5.1(side)" and 5 channels "5.0(side)" in the written file. */`
 - Why: jobs/web-ui must not compare the plan's layout string with the output probe literally.
 - Workaround in place: no.
+
+### Document when a compatible track counts as a duplicate
+
+- File: src/contracts/rules-ffmpeg.ts (`PlanConversion` comment, first bullet)
+- Change: `- skip conversion when a compatible track of the same programme exists: same tagged language (sameLanguage, so untagged tracks never match; fillMissingLanguage tags them first), >= target channels, neither title names a role (commentary, description, descriptive, narration, karaoke, isolated, score, trivia, DVS) and durations within max(5 s, 2 %) when both are known (drop/demote the incompatible one); otherwise encode,`
+  and on the default-flag bullet: `- default flag on the original-language track, never on a role-titled track (commentary, description, ...) while another playable track exists,`
+- Why: untagged scene releases and Blu-rays with a compatible commentary or audio-description track lost their main audio in Replace mode.
+- Workaround in place: yes, implemented in `samePresentation` and `chooseDefaultAudio` (src/modules/rules/engine.ts), table-tested in engine.test.ts.
+
+### Keep both: "converted track first" means first audio stream
+
+- File: src/contracts/rules-ffmpeg.ts (`PlanConversion` comment) and src/shared/domain.ts (`ConversionPlan.streams` comment)
+- Change: `- Replace (only converted track) vs KeepBoth (each converted track is written before its original; the default converted track moves to the first audio position, every other audio stream keeps source order),`
+- Why: players that ignore the default flag play the first audio stream; with several languages the default converted track was not first.
+- Workaround in place: yes, `leadAudioWith` in src/modules/rules/engine.ts; verified with real ffmpeg in args.fixtures.test.ts.
+
+### Profiles without a common audio target codec block the plan
+
+- File: src/contracts/rules-ffmpeg.ts (`ResolveEffectiveProfile` and `PlanConversion` comments)
+- Change: on `ResolveEffectiveProfile`: `... first profile's target codec when it is allowed by all, else the first of the profiles' targets then ac3/eac3/aac allowed by all; when none is, the first profile's target is kept and planConversion blocks.`
+  On `PlanConversion`: `- an encode whose target codec is not in profile.audio.allowedCodecs (assigned profiles share no target) -> action "blocked" with reason "assigned profiles share no audio target codec (<codec> is not allowed by all)"; files needing no encode still skip or remux.`
+  Optional (libraries module): reject a profile assignment whose resolved target codec is not in its resolved allowed list with AppError('unprocessable').
+- Why: two valid profiles with disjoint audio lists produced an effective target outside the allowed list, so already-compatible tracks were re-encoded on every scan (generation loss loop).
+- Workaround in place: yes, in `planConversion` (src/modules/rules/engine.ts), tested in engine.test.ts.
+
+### buildAudioConversionArgs output path guards and the temp-file precondition
+
+- File: src/contracts/rules-ffmpeg.ts (`AudioConversionInput.outputPath` / `BuildAudioConversionArgs` comments), src/contracts/jobs.ts (executor note)
+- Change: on `BuildAudioConversionArgs`: `Throws when outputPath equals inputPath (after path normalisation) or starts with "-" (ffmpeg would read it as an option).`
+  On `AudioConversionInput.outputPath`: `Must not exist when ffmpeg starts: the caller lstat()s it and unlinks a leftover file or symlink first. The argv carries -y, and ffmpeg's in-place guard only compares names, so a symlink or hardlink to the input at this path truncates the original.`
+- Why: verified by a reviewer with ffmpeg: `-y ... link.mkv` where link.mkv is a symlink to the input truncates the source. The pure builder cannot lstat; only the executor can guarantee a fresh file. `-y` stays because the frozen contract example includes it; dropping it is the integrator's call.
+- Workaround in place: partly, the builder throws on identical or dash-prefixed paths (src/modules/ffmpeg/args.ts); the lstat/unlink step belongs to the jobs executor.

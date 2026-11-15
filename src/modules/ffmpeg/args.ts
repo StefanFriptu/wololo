@@ -1,3 +1,4 @@
+import { normalize } from 'node:path';
 import type { BuildAudioConversionArgs, SelectBitrate } from '../../contracts/rules-ffmpeg.ts';
 import type { MediaStream, PlannedStream, StreamKind } from '../../shared/domain.ts';
 
@@ -92,6 +93,8 @@ export const buildAudioConversionArgs: BuildAudioConversionArgs = ({
   probe,
   plan,
 }) => {
+  if (outputPath.startsWith('-')) throw new Error(`output path ${outputPath} would be read as an ffmpeg option`);
+  if (normalize(outputPath) === normalize(inputPath)) throw new Error(`output path ${outputPath} is the input file`);
   const sources = new Map(probe.streams.map((stream) => [stream.index, stream]));
   const missing = plan.streams.find((stream) => sources.get(stream.sourceIndex)?.kind !== stream.kind);
   if (missing) {

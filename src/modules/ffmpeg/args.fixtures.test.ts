@@ -357,6 +357,37 @@ describe.skipIf(!ffmpegAvailable())('buildAudioConversionArgs with real ffmpeg',
   );
 
   test(
+    'buildAudioConversionArgs - keep both writes the default converted track ahead of other languages',
+    async () => {
+      const conversion = await convert(
+        {
+          name: 'rules-ffmpeg-keep-both-two-languages',
+          audio: [
+            { codec: 'dts', layout: '5.1', language: 'fre', title: 'Francais' },
+            { codec: 'dts', layout: 'stereo', language: 'eng', title: 'English', default: false },
+          ],
+        },
+        { library: { mode: 'keep_both' }, originalLanguage: 'English' },
+      );
+      await expectSafeOutput(conversion);
+      expect(
+        audioOf(conversion.output).map((stream) => [
+          stream.codec_name,
+          stream.tags.language,
+          stream.channels,
+          stream.disposition.default,
+        ]),
+      ).toEqual([
+        ['ac3', 'eng', 2, 1],
+        ['ac3', 'fre', 6, 0],
+        ['dts', 'fre', 6, 0],
+        ['dts', 'eng', 2, 0],
+      ]);
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
     'buildAudioConversionArgs - untagged audio is tagged with the original language',
     async () => {
       const conversion = await convert(FIXTURES.untaggedLanguage, {

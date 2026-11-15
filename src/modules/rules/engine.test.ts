@@ -322,6 +322,88 @@ test('planConversion - language aliases count as the same language for the compa
   expect(result.dropped[0]?.reason).toBe('compatible_duplicate');
 });
 
+test.each([
+  ['untagged', null, 'untagged', null, 'off', 'convert'],
+  ['untagged', null, 'tagged', 'eng', 'off', 'convert'],
+  ['tagged', 'eng', 'untagged', null, 'off', 'convert'],
+  ['untagged', null, 'untagged', null, 'original', 'remux'],
+  ['untagged', null, 'untagged', null, 'eng', 'remux'],
+] as const)(
+  'planConversion - %s dts plus %s ac3 with fill %s plans %s',
+  (_dtsName, dtsLanguage, _ac3Name, ac3Language, fill, action) => {
+    const result = plan(
+      [
+        videoStream(),
+        audioStream({ codec: 'dts', language: dtsLanguage, default: true }),
+        audioStream({ codec: 'ac3', language: ac3Language, default: false }),
+      ],
+      { library: { fillMissingLanguage: fill }, originalLanguage: 'eng' },
+    );
+    expect(result.action).toBe(action);
+    const kept = action === 'convert' ? [1, 2] : [2];
+    expect(audioOut(result).map((stream) => stream.sourceIndex)).toEqual(kept);
+  },
+);
+
+test.each([
+  ['dts', 'English DTS-HD MA 1.0', 1, 'ac3', 'Commentary by Director', 2, [true, false]],
+  ['truehd', 'Main', 2, 'ac3', 'Audio Description', 2, [true, false]],
+  ['dts', null, 6, 'ac3', 'Descriptive Video Service', 6, [true, false]],
+  ['flac', null, 2, 'aac', 'Isolated Score', 2, [true, false]],
+  ['dts', 'Director commentary', 6, 'ac3', null, 6, [false, true]],
+] as const)(
+  'planConversion - %s %j with %p channels is kept beside a compatible %s %j with %p channels',
+  (codec, title, channels, compatibleCodec, compatibleTitle, compatibleChannels, defaults) => {
+    const result = plan([
+      videoStream(),
+      audioStream({ codec, title, channels, profile: codec === 'dts' ? 'DTS-HD MA' : null, default: true }),
+      audioStream({ codec: compatibleCodec, title: compatibleTitle, channels: compatibleChannels, default: false }),
+    ]);
+    expect(result.action).toBe('convert');
+    expect(result.dropped.map((drop) => drop.reason)).toEqual(['incompatible_replaced']);
+    expect(audioOut(result).map((stream) => [stream.sourceIndex, stream.op])).toEqual([
+      [1, 'encode'],
+      [2, 'copy'],
+    ]);
+    expect(audioOut(result).map((stream) => stream.default)).toEqual([...defaults]);
+  },
+);
+
+test.each([
+  [5400, 5400, 'remux'],
+  [5400, 5450, 'remux'],
+  [5400, 1200, 'convert'],
+  [null, 1200, 'remux'],
+] as const)('planConversion - durations %p and %p of the same-language pair plan %s', (main, other, action) => {
+  const result = plan([
+    audioStream({ codec: 'truehd', durationSec: main }),
+    audioStream({ codec: 'ac3', durationSec: other, default: false }),
+  ]);
+  expect(result.action).toBe(action);
+});
+
+test('planConversion - a commentary never becomes default when the source default is filtered out', () => {
+  const result = plan(
+    [
+      videoStream(),
+      audioStream({ codec: 'ac3', language: 'fre', default: true }),
+      audioStream({ codec: 'ac3', language: 'eng', title: 'Commentary', default: false }),
+      audioStream({ codec: 'ac3', language: 'eng', title: 'English', default: false }),
+    ],
+    { library: { keepLanguages: ['eng'], keepOriginalLanguage: false } },
+  );
+  expect(audioOut(result).map((stream) => [stream.sourceIndex, stream.default])).toEqual([
+    [2, false],
+    [3, true],
+  ]);
+});
+
+test('planConversion - a commentary stays default when it is the only playable audio', () => {
+  const result = plan([audioStream({ codec: 'ac3', title: 'Commentary', default: true })]);
+  expect(result.action).toBe('skip');
+  expect(audioOut(result)[0]?.default).toBe(true);
+});
+
 test('planConversion - keep both demotes the incompatible track behind a compatible same-language track', () => {
   const result = plan(
     [audioStream({ codec: 'truehd', default: true }), audioStream({ codec: 'ac3', default: false })],
@@ -370,6 +452,27 @@ test('planConversion - keep both pairs every converted track with its original',
     [1, 'ac3', false],
     [1, 'eac3', false],
   ]);
+});
+
+test('planConversion - keep both moves the default converted track ahead of other languages', () => {
+  const result = plan(
+    [
+      videoStream(),
+      audioStream({ codec: 'dts', language: 'fre', default: true }),
+      audioStream({ codec: 'dts', language: 'eng', default: false }),
+      subtitleStream(),
+    ],
+    { library: { mode: 'keep_both' }, originalLanguage: 'eng' },
+  );
+  expect(result.streams.map((stream) => [stream.sourceIndex, stream.codec])).toEqual([
+    [0, 'h264'],
+    [2, 'ac3'],
+    [1, 'ac3'],
+    [1, 'dts'],
+    [2, 'dts'],
+    [3, 'subrip'],
+  ]);
+  expect(audioOut(result).map((stream) => stream.default)).toEqual([true, false, false, false]);
 });
 
 test('planConversion - replace keeps the converted track in the original position', () => {
@@ -751,6 +854,42 @@ test('resolveEffectiveProfile - strictest profile is what the engine applies', (
   const profile = resolveEffectiveProfile([deviceProfile(1, samsungTizenDefinition()), deviceProfile(2, stereoOnly)]);
   const result = plan([audioStream({ codec: 'dts', channels: 6 })], { profile });
   expect(onlyEncode(result)).toMatchObject({ channels: 2, bitrateKbps: 448 });
+});
+
+test.each([
+  [[audioStream({ codec: 'ac3', channels: 6 })], 'blocked'],
+  [[audioStream({ codec: 'aac', channels: 2 })], 'blocked'],
+  [[audioStream({ codec: 'dts', channels: 6 })], 'blocked'],
+  [[audioStream({ codec: 'mp3', channels: 2 })], 'skip'],
+  [[audioStream({ codec: 'dts' }), audioStream({ codec: 'mp3', channels: 6, default: false })], 'remux'],
+] as const)('resolveEffectiveProfile - profiles without a common target codec never re-encode %j', (audio, action) => {
+  const profile = resolveEffectiveProfile([
+    deviceProfile(1, withAudio({ allowedCodecs: ['ac3', 'mp3'], targetCodec: 'ac3' })),
+    deviceProfile(2, withAudio({ allowedCodecs: ['aac', 'mp3'], targetCodec: 'aac' })),
+  ]);
+  const result = plan([videoStream(), ...audio], { profile });
+  expect(result.action).toBe(action);
+  expect(result.reasons.includes('assigned profiles share no audio target codec (ac3 is not allowed by all)')).toBe(
+    action === 'blocked',
+  );
+});
+
+test.each([
+  [
+    ['ac3', 'aac'],
+    ['eac3', 'aac', 'ac3'],
+  ],
+  [['ac3'], ['ac3', 'eac3']],
+  [['aac', 'mp3'], ['aac']],
+  [['eac3', 'ac3'], ['eac3']],
+] as const)('resolveEffectiveProfile - %j and %j converted output re-plans to skip', (first, second) => {
+  const profile = resolveEffectiveProfile([
+    deviceProfile(1, withAudio({ allowedCodecs: [...first], targetCodec: first[0] })),
+    deviceProfile(2, withAudio({ allowedCodecs: [...second], targetCodec: second[0] })),
+  ]);
+  const encode = onlyEncode(plan([videoStream(), audioStream({ codec: 'truehd', channels: 8 })], { profile }));
+  const output = [videoStream(), audioStream({ codec: encode?.codec, channels: encode?.channels })];
+  expect(plan(output, { profile }).action).toBe('skip');
 });
 
 test('resolveEffectiveProfile - no profiles is an error', () => {

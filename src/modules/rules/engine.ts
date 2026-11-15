@@ -53,6 +53,13 @@ const CHANNEL_LABELS: Readonly<Record<number, string>> = {
   8: '7.1',
 };
 
+const ROLE_TITLE =
+  /\b(commentar(?:y|ies)|comments?|descri(?:ption|ptive|bed)|narrat\w*|karaoke|isolated|score|trivia|dvs)\b/i;
+
+const DURATION_TOLERANCE_SEC = 5;
+
+const DURATION_TOLERANCE_RATIO = 0.02;
+
 const NAMED_LAYOUT_LABELS: Readonly<Record<string, string>> = { mono: '1.0', stereo: '2.0', quad: '4.0' };
 
 const SOURCE_CODEC_LABELS: Readonly<Record<string, string>> = {
@@ -212,6 +219,22 @@ function keptAudio(tracks: readonly AudioTrack[], library: LibraryRuleSettings, 
   return new Set(tracks.filter((track) => sameGroup(track.language, anchorTrack?.language ?? null)));
 }
 
+function hasRole(title: string | null): boolean {
+  return title !== null && ROLE_TITLE.test(title);
+}
+
+function similarDuration(a: number | null, b: number | null): boolean {
+  if (a === null || b === null) return true;
+  const tolerance = Math.max(DURATION_TOLERANCE_SEC, Math.max(a, b) * DURATION_TOLERANCE_RATIO);
+  return Math.abs(a - b) <= tolerance;
+}
+
+function samePresentation(track: AudioTrack, other: AudioTrack): boolean {
+  if (hasRole(track.stream.title) || hasRole(other.stream.title)) return false;
+  if (!sameLanguage(track.language, other.language)) return false;
+  return similarDuration(track.stream.durationSec, other.stream.durationSec);
+}
+
 function encodeSpec(stream: AudioStream, audio: DeviceProfileDefinition['audio']): AudioEncodeSpec {
   const sourceChannels = Math.max(1, stream.channels);
   const channels = Math.max(1, Math.min(sourceChannels, audio.maxChannels, TARGET_MAX_CHANNELS[audio.targetCodec]));
@@ -238,8 +261,7 @@ function decideAudio(
     if (compatible(track)) return { outcome: 'copy', track };
     const encode = encodeSpec(track.stream, definition.audio);
     const duplicateOf = [...kept].find(
-      (other) =>
-        compatible(other) && sameGroup(other.language, track.language) && other.stream.channels >= encode.channels,
+      (other) => compatible(other) && other.stream.channels >= encode.channels && samePresentation(track, other),
     );
     if (duplicateOf) return { outcome: 'duplicate', track, duplicateOf };
     return { outcome: 'encode', track, encode };
@@ -385,10 +407,18 @@ function chooseDefaultAudio(
   sourceDefaultIndex: number | null,
 ): PlannedStream | undefined {
   const audio = output.filter((stream) => stream.kind === 'audio');
-  const playable = audio.filter((stream) => stream.op === 'encode' || codecAllowed(stream.codec, allowed));
+  const decodable = audio.filter((stream) => stream.op === 'encode' || codecAllowed(stream.codec, allowed));
+  const main = decodable.filter((stream) => !hasRole(stream.title));
+  const playable = main.length > 0 ? main : decodable;
   const originals = playable.filter((stream) => sameLanguage(stream.language, original));
   const pool = originals.length > 0 ? originals : playable;
   return pool.find((stream) => stream.sourceIndex === sourceDefaultIndex) ?? pool[0] ?? audio[0];
+}
+
+function leadAudioWith(streams: readonly PlannedStream[], lead: PlannedStream): PlannedStream[] {
+  const firstAudio = streams.findIndex((stream) => stream.kind === 'audio');
+  const rest = streams.filter((stream) => stream !== lead);
+  return [...rest.slice(0, firstAudio), lead, ...rest.slice(firstAudio)];
 }
 
 function streamBytes(stream: MediaStream, durationSec: number): number {
@@ -447,9 +477,11 @@ export const planConversion: PlanConversion = (input) => {
 
   const sourceDefault = sourceDefaultAudio(probe.streams.filter((stream) => stream.kind === 'audio'));
   const chosen = chooseDefaultAudio(output, definition.audio.allowedCodecs, original, sourceDefault?.index ?? null);
-  const streams = output.map((stream) =>
+  const flagged = output.map((stream) =>
     stream.kind === 'audio' ? { ...stream, default: stream === chosen } : stream,
   );
+  const lead = flagged.find((stream) => stream.default && stream.op === 'encode');
+  const streams = library.mode === 'keep_both' && lead ? leadAudioWith(flagged, lead) : flagged;
   const defaultChanged =
     chosen !== undefined && sourceDefault !== undefined && chosen.sourceIndex !== sourceDefault.index;
   if (defaultChanged) reasons.push(`default audio set to ${chosen.codec} (${chosen.language ?? 'und'})`);
@@ -461,8 +493,12 @@ export const planConversion: PlanConversion = (input) => {
   for (const codec of videoCodecs) reasons.push(`video ${codec} not decoded by profile (video is never re-encoded)`);
 
   const encodes = streams.some((stream) => stream.op === 'encode');
+  const { targetCodec, allowedCodecs } = definition.audio;
+  const noTarget = encodes && !codecAllowed(targetCodec, allowedCodecs);
+  if (noTarget) reasons.push(`assigned profiles share no audio target codec (${targetCodec} is not allowed by all)`);
   const rewrites = drops.some((drop) => drop.reason !== 'unsupported') || retagged.length > 0 || defaultChanged;
-  const action: PlanAction = videoCodecs.length > 0 ? 'blocked' : encodes ? 'convert' : rewrites ? 'remux' : 'skip';
+  const blocked = videoCodecs.length > 0 || noTarget;
+  const action: PlanAction = blocked ? 'blocked' : encodes ? 'convert' : rewrites ? 'remux' : 'skip';
 
   const failingAudio = decisions
     .filter((decision) => decision.outcome === 'encode' || decision.outcome === 'duplicate')

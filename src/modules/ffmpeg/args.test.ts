@@ -261,3 +261,18 @@ test('buildAudioConversionArgs - output path is the last argument', () => {
   expect(args.at(-1)).toBe(OUT);
   expect(args.at(-2)).toBe('matroska');
 });
+
+test.each([
+  ['the input path', IN],
+  ['the input path written differently', '/data/media/movies/./Movie (2020)/Movie (2020).mkv'],
+])('buildAudioConversionArgs - output path equal to %s is an error', (_name, outputPath) => {
+  expect(() => buildAudioConversionArgs(input([audioStream({ codec: 'dts' })], { outputPath }))).toThrow(
+    'is the input file',
+  );
+});
+
+test('buildAudioConversionArgs - output path starting with a dash is an error', () => {
+  expect(() =>
+    buildAudioConversionArgs(input([audioStream({ codec: 'dts' })], { outputPath: '-movie.wololo-tmp.mkv' })),
+  ).toThrow('would be read as an ffmpeg option');
+});
