@@ -77,6 +77,24 @@ describe.skipIf(!ffmpegAvailable())('createVerifier on real files', () => {
     expect(result.checks.map((check) => check.name)).toEqual(['output_exists', 'duration', 'stream_count']);
   });
 
+  test('verify - streamhash output that yields no hashes fails instead of passing as "no video"', async () => {
+    const blind = createVerifier({
+      run: async (options) => {
+        const result = await runProcess({ ...options, lowPriority: false });
+        return options.args.includes('streamhash') ? { ...result, stdout: 'unexpected format\n' } : result;
+      },
+      ffmpeg: 'ffmpeg',
+      ffprobe: 'ffprobe',
+    });
+    const result = await blind(request());
+    expect(result.passed).toBe(false);
+    expect(result.checks.find((check) => check.name === 'video_checksum')).toEqual({
+      name: 'video_checksum',
+      passed: false,
+      detail: '0 video hashes for 1 video streams in the output',
+    });
+  });
+
   test('verify - a missing output fails only output_exists', async () => {
     const result = await verify(request({ outputPath: join(dir, 'missing.mkv') }));
     expect(result).toEqual({

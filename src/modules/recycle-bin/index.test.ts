@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -14,10 +15,11 @@ import { createTestContext, type TestContext } from '../../../test/helpers/conte
 import { insertJob, insertLibrary, insertMediaFile } from '../../../test/helpers/seed.ts';
 import { stubService } from '../../../test/helpers/stubs.ts';
 import type { FileChangedEvent, NotifierService } from '../../contracts/integrations.ts';
-import type { LibraryService } from '../../contracts/probe-scan.ts';
+import type { LibraryService, MediaService } from '../../contracts/probe-scan.ts';
 import { AppError, type ErrorCode } from '../../core/errors.ts';
 import { getJobRow } from '../jobs/jobQueries.ts';
 import { type MediaRecorder, mediaDetail, recordingMediaService } from '../jobs/test-support.ts';
+import { createRecycleBinService } from './index.ts';
 import { getRecycleRow } from './recycleBinQueries.ts';
 
 let t: TestContext | null = null;
@@ -32,7 +34,7 @@ interface Setup {
   source: string;
   mediaFileId: number;
   jobId: number;
-  recorder: MediaRecorder;
+  recorder: MediaRecorder & { service: MediaService };
   notified: FileChangedEvent[];
 }
 
@@ -64,7 +66,15 @@ function setup(options: { rootKnown?: boolean } = {}): Setup {
   const media = insertMediaFile(context.ctx.db, library, { path: source });
   recorder.files.set(media.id, mediaDetail(media.id, source));
   const job = insertJob(context.ctx.db, { sourcePath: source, mediaFileId: media.id, state: 'running' });
-  return { t: context, root: holder.root, source, mediaFileId: media.id, jobId: job.id, recorder, notified };
+  return {
+    t: context,
+    root: holder.root,
+    source,
+    mediaFileId: media.id,
+    jobId: job.id,
+    recorder: { ...recorder, service },
+    notified,
+  };
 }
 
 async function expectAppError(promise: Promise<unknown>, code: ErrorCode) {
@@ -174,6 +184,98 @@ test('restore - a converted file at a new path (mp4 -> mkv) is binned too', asyn
   expect(existsSync(s.source)).toBe(false);
   expect(readdirSync(dirname(s.source))).toEqual(['Old.mp4']);
 });
+
+test('restore - an mp4 converted to mkv moves the media row back to the mp4 path and ignores it', async () => {
+  const s = setup();
+  t = s.t;
+  const mp4 = join(dirname(s.source), 'Movie (2020).mp4');
+  renameSync(s.source, mp4);
+  s.recorder.files.set(s.mediaFileId, mediaDetail(s.mediaFileId, mp4));
+  const { entry } = await t.ctx.services.recycleBin.recycleForReplace(mp4, {
+    jobId: s.jobId,
+    mediaFileId: s.mediaFileId,
+  });
+  unlinkSync(mp4);
+  writeFileSync(s.source, 'converted');
+  await s.recorder.service.recordJobResult(s.mediaFileId, {
+    status: 'compatible',
+    reason: null,
+    lastJobId: s.jobId,
+    path: s.source,
+  });
+
+  await t.ctx.services.recycleBin.restore(entry.id);
+
+  expect(readdirSync(dirname(s.source))).toEqual(['Movie (2020).mp4']);
+  expect(s.recorder.results.at(-1)).toEqual({
+    id: s.mediaFileId,
+    update: { status: 'ignored', reason: 'restored from recycle bin', lastJobId: s.jobId, path: mp4 },
+  });
+  expect(s.recorder.files.get(s.mediaFileId)).toMatchObject({ path: mp4, status: 'ignored' });
+  expect(s.recorder.ignored).toEqual([{ id: s.mediaFileId, ignored: true, reason: 'restored from recycle bin' }]);
+});
+
+test('recycleForReplace - falls back to moving the original when the filesystem refuses hard links', async () => {
+  const s = setup();
+  t = s.t;
+  const service = createRecycleBinService(t.ctx, {
+    link: () => {
+      throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+    },
+  });
+
+  const { entry, mode } = await service.recycleForReplace(s.source, { jobId: s.jobId, mediaFileId: s.mediaFileId });
+
+  expect(mode).toBe('move');
+  expect(existsSync(s.source)).toBe(false);
+  expect(readFileSync(entry.recyclePath, 'utf8')).toBe('original');
+  expect(getJobRow(t.ctx.db, s.jobId)?.recycleBinEntryId).toBe(entry.id);
+});
+
+test('recycleForReplace - other link errors are not mistaken for missing hard-link support', async () => {
+  const s = setup();
+  t = s.t;
+  const service = createRecycleBinService(t.ctx, {
+    link: () => {
+      throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+    },
+  });
+
+  await expect(service.recycleForReplace(s.source, { jobId: s.jobId, mediaFileId: null })).rejects.toThrow('disk full');
+  expect(readFileSync(s.source, 'utf8')).toBe('original');
+});
+
+test('recycleForReplace - expiry follows the injected clock', async () => {
+  const s = setup();
+  t = s.t;
+  const service = createRecycleBinService(t.ctx, { now: () => new Date('2026-11-15T10:30:00.000Z') });
+
+  const { entry } = await service.recycleForReplace(s.source, { jobId: s.jobId, mediaFileId: null });
+
+  expect(entry.expiresAt).toBe('2026-11-22T10:30:00.000Z');
+  expect(entry.recyclePath).toContain('/20261115T103000Z/');
+});
+
+test.skipIf(process.getuid?.() === 0)(
+  'recycleForReplace - a bin path that cannot be written fails before touching the original',
+  async () => {
+    const s = setup();
+    t = s.t;
+    const locked = join(t.dir, 'locked');
+    mkdirSync(locked);
+    chmodSync(locked, 0o500);
+    t.ctx.settings.update({ recycleBin: { path: join(locked, 'bin') } });
+    try {
+      await expectAppError(
+        t.ctx.services.recycleBin.recycleForReplace(s.source, { jobId: s.jobId, mediaFileId: null }),
+        'precondition_failed',
+      );
+      expect(readFileSync(s.source, 'utf8')).toBe('original');
+    } finally {
+      chmodSync(locked, 0o700);
+    }
+  },
+);
 
 test('restore - fails cleanly when the recycled file is gone', async () => {
   const s = setup();

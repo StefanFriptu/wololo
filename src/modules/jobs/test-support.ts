@@ -213,7 +213,7 @@ export function mediaDetail(id: number, path: string, overrides: Partial<MediaFi
   };
 }
 
-/** A media service that serves the given rows (list honours status and paging) and records every write. */
+/** A media service that serves the given rows (list honours status and paging), applies and records every write. */
 export function recordingMediaService(files: MediaFileDetail[]): { service: MediaService; recorder: MediaRecorder } {
   const recorder: MediaRecorder = {
     files: new Map(files.map((file) => [file.id, file])),
@@ -239,15 +239,28 @@ export function recordingMediaService(files: MediaFileDetail[]): { service: Medi
     },
     setStatus: async (id, status, reason) => {
       recorder.statuses.push({ id, status, reason });
+      const file = recorder.files.get(id);
+      if (file) recorder.files.set(id, { ...file, status, statusReason: reason });
     },
     recordJobResult: async (id, update) => {
       recorder.results.push({ id, update });
+      const file = recorder.files.get(id);
+      if (file)
+        recorder.files.set(id, {
+          ...file,
+          status: update.status,
+          statusReason: update.reason,
+          lastJobId: update.lastJobId,
+          path: update.path ?? file.path,
+        });
     },
     setIgnored: async (id, ignored, reason) => {
       recorder.ignored.push({ id, ignored, reason });
       const file = recorder.files.get(id);
       if (!file) throw notFound(`media file ${id}`);
-      return file;
+      const updated = { ...file, status: ignored ? ('ignored' as const) : ('needs_work' as const) };
+      recorder.files.set(id, { ...updated, statusReason: reason ?? null });
+      return updated;
     },
   });
   return { service, recorder };

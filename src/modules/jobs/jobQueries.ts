@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, inArray, isNotNull, ne, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNotNull, lt, ne, notInArray, type SQL } from 'drizzle-orm';
 import type { Db } from '../../db/client.ts';
 import { type JobHistoryRow, type JobRow, jobHistory, jobs, type NewJobRow } from '../../db/schema.ts';
 import type { HistoryEventType, JobState, JobType } from '../../shared/domain.ts';
@@ -109,18 +109,39 @@ export function existingJobIds(db: Db, ids: number[]): Set<number> {
   return new Set(rows.map((row) => row.id));
 }
 
+export function finishedJobIdsBeforeQuery(db: Db, options: { ids: number[]; beforeIso: string }) {
+  return db
+    .select({ id: jobs.id })
+    .from(jobs)
+    .where(
+      and(
+        inArray(jobs.id, options.ids),
+        notInArray(jobs.state, ACTIVE_STATES),
+        isNotNull(jobs.finishedAt),
+        lt(jobs.finishedAt, options.beforeIso),
+      ),
+    );
+}
+
 export function finishedJobIdsBefore(db: Db, ids: number[], beforeIso: string): Set<number> {
   if (ids.length === 0) return new Set();
-  const rows = db
-    .select({ id: jobs.id, state: jobs.state, finishedAt: jobs.finishedAt })
-    .from(jobs)
-    .where(inArray(jobs.id, ids))
-    .all();
   return new Set(
-    rows
-      .filter((row) => !ACTIVE_STATES.includes(row.state) && row.finishedAt !== null && row.finishedAt < beforeIso)
+    finishedJobIdsBeforeQuery(db, { ids, beforeIso })
+      .all()
       .map((row) => row.id),
   );
+}
+
+export function tempPathReferencedQuery(db: Db, path: string) {
+  return db
+    .select({ id: jobs.id })
+    .from(jobs)
+    .where(inArray(jobs.tempPath, [path, `${path}/`]))
+    .limit(1);
+}
+
+export function isTempPathReferenced(db: Db, path: string): boolean {
+  return tempPathReferencedQuery(db, path).get() !== undefined;
 }
 
 export function listJobRows(

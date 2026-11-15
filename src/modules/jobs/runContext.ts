@@ -4,7 +4,7 @@ import { AppError } from '../../core/errors.ts';
 import { runProcess } from '../../core/process.ts';
 import type { JobRow } from '../../db/schema.ts';
 import type { JobStep } from '../../shared/domain.ts';
-import { availableBytes, formatBytes, requiredBytes } from './freeSpace.ts';
+import { availableBytes, formatBytes, freeSpaceShortage, requiredBytes } from './freeSpace.ts';
 import { updateJobRow } from './jobQueries.ts';
 import { type LiveProgress, toJobDetail } from './mappers.ts';
 import { isTempPath } from './paths.ts';
@@ -98,8 +98,7 @@ export function createRunContext(deps: RunContextDeps): JobRunContext {
       }
       jobLog.line(`free space in ${dir}: ${formatBytes(available)}, needed ${formatBytes(needed)}`);
       if (available < needed)
-        throw new AppError(
-          'precondition_failed',
+        throw freeSpaceShortage(
           `not enough free space in ${dir}: ${formatBytes(available)} free, ${formatBytes(needed)} needed`,
         );
     },

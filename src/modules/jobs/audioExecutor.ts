@@ -6,7 +6,7 @@ import { AppError, errorMessage } from '../../core/errors.ts';
 import type { Logger } from '../../core/logger.ts';
 import type { MediaFileDetail } from '../../shared/api-types.ts';
 import type { ConversionPlan, MediaStream, ProbeResult } from '../../shared/domain.ts';
-import { outputPathFor, tempPathFor } from './paths.ts';
+import { exceedsNameMax, isTempPath, outputPathFor, tempPathFor } from './paths.ts';
 import { NODE_REPLACE_FS, type ReplaceFs, replaceOriginal } from './replace.ts';
 import { failedChecksMessage } from './verification.ts';
 
@@ -14,6 +14,8 @@ export interface AudioExecutorDeps {
   services: Pick<Services, 'probe' | 'media' | 'libraries' | 'rules' | 'ffmpeg' | 'recycleBin' | 'notifier'>;
   ffmpegPath: () => string;
   recycleBinEnabled: () => boolean;
+  /** Fails when the recycle bin for this path cannot be created or sits on another filesystem. */
+  checkRecycleBin: (sourcePath: string) => Promise<void>;
   /** Stores the plan and source streams the executor actually used (job detail, history "retagged"). */
   recordPlan: (jobId: number, plan: ConversionPlan, before: MediaStream[]) => void;
   log: Logger;
@@ -113,11 +115,6 @@ async function afterReplace(
   return { after };
 }
 
-/**
- * Executor for "audio" jobs: fresh probe -> plan -> free space -> temp write -> verify -> link-then-rename replace ->
- * record result -> notify. Nothing touches the original before verification passed; after the swap no step may fail
- * the job, and the abort signal is no longer honoured.
- */
 export function createAudioExecutor(deps: AudioExecutorDeps): JobExecutor {
   const fs = deps.fs ?? NODE_REPLACE_FS;
   return async (ctx) => {
@@ -125,6 +122,8 @@ export function createAudioExecutor(deps: AudioExecutorDeps): JobExecutor {
     const { job } = ctx;
     if (job.mediaFileId === null) throw new AppError('unprocessable', 'the media file of this job was removed');
     const sourcePath = job.sourcePath;
+    if (isTempPath(sourcePath))
+      throw new AppError('unprocessable', `refusing to convert a Wololo temp file: ${sourcePath}`);
     if (!existsSync(sourcePath)) throw new AppError('not_found', `source file is missing: ${sourcePath}`);
 
     ctx.setStep('preparing', 'probing source and planning');
@@ -157,9 +156,12 @@ export function createAudioExecutor(deps: AudioExecutorDeps): JobExecutor {
 
     const tempPath = tempPathFor(sourcePath);
     const outputPath = outputPathFor(sourcePath);
+    if (exceedsNameMax(outputPath))
+      throw new AppError('unprocessable', `output file name is longer than 255 bytes: ${outputPath}`);
     if (outputPath !== sourcePath && existsSync(outputPath))
       throw new AppError('conflict', `output path already exists: ${outputPath}`);
     await ctx.ensureFreeSpace(dirname(sourcePath), plan.estimatedOutputBytes ?? probe.sizeBytes);
+    if (deps.recycleBinEnabled()) await deps.checkRecycleBin(sourcePath);
 
     await ctx.setTempPath(tempPath);
     if (existsSync(tempPath)) unlinkSync(tempPath);

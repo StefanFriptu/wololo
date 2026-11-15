@@ -8,6 +8,7 @@ const replacing = (overrides: Partial<RecoveryInput>): RecoveryInput => ({
   sourceExists: false,
   outputExists: false,
   samePath: true,
+  tempIsOutput: false,
   hasBinEntry: false,
   ...overrides,
 });
@@ -37,17 +38,41 @@ test.each<[string, Partial<RecoveryInput>, RecoveryAction]>([
   ],
   ['mp4 source: output written, source gone', { samePath: false, outputExists: true, hasBinEntry: true }, 'complete'],
   ['mp4 source: temp vanished before rename', { samePath: false, sourceExists: true }, 'keep_original'],
+  [
+    'mp4 source: temp linked to the output, not yet unlinked',
+    { samePath: false, tempExists: true, sourceExists: true, outputExists: true, tempIsOutput: true },
+    'complete_drop_temp',
+  ],
+  [
+    'mp4 source moved to bin, a foreign file sits at the output path',
+    { samePath: false, tempExists: true, outputExists: true, hasBinEntry: true },
+    'restore_from_bin',
+  ],
+  [
+    'mp4 source gone, a foreign file at the output path, no bin entry',
+    { samePath: false, tempExists: true, outputExists: true },
+    'fail_source_missing',
+  ],
 ])('decideRecovery - replacing, %s', (_name, input, expected) => {
   expect(decideRecovery(replacing(input))).toBe(expected);
 });
 
-test.each(['waiting', 'preparing', 'encoding', 'muxing', 'verifying', 'importing', 'notifying', 'done'] as const)(
+test.each(['waiting', 'preparing', 'encoding', 'muxing', 'verifying', 'importing', 'done'] as const)(
   'decideRecovery - audio step %s re-queues',
   (step) => {
     expect(decideRecovery(replacing({ step, tempExists: true, sourceExists: true }))).toBe('requeue');
   },
 );
 
+test.each<[string, Partial<RecoveryInput>, RecoveryAction]>([
+  ['mkv replaced in place', { sourceExists: true, outputExists: true }, 'complete'],
+  ['mp4 source already removed', { samePath: false, outputExists: true }, 'complete'],
+  ['output gone since the swap', { samePath: false }, 'requeue'],
+])('decideRecovery - notifying, %s', (_name, input, expected) => {
+  expect(decideRecovery(replacing({ step: 'notifying', ...input }))).toBe(expected);
+});
+
 test('decideRecovery - bdmv jobs always re-queue', () => {
   expect(decideRecovery(replacing({ type: 'bdmv', tempExists: true }))).toBe('requeue');
+  expect(decideRecovery(replacing({ type: 'bdmv', step: 'notifying', outputExists: true }))).toBe('requeue');
 });

@@ -37,7 +37,6 @@ function compact(data: HistoryData): HistoryData {
 
 export type JobLifecycle = ReturnType<typeof createJobLifecycle>;
 
-/** Every terminal or re-queue transition of a job row: DB state, history entry, media status and events, in that order. */
 export function createJobLifecycle(ctx: AppContext, options: { log: Logger; onChange: () => void }) {
   const { db, events } = ctx;
   const { log } = options;
@@ -100,7 +99,7 @@ export function createJobLifecycle(ctx: AppContext, options: { log: Logger; onCh
           bytesAfter: outcome.bytesAfter ?? undefined,
           outputPath: outcome.outputPath ?? undefined,
           recycleBinEntryId: updated.recycleBinEntryId ?? undefined,
-          retagged: retaggedStreams(updated.plan),
+          retagged: retaggedStreams(updated.plan ?? updated.bdmvPlan?.audioPlan ?? null),
         }),
       });
       events.emit('job.finished', { job: toJobSummary(updated), state: 'completed' });

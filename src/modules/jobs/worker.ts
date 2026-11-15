@@ -1,10 +1,12 @@
-import { statSync } from 'node:fs';
+import { existsSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { AppContext } from '../../app/context.ts';
 import type { JobExecutor } from '../../contracts/jobs.ts';
 import { errorMessage } from '../../core/errors.ts';
 import type { Logger } from '../../core/logger.ts';
 import type { JobRow } from '../../db/schema.ts';
 import type { JobType, QueuePauseReason, QueueState } from '../../shared/domain.ts';
+import { isFreeSpaceShortage } from './freeSpace.ts';
 import { createJobLog } from './jobLog.ts';
 import { claimNextQueued, countJobsInState, getJobRow, updateJobRow } from './jobQueries.ts';
 import type { JobLifecycle } from './lifecycle.ts';
@@ -16,9 +18,12 @@ import { isWithinProcessingWindow } from './window.ts';
 
 const TICK_INTERVAL_MS = 15_000;
 const PLEX_POLL_INTERVAL_MS = 30_000;
+const FREE_SPACE_RETRY_MS = 15 * 60_000;
 const PAUSE_REASON_ORDER: readonly QueuePauseReason[] = ['user', 'window', 'plex_streaming', 'shutdown'];
+const SUSPENDING_REASONS: readonly QueuePauseReason[] = ['window', 'plex_streaming'];
+const USER_PAUSE_FILE = 'queue-paused';
 
-type AbortReason = 'cancel' | 'shutdown';
+type AbortReason = 'cancel' | 'shutdown' | 'paused';
 
 export interface WorkerDeps {
   ctx: AppContext;
@@ -39,20 +44,17 @@ function fileSize(path: string): number | null {
   }
 }
 
-/**
- * The in-process queue runner. A tick re-evaluates the gates (processing enabled, user pause, processing window, Plex
- * playback) and starts queued jobs up to the configured concurrency. Gates only hold back new jobs; a running job
- * finishes at low priority. Ticks run on a timer, on settings changes and whenever a job is queued or finishes.
- */
 export function createWorker(deps: WorkerDeps) {
   const { ctx, log, lifecycle } = deps;
   const now = deps.now ?? (() => new Date());
-  const manualReasons = new Set<QueuePauseReason>();
+  const userPauseFile = join(ctx.config.get().configDir, USER_PAUSE_FILE);
+  const manualReasons = new Set<QueuePauseReason>(existsSync(userPauseFile) ? ['user'] : []);
   const active = new Map<number, { controller: AbortController; done: Promise<void> }>();
   const live = new Map<number, LiveProgress>();
   let windowClosed = false;
   let plexStreaming = false;
   let plexCheckedAt = Number.NEGATIVE_INFINITY;
+  let freeSpaceRetryAt = Number.NEGATIVE_INFINITY;
   let started = false;
   let timer: ReturnType<typeof setInterval> | null = null;
   let unsubscribe: (() => void) | null = null;
@@ -100,7 +102,7 @@ export function createWorker(deps: WorkerDeps) {
   const refreshGates = async () => {
     windowClosed = !isWithinProcessingWindow(ctx.settings.section('processing').window, now());
     const due = Date.now() - plexCheckedAt >= PLEX_POLL_INTERVAL_MS;
-    if (!due || countJobsInState(ctx.db, 'queued') === 0) return;
+    if (!due || (active.size === 0 && countJobsInState(ctx.db, 'queued') === 0)) return;
     plexCheckedAt = Date.now();
     if (!(await plexWantsPause())) {
       plexStreaming = false;
@@ -114,6 +116,30 @@ export function createWorker(deps: WorkerDeps) {
     }
   };
 
+  const persistUserPause = (paused: boolean) => {
+    try {
+      if (paused) writeFileSync(userPauseFile, `${now().toISOString()}\n`);
+      else rmSync(userPauseFile, { force: true });
+    } catch (error) {
+      log.warn('cannot persist the queue pause', { path: userPauseFile, error: errorMessage(error) });
+    }
+  };
+
+  const suspendRunning = () => {
+    const reasons = pauseReasons().filter((reason) => SUSPENDING_REASONS.includes(reason));
+    if (reasons.length === 0) return;
+    for (const [jobId, entry] of active) {
+      if (entry.controller.signal.aborted) continue;
+      log.info('pausing a running job, it is re-queued', { jobId, reasons });
+      entry.controller.abort('paused' satisfies AbortReason);
+    }
+  };
+
+  const requeueWithoutAttempt = async (row: JobRow, message: string) => {
+    const restored = updateJobRow(ctx.db, row.id, { attempts: Math.max(0, row.attempts - 1) }) ?? row;
+    await lifecycle.requeued(restored, restored.trigger, message);
+  };
+
   const handleFailure = async (
     jobId: number,
     error: unknown,
@@ -125,7 +151,7 @@ export function createWorker(deps: WorkerDeps) {
     const message = errorMessage(error);
     let resolution: ReturnType<typeof resolveInterruptedJob> | null = null;
     try {
-      resolution = resolveInterruptedJob(ctx.db, row, (line) => jobLog.line(line));
+      resolution = resolveInterruptedJob(ctx.db, row, { notes: (line) => jobLog.line(line), now: now() });
     } catch (cleanupError) {
       jobLog.line(`cleanup failed: ${errorMessage(cleanupError)}`);
       log.error('cleanup after a failed job failed', { jobId, path: row.tempPath, error: errorMessage(cleanupError) });
@@ -139,13 +165,25 @@ export function createWorker(deps: WorkerDeps) {
     const reason = signal.aborted ? (signal.reason as AbortReason) : null;
     if (reason === 'shutdown') {
       jobLog.section('interrupted by shutdown, re-queued');
-      const restored = updateJobRow(ctx.db, jobId, { attempts: Math.max(0, settled.attempts - 1) }) ?? settled;
-      await lifecycle.requeued(restored, restored.trigger, 'interrupted by shutdown');
+      await requeueWithoutAttempt(settled, 'interrupted by shutdown');
+      return;
+    }
+    if (reason === 'paused') {
+      const why = pauseReasons().join(', ') || 'queue paused';
+      jobLog.section(`paused (${why}), re-queued`);
+      await requeueWithoutAttempt(settled, `paused while running (${why})`);
       return;
     }
     if (reason === 'cancel') {
       jobLog.section('cancelled');
       await lifecycle.cancelled(settled);
+      return;
+    }
+    if (!signal.aborted && isFreeSpaceShortage(error)) {
+      freeSpaceRetryAt = now().getTime() + FREE_SPACE_RETRY_MS;
+      jobLog.section(`waiting for free space: ${message}`);
+      log.warn('not enough free space, holding the queue', { jobId, path: row.sourcePath, error: message });
+      await requeueWithoutAttempt(settled, `waiting for free space: ${message}`);
       return;
     }
     const failure = resolution?.kind === 'source_missing' ? `source missing after an error: ${message}` : message;
@@ -206,6 +244,7 @@ export function createWorker(deps: WorkerDeps) {
     while (started && pauseReasons().length === 0) {
       const processing = ctx.settings.section('processing');
       if (!processing.enabled || active.size >= processing.concurrency) return;
+      if (now().getTime() < freeSpaceRetryAt) return;
       const row = claimNextQueued(ctx.db);
       if (!row) return;
       launch(row);
@@ -226,6 +265,7 @@ export function createWorker(deps: WorkerDeps) {
       do {
         tickAgain = false;
         await refreshGates();
+        suspendRunning();
         startAvailable();
         emitState();
       } while (tickAgain && started);
@@ -244,12 +284,14 @@ export function createWorker(deps: WorkerDeps) {
 
     pause(reason: QueuePauseReason): QueueState {
       manualReasons.add(reason);
+      if (reason === 'user') persistUserPause(true);
       emitState();
       return state();
     },
 
     resume(reason: QueuePauseReason): QueueState {
       manualReasons.delete(reason);
+      if (reason === 'user') persistUserPause(false);
       if (reason === 'plex_streaming') {
         plexStreaming = false;
         plexCheckedAt = Number.NEGATIVE_INFINITY;
@@ -275,6 +317,7 @@ export function createWorker(deps: WorkerDeps) {
       timer.unref?.();
       unsubscribe = ctx.events.on('settings.changed', () => {
         plexCheckedAt = Number.NEGATIVE_INFINITY;
+        freeSpaceRetryAt = Number.NEGATIVE_INFINITY;
         void tick();
       });
       await tick();

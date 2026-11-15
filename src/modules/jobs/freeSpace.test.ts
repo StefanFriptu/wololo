@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { tmpdir } from 'node:os';
-import { availableBytes, formatBytes, requiredBytes } from './freeSpace.ts';
+import { AppError } from '../../core/errors.ts';
+import { availableBytes, formatBytes, freeSpaceShortage, isFreeSpaceShortage, requiredBytes } from './freeSpace.ts';
 
 test.each([
   [1000, 5, 1050],
@@ -28,4 +29,10 @@ test('availableBytes - reports a positive number for an existing directory', () 
 
 test('availableBytes - null for a missing directory', () => {
   expect(availableBytes('/definitely/not/here/wololo')).toBeNull();
+});
+
+test('isFreeSpaceShortage - only the error freeSpaceShortage builds', () => {
+  expect(isFreeSpaceShortage(freeSpaceShortage('not enough free space'))).toBe(true);
+  expect(isFreeSpaceShortage(new AppError('precondition_failed', 'recycle bin on another filesystem'))).toBe(false);
+  expect(isFreeSpaceShortage(new Error('not enough free space'))).toBe(false);
 });

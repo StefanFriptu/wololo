@@ -8,6 +8,8 @@ const EPSILON = 1e-9;
 export interface MediaFacts {
   durationSec: number | null;
   streams: { index: number; kind: StreamKind; language: string | null }[];
+  /** Video streams that are not attached pictures: what `-map 0:V` hashes. */
+  videoStreamCount: number;
   chapterCount: number;
 }
 
@@ -27,6 +29,7 @@ const ffprobeSchema = z.object({
         index: z.number().int(),
         codec_type: z.string().optional(),
         tags: z.record(z.string(), z.string()).optional(),
+        disposition: z.record(z.string(), z.number()).optional(),
       }),
     )
     .default([]),
@@ -51,6 +54,9 @@ export function parseMediaFacts(raw: unknown): MediaFacts {
       kind: STREAM_KINDS[stream.codec_type ?? ''] ?? 'data',
       language: languageTag(stream.tags),
     })),
+    videoStreamCount: parsed.streams.filter(
+      (stream) => stream.codec_type === 'video' && stream.disposition?.attached_pic !== 1,
+    ).length,
     chapterCount: parsed.chapters.length,
   };
 }
@@ -86,7 +92,17 @@ export function checkStreamCount(expected: number, actual: number): Verification
   return { name: 'stream_count', passed: actual === expected, detail: `${actual} streams, expected ${expected}` };
 }
 
-export function checkVideoHashes(source: readonly string[], output: readonly string[]): VerificationCheck {
+export function checkVideoHashes(
+  source: readonly string[],
+  output: readonly string[],
+  outputVideoStreams: number,
+): VerificationCheck {
+  if (output.length !== outputVideoStreams)
+    return {
+      name: 'video_checksum',
+      passed: false,
+      detail: `${output.length} video hashes for ${outputVideoStreams} video streams in the output`,
+    };
   if (source.length === 0 && output.length === 0)
     return { name: 'video_checksum', passed: true, detail: 'no video stream' };
   const passed = source.length === output.length && source.every((hash, i) => hash === output[i]);

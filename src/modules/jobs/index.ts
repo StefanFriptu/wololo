@@ -6,6 +6,7 @@ import { AppError, errorMessage, notFound } from '../../core/errors.ts';
 import type { JobRow } from '../../db/schema.ts';
 import type { EnqueueRequest, EnqueueResponse, MediaFileSummary, PageQuery } from '../../shared/api-types.ts';
 import { JOB_STATES, type JobState, type JobSummary } from '../../shared/domain.ts';
+import { checkRecycleBinLocation } from '../recycle-bin/checkRecycleBinLocation.ts';
 import { createAudioExecutor } from './audioExecutor.ts';
 import {
   deleteJobRow,
@@ -15,6 +16,7 @@ import {
   getJobRow,
   idleJobsWithTempPath,
   insertJobRow,
+  isTempPathReferenced,
   jobsInState,
   listHistoryRows,
   listJobRows,
@@ -26,6 +28,7 @@ import { createJobLifecycle } from './lifecycle.ts';
 import { toHistoryEntry, toJobDetail, toJobSummary } from './mappers.ts';
 import { jobTitleFor } from './paths.ts';
 import { deleteTempPath, resolveInterruptedJob } from './recover.ts';
+import { sweepOrphanedTempPaths } from './sweepOrphanedTempPaths.ts';
 import { createWorker } from './worker.ts';
 
 const ENQUEUE_PAGE_SIZE = 500;
@@ -59,6 +62,16 @@ export function createJobsService(ctx: AppContext): JobsService {
     services: ctx.services,
     ffmpegPath: () => ctx.config.get().tools.ffmpeg,
     recycleBinEnabled: () => ctx.settings.section('recycleBin').enabled,
+    checkRecycleBin: async (path) => {
+      await checkRecycleBinLocation(
+        {
+          configuredPath: ctx.settings.section('recycleBin').path,
+          findRootForPath: (target) => ctx.services.libraries.findRootForPath(target),
+          warn: (message, context) => log.warn(message, context),
+        },
+        path,
+      );
+    },
     recordPlan: (jobId, plan, before) => {
       updateJobRow(db, jobId, {
         plan,
@@ -159,6 +172,7 @@ export function createJobsService(ctx: AppContext): JobsService {
       return response;
     }
     const filter = request.filter ?? {};
+    const matches = new Map<number, MediaFileSummary>();
     for (let page = 1; ; page++) {
       const result = await ctx.services.media.list({
         libraryId: filter.libraryId,
@@ -170,18 +184,52 @@ export function createJobsService(ctx: AppContext): JobsService {
         pageSize: ENQUEUE_PAGE_SIZE,
         sortDir: 'asc',
       });
-      for (const item of result.items) await consider(item, null);
+      for (const item of result.items) matches.set(item.id, item);
       if (result.items.length === 0 || page * ENQUEUE_PAGE_SIZE >= result.total) break;
     }
+    for (const item of matches.values()) await consider(item, null);
     return response;
   };
+
+  const deleteIdleTempPaths = (): number => {
+    let deleted = 0;
+    for (const row of idleJobsWithTempPath(db)) {
+      try {
+        if (deleteTempPath(row.tempPath)) deleted += 1;
+        updateJobRow(db, row.id, { tempPath: null });
+      } catch (error) {
+        log.warn('cannot delete temp path', { jobId: row.id, path: row.tempPath, error: errorMessage(error) });
+      }
+    }
+    return deleted;
+  };
+
+  const libraryRoots = async (): Promise<string[]> => {
+    try {
+      return (await ctx.services.libraries.list()).flatMap((library) => library.roots.map((root) => root.path));
+    } catch (error) {
+      log.warn('cannot list library roots for the temp file sweep', { error: errorMessage(error) });
+      return [];
+    }
+  };
+
+  const sweepOrphans = async (recursive: boolean): Promise<number> =>
+    sweepOrphanedTempPaths({
+      roots: await libraryRoots(),
+      recursive,
+      isReferenced: (path) => isTempPathReferenced(db, path),
+      onError: (path, error) => log.warn('cannot sweep temp path', { path, error: errorMessage(error) }),
+    });
 
   const recover: JobsService['recover'] = async () => {
     const counts = { requeued: 0, completed: 0, tempFilesDeleted: 0 };
     const { maxAttempts } = ctx.settings.section('processing');
     for (const row of jobsInState(db, 'running')) {
       try {
-        const resolution = resolveInterruptedJob(db, row, (line) => log.info(line, { jobId: row.id }));
+        const resolution = resolveInterruptedJob(db, row, {
+          notes: (line) => log.info(line, { jobId: row.id }),
+          now: new Date(),
+        });
         if (resolution.kind === 'completed') {
           await lifecycle.completedAfterInterruption(row, resolution.outputPath, 'completed during crash recovery');
           counts.completed += 1;
@@ -204,23 +252,13 @@ export function createJobsService(ctx: AppContext): JobsService {
         await lifecycle.failed(row, `crash recovery failed: ${errorMessage(error)}`);
       }
     }
-    for (const row of idleJobsWithTempPath(db)) {
-      if (deleteTempPath(row.tempPath)) counts.tempFilesDeleted += 1;
-      updateJobRow(db, row.id, { tempPath: null });
-    }
+    counts.tempFilesDeleted += deleteIdleTempPaths();
+    counts.tempFilesDeleted += await sweepOrphans(false);
     return counts;
   };
 
   const housekeeping = async (): Promise<string> => {
-    let temps = 0;
-    for (const row of idleJobsWithTempPath(db)) {
-      try {
-        if (deleteTempPath(row.tempPath)) temps += 1;
-        updateJobRow(db, row.id, { tempPath: null });
-      } catch (error) {
-        log.warn('cannot delete temp path', { jobId: row.id, path: row.tempPath, error: errorMessage(error) });
-      }
-    }
+    const temps = deleteIdleTempPaths() + (await sweepOrphans(true));
     const logDir = ctx.config.get().jobLogDir;
     const files = existsSync(logDir) ? readdirSync(logDir) : [];
     const byId = new Map<number, string>();
@@ -235,8 +273,13 @@ export function createJobsService(ctx: AppContext): JobsService {
       const expired = finishedJobIdsBefore(db, ids, cutoff);
       for (const id of ids) {
         if (existing.has(id) && !expired.has(id)) continue;
-        rmSync(join(logDir, byId.get(id) as string), { force: true });
-        logs += 1;
+        const path = join(logDir, byId.get(id) as string);
+        try {
+          rmSync(path, { force: true });
+          logs += 1;
+        } catch (error) {
+          log.warn('cannot delete job log', { path, error: errorMessage(error) });
+        }
       }
     }
     return `deleted ${temps} temp file(s) and ${logs} job log(s)`;
@@ -286,6 +329,7 @@ export function createJobsService(ctx: AppContext): JobsService {
           state: 'queued',
           step: 'waiting',
           trigger: 'retry',
+          attempts: 0,
           progress: 0,
           speed: null,
           etaSec: null,

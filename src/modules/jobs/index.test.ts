@@ -10,6 +10,7 @@ import type { JobExecutor, JobOutcome } from '../../contracts/jobs.ts';
 import { AppError, type ErrorCode } from '../../core/errors.ts';
 import type { BdmvJobPlan, MediaFileStatus, QueueState } from '../../shared/domain.ts';
 import type { DeepPartial, Settings } from '../../shared/settings.ts';
+import { createJobsService } from './index.ts';
 import { getJobRow, updateJobRow } from './jobQueries.ts';
 import { type MediaRecorder, mediaDetail, recordingMediaService, waitForEvent } from './test-support.ts';
 
@@ -202,6 +203,22 @@ test('enqueueMany - a filter walks every page of needs_work rows', async () => {
   expect(t.ctx.services.jobs.state().queued).toBe(503);
 });
 
+test('enqueueMany - a filter queues every row while the worker is running and rows leave needs_work', async () => {
+  const s = setup();
+  t = s.t;
+  t.ctx.settings.update({ processing: { enabled: false } });
+  const ids = Array.from({ length: 503 }, () => s.addFile('needs_work', 'bdmv'));
+  t.ctx.settings.update({ processing: { enabled: true } });
+  await t.ctx.services.jobs.start();
+
+  const result = await t.ctx.services.jobs.enqueueMany({ filter: {} });
+
+  await s.gate.waitStarted(1);
+  expect(s.recorder.files.get(ids[0] ?? 0)?.status).toBe('processing');
+  expect(result.skipped).toEqual([]);
+  expect(result.jobs.map((job) => job.mediaFileId ?? 0).sort((a, b) => a - b)).toEqual(ids);
+});
+
 test('worker - runs one job at a time by default, highest priority first', async () => {
   const s = setup();
   t = s.t;
@@ -329,6 +346,105 @@ test('worker - the Plex connection toggle also enables the streaming pause', asy
   expect(t.ctx.services.jobs.state().pauseReasons).toEqual(['plex_streaming']);
 });
 
+test('worker - a running job is paused and re-queued when the processing window closes', async () => {
+  const hour = (offset: number) => `${String((new Date().getHours() + offset) % 24).padStart(2, '0')}:00`;
+  const s = setup();
+  t = s.t;
+  const job = await enqueueDisc(s, s.addFile());
+  await t.ctx.services.jobs.start();
+  await s.gate.waitStarted(1);
+  const requeued = waitForEvent(t.ctx.events, 'job.queued');
+  const idle = waitForEvent(t.ctx.events, 'queue.state', (state) => state.running === 0);
+
+  t.ctx.settings.update({ processing: { window: { enabled: true, start: hour(2), end: hour(3) } } });
+
+  expect((await requeued).job).toMatchObject({ id: job.id, state: 'queued' });
+  expect(await idle).toMatchObject({ pauseReasons: ['window'], running: 0, queued: 1 });
+  expect(getJobRow(t.ctx.db, job.id)).toMatchObject({ state: 'queued', attempts: 0 });
+  const history = await t.ctx.services.jobs.history({ jobId: job.id });
+  expect(history.items[0]?.message).toBe('paused while running (window)');
+  expect(s.recorder.statuses.map((entry) => entry.status)).toEqual(['processing', 'needs_work']);
+
+  t.ctx.settings.update({ processing: { window: { enabled: false } } });
+  await s.gate.waitStarted(2);
+  expect(s.gate.started).toEqual([job.id, job.id]);
+});
+
+test('worker - a running job is paused when Plex playback starts and resumes after it stops', async () => {
+  let active = 0;
+  const plex = stubService<PlexService>('plex', { sessions: async () => ({ active, sessions: [] }) });
+  const s = setup({ settings: { processing: { pauseWhilePlexStreaming: true } }, plex });
+  t = s.t;
+  const job = await enqueueDisc(s, s.addFile());
+  await t.ctx.services.jobs.start();
+  await s.gate.waitStarted(1);
+  const requeued = waitForEvent(t.ctx.events, 'job.queued');
+  const idle = waitForEvent(t.ctx.events, 'queue.state', (state) => state.running === 0);
+
+  active = 1;
+  t.ctx.settings.update({ processing: { freeSpaceMarginPercent: 6 } });
+
+  expect((await requeued).job).toMatchObject({ id: job.id, state: 'queued' });
+  expect(await idle).toMatchObject({ pauseReasons: ['plex_streaming'], running: 0 });
+  active = 0;
+  t.ctx.settings.update({ processing: { freeSpaceMarginPercent: 7 } });
+  await s.gate.waitStarted(2);
+});
+
+test('worker - a free-space shortage re-queues the job and holds the queue instead of failing every job', async () => {
+  const s = setup();
+  t = s.t;
+  let runs = 0;
+  t.ctx.services.bdmv.execute = async (run) => {
+    runs += 1;
+    await run.ensureFreeSpace(t?.dir ?? '/', Number.MAX_SAFE_INTEGER);
+    return OUTCOME;
+  };
+  const jobs = [
+    await enqueueDisc(s, s.addFile()),
+    await enqueueDisc(s, s.addFile()),
+    await enqueueDisc(s, s.addFile()),
+  ];
+  const requeued = waitForEvent(t.ctx.events, 'job.queued');
+
+  await t.ctx.services.jobs.start();
+  await requeued;
+  await Bun.sleep(50);
+
+  expect(runs).toBe(1);
+  for (const job of jobs) expect(getJobRow(t.ctx.db, job.id)).toMatchObject({ state: 'queued', attempts: 0 });
+  expect(s.recorder.statuses.map((entry) => entry.status)).toEqual(['processing', 'needs_work']);
+  expect((await t.ctx.services.jobs.history({ event: 'failed' })).total).toBe(0);
+
+  t.ctx.settings.update({ processing: { freeSpaceMarginPercent: 0 } });
+  await Bun.sleep(50);
+  expect(runs).toBe(2);
+});
+
+test('worker - a completed bdmv job records retagged streams from its audio plan', async () => {
+  const s = setup();
+  t = s.t;
+  const bdmvPlan = {
+    sourceKind: 'bdmv',
+    audioPlan: { streams: [{ kind: 'video' }, { kind: 'audio', language: 'spa', retagged: true }] },
+  } as unknown as BdmvJobPlan;
+  const job = await t.ctx.services.jobs.enqueue({
+    type: 'bdmv',
+    trigger: 'manual',
+    mediaFileId: s.addFile(),
+    bdmvPlan,
+  });
+  await t.ctx.services.jobs.start();
+  await s.gate.waitStarted(1);
+  const finished = waitForEvent(t.ctx.events, 'job.finished');
+
+  s.gate.release(job.id);
+
+  expect((await finished).state).toBe('completed');
+  const history = await t.ctx.services.jobs.history({ jobId: job.id, event: 'completed' });
+  expect(history.items[0]?.data?.retagged).toEqual(['audio 1 -> spa']);
+});
+
 test('worker - an executor error fails the job and marks the media file failed', async () => {
   const s = setup();
   t = s.t;
@@ -376,6 +492,27 @@ test('retry - re-queues a failed job and rejects active ones', async () => {
   expect(await t.ctx.services.jobs.retry(job.id)).toMatchObject({ state: 'queued', trigger: 'retry', error: null });
   const history = await t.ctx.services.jobs.history({ jobId: job.id });
   expect(history.items[0]?.event).toBe('retried');
+});
+
+test('retry - resets the attempt counter so earlier failures do not count as interruptions', async () => {
+  const s = setup();
+  t = s.t;
+  const job = await enqueueDisc(s, s.addFile());
+  updateJobRow(t.ctx.db, job.id, { state: 'failed', attempts: 3 });
+
+  await t.ctx.services.jobs.retry(job.id);
+
+  expect(getJobRow(t.ctx.db, job.id)?.attempts).toBe(0);
+});
+
+test('pause - a user pause survives a restart until it is resumed', async () => {
+  const s = setup();
+  t = s.t;
+  t.ctx.services.jobs.pause('user');
+
+  expect(createJobsService(t.ctx).state().pauseReasons).toEqual(['user']);
+  t.ctx.services.jobs.resume('user');
+  expect(createJobsService(t.ctx).state().pauseReasons).toEqual([]);
 });
 
 test('retry - refuses when another job for the same file is active', async () => {

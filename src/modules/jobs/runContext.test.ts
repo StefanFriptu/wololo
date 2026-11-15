@@ -4,6 +4,7 @@ import { createTestContext, type TestContext } from '../../../test/helpers/conte
 import { insertJob } from '../../../test/helpers/seed.ts';
 import { AppError } from '../../core/errors.ts';
 import type { EventMap } from '../../shared/events.ts';
+import { isFreeSpaceShortage } from './freeSpace.ts';
 import { getJobRow } from './jobQueries.ts';
 import type { LiveProgress } from './mappers.ts';
 import { createRunContext } from './runContext.ts';
@@ -90,6 +91,7 @@ test('ensureFreeSpace - passes with room, fails with precondition_failed when ou
   const error = await s.run.ensureFreeSpace(tmpdir(), Number.MAX_SAFE_INTEGER).catch((caught: unknown) => caught);
   expect(error).toBeInstanceOf(AppError);
   expect((error as AppError).code).toBe('precondition_failed');
+  expect(isFreeSpaceShortage(error)).toBe(true);
   expect(s.lines.some((line) => line.startsWith('free space in'))).toBe(true);
 });
 

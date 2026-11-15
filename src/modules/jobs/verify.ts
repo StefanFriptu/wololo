@@ -113,7 +113,7 @@ export function createVerifier(deps: VerifierDeps): (request: VerifyRequest) => 
     if (request.compareVideoHash) {
       try {
         const [source, output] = await Promise.all([videoHashes(request.sourcePath), videoHashes(request.outputPath)]);
-        checks.push(checkVideoHashes(source, output));
+        checks.push(checkVideoHashes(source, output, facts.videoStreamCount));
       } catch (error) {
         checks.push({ name: 'video_checksum', passed: false, detail: errorMessage(error) });
       }

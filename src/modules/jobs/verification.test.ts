@@ -43,15 +43,25 @@ test.each([
 });
 
 test.each([
-  [['MD5=a'], ['MD5=a'], true],
-  [['MD5=a', 'MD5=b'], ['MD5=a', 'MD5=b'], true],
-  [['MD5=a'], ['MD5=b'], false],
-  [['MD5=a'], [], false],
-  [[], ['MD5=a'], false],
-  [['MD5=a', 'MD5=b'], ['MD5=b', 'MD5=a'], false],
-  [[], [], true],
-])('checkVideoHashes - %j vs %j passes: %p', (source, output, passed) => {
-  expect(checkVideoHashes(source, output).passed).toBe(passed);
+  [['MD5=a'], ['MD5=a'], 1, true],
+  [['MD5=a', 'MD5=b'], ['MD5=a', 'MD5=b'], 2, true],
+  [['MD5=a'], ['MD5=b'], 1, false],
+  [['MD5=a'], [], 0, false],
+  [[], ['MD5=a'], 1, false],
+  [['MD5=a', 'MD5=b'], ['MD5=b', 'MD5=a'], 2, false],
+  [[], [], 0, true],
+  [[], [], 1, false],
+  [['MD5=a'], ['MD5=a'], 2, false],
+])('checkVideoHashes - %j vs %j with %d output video streams passes: %p', (source, output, streams, passed) => {
+  expect(checkVideoHashes(source, output, streams).passed).toBe(passed);
+});
+
+test('checkVideoHashes - no hashes for a file that has video never passes as "no video stream"', () => {
+  expect(checkVideoHashes([], [], 1)).toEqual({
+    name: 'video_checksum',
+    passed: false,
+    detail: '0 video hashes for 1 video streams in the output',
+  });
 });
 
 test.each([
@@ -117,6 +127,7 @@ test('parseMediaFacts - maps duration, kinds, normalised languages and chapters'
   const facts = parseMediaFacts({
     streams: [
       { index: 0, codec_type: 'video', tags: {} },
+      { index: 5, codec_type: 'video', disposition: { attached_pic: 1 } },
       { index: 1, codec_type: 'audio', tags: { language: 'deu' } },
       { index: 2, codec_type: 'subtitle', tags: { LANGUAGE: 'en' } },
       { index: 3, codec_type: 'attachment' },
@@ -129,17 +140,24 @@ test('parseMediaFacts - maps duration, kinds, normalised languages and chapters'
     durationSec: 3.005,
     streams: [
       { index: 0, kind: 'video', language: null },
+      { index: 5, kind: 'video', language: null },
       { index: 1, kind: 'audio', language: 'ger' },
       { index: 2, kind: 'subtitle', language: 'eng' },
       { index: 3, kind: 'attachment', language: null },
       { index: 4, kind: 'data', language: null },
     ],
+    videoStreamCount: 1,
     chapterCount: 3,
   });
 });
 
 test('parseMediaFacts - missing duration is null, missing arrays are empty', () => {
-  expect(parseMediaFacts({ format: {} })).toEqual({ durationSec: null, streams: [], chapterCount: 0 });
+  expect(parseMediaFacts({ format: {} })).toEqual({
+    durationSec: null,
+    streams: [],
+    videoStreamCount: 0,
+    chapterCount: 0,
+  });
   expect(parseMediaFacts({ format: { duration: 'N/A' } }).durationSec).toBeNull();
 });
 
