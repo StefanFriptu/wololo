@@ -180,6 +180,7 @@ export function createPlexService(ctx: AppContext, deps: PlexDeps = {}): PlexSer
         server: updated.serverName ?? updated.serverUrl,
         enabled: updated.enabled,
       });
+      ctx.services.jobs.resume('plex_streaming');
       return toConnection(updated);
     },
     signOut: async () => {
@@ -195,6 +196,7 @@ export function createPlexService(ctx: AppContext, deps: PlexDeps = {}): PlexSer
         pendingPinId: null,
       });
       log.info('signed out of Plex');
+      ctx.services.jobs.resume('plex_streaming');
       return toConnection(cleared);
     },
     createPin: async () => {

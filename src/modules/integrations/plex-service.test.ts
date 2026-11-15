@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
+import { stubService } from '../../../test/helpers/stubs.ts';
 import type { PlexService } from '../../contracts/integrations.ts';
+import type { JobsService } from '../../contracts/jobs.ts';
 import { type FakeUpstream, startFakeUpstream } from './fake-upstream.ts';
 import { createPlexService, plexAuthUrl } from './plex-service.ts';
 
@@ -184,6 +186,20 @@ test('plex.update - unknown server is not found', async () => {
 
 test('plex.update - enabling without a server is a precondition failure', async () => {
   await expect(plex.update({ enabled: true })).rejects.toMatchObject({ code: 'precondition_failed' });
+});
+
+test('plex.update - re-checks the streaming gate of the queue right away', async () => {
+  const reasons: string[] = [];
+  t.ctx.services.jobs = stubService<JobsService>('jobs', {
+    resume: (reason) => {
+      reasons.push(reason);
+      return { paused: false, pauseReasons: [], running: 0, queued: 0, concurrency: 1 };
+    },
+  });
+  await plex.update({ serverUrl: server.url, pauseWhileStreaming: true });
+  await plex.update({ pauseWhileStreaming: false });
+  await plex.signOut();
+  expect(reasons).toEqual(['plex_streaming', 'plex_streaming', 'plex_streaming']);
 });
 
 test('plex.update - a manual URL never receives the account token', async () => {

@@ -86,6 +86,7 @@ export interface JobsService {
   queue(): Promise<QueueResponse>;
   state(): QueueState;
   pause(reason: QueuePauseReason): QueueState;
+  /** resume('plex_streaming') re-polls Plex now: plex.update calls it so a changed connection applies at once. */
   resume(reason: QueuePauseReason): QueueState;
   history(query: HistoryQuery): Promise<Paginated<HistoryEntry>>;
   addHistory(entry: {
