@@ -235,7 +235,7 @@ export async function ensureFixtureCopy(spec: FixtureSpec, dir: string, name?: s
   return target;
 }
 
-/** Shared catalogue. Add new fixtures here only through docs/contract-changes/<module>.md; define module-local specs in your own tests. */
+/** Shared catalogue; define module-local specs in your own tests. */
 export const FIXTURES = {
   dts51: {
     name: 'dts51',

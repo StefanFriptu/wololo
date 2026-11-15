@@ -30,7 +30,7 @@ export interface TestContextOptions {
   env?: Record<string, string>;
 }
 
-/** Fresh temp config dir + migrated SQLite db + full AppContext (real core, module services as currently implemented). */
+/** Fresh temp config dir + migrated SQLite db + full AppContext with every real service (override some for isolation). */
 export function createTestContext(options: TestContextOptions = {}): TestContext {
   const dir = mkdtempSync(join(tmpdir(), 'wololo-test-'));
   const config = new ConfigStore({
