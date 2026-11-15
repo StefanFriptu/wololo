@@ -1,6 +1,7 @@
 /**
  * End to end: author a 30 s Blu-ray with tsMuxeR (folder and .iso), convert it with the real bdmv executor, mkvmerge,
- * ffmpeg (libbluray) and 7z, and check languages, chapters and the untouched video. Skips when a tool is missing.
+ * ffmpeg (libbluray) and 7z, and check languages, chapters and the untouched video. Skips when a tool is missing, unless
+ * WOLOLO_REQUIRE_BDMV_E2E=1 (CI): then missing tools or a disc authored without subtitles fail the run.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -24,7 +25,22 @@ function ffmpegHasBluray(): boolean {
   return /^\s*bluray\s*$/m.test(result.stdout.toString());
 }
 
-const READY = hasBinary('tsMuxeR') && hasBinary('mkvmerge') && ffmpegHasBluray();
+const REQUIRED = process.env.WOLOLO_REQUIRE_BDMV_E2E === '1';
+const TOOLS = {
+  tsMuxeR: hasBinary('tsMuxeR'),
+  mkvmerge: hasBinary('mkvmerge'),
+  'ffmpeg with the bluray protocol': ffmpegHasBluray(),
+  '7z': hasBinary('7z'),
+};
+const READY = TOOLS.tsMuxeR && TOOLS.mkvmerge && TOOLS['ffmpeg with the bluray protocol'];
+
+test.if(REQUIRED)('bdmv e2e - every tool is installed when the end-to-end run is required', () => {
+  expect(
+    Object.entries(TOOLS)
+      .filter(([, found]) => !found)
+      .map(([name]) => name),
+  ).toEqual([]);
+});
 const DURATION = 30;
 const PLAYLIST = '00000.mpls';
 
@@ -166,6 +182,12 @@ function toProbe(path: string, args: string[]): ProbeResult {
 
 const discProbe = (disc: string) => toProbe(disc, ['-playlist', String(playlistNumber(PLAYLIST)), `bluray:${disc}`]);
 
+/** The probe as if ffmpeg had tagged nothing: languages must then come from the MPLS stream table. */
+const withoutLanguages = (probe: ProbeResult): ProbeResult => ({
+  ...probe,
+  streams: probe.streams.map((stream) => ({ ...stream, language: null })),
+});
+
 function planFor(probe: ProbeResult): ConversionPlan {
   const streams: PlannedStream[] = probe.streams.map((stream) => ({
     sourceIndex: stream.index,
@@ -239,6 +261,7 @@ describe.skipIf(!READY)('bdmv end to end (tsMuxeR + mkvmerge + ffmpeg/libbluray)
     try {
       authorDisc(join(scratch, 'work'), folderDisc, true);
     } catch (error) {
+      if (REQUIRED) throw error;
       process.stderr.write(`[bdmv e2e] tsMuxeR could not render subtitles, authoring without them: ${String(error)}\n`);
       rmSync(folderDisc, { recursive: true, force: true });
       hasSubtitles = false;
@@ -266,8 +289,8 @@ describe.skipIf(!READY)('bdmv end to end (tsMuxeR + mkvmerge + ffmpeg/libbluray)
     const probe = discProbe(disc);
     const s = setup({
       existingDisc: { path: disc, kind },
-      plan: planFor(probe),
-      probe: (path) => (path.endsWith('.mkv') ? toProbe(path, [path]) : probe),
+      plan: (input) => planFor(input.probe),
+      probe: (path) => (path.endsWith('.mkv') ? toProbe(path, [path]) : withoutLanguages(probe)),
       overrides: { ffmpeg: ffmpegService },
     });
     const fake = createFakeRunContext({ job: { id: 5, type: 'bdmv', mediaFileId: s.mediaFileId, sourcePath: disc } });
@@ -318,7 +341,7 @@ describe.skipIf(!READY)('bdmv end to end (tsMuxeR + mkvmerge + ffmpeg/libbluray)
     expect(fake.steps.map((step) => step.step)).toContain('encoding');
   }, 300_000);
 
-  test.skipIf(!hasBinary('7z'))(
+  test.skipIf(!TOOLS['7z'] && !REQUIRED)(
     'bdmv.execute - .iso disc is extracted with 7z and converted the same way',
     async () => {
       const iso = join(scratch, 'Jamon.Jamon.1992.iso');

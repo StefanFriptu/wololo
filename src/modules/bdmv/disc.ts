@@ -2,6 +2,7 @@ import type { Dirent } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import type { MainTitlePick, MplsPlaylist } from '../../contracts/bdmv.ts';
+import { errorMessage } from '../../core/errors.ts';
 import { type DiscEntry, findEntry, type SevenZipIsoReader } from './iso.ts';
 import { parseClpi, parseMpls, withClipLanguages } from './mpls.ts';
 import { dedupePlaylists, detectEncryption, pickMainTitle } from './titles.ts';
@@ -35,14 +36,17 @@ async function hasIndex(bdmvDir: string): Promise<boolean> {
   return (await listDir(bdmvDir)).some((entry) => entry.isFile() && entry.name.toLowerCase() === 'index.bdmv');
 }
 
-/** A folder holding BDMV/index.bdmv, the BDMV folder itself, or a .iso file. */
-export async function detectDisc(path: string): Promise<{ kind: DiscKind; discRoot: string } | null> {
+/** A folder holding BDMV/index.bdmv, the BDMV folder itself, or an .iso that isBlurayIso confirms. */
+export async function detectDisc(
+  path: string,
+  isBlurayIso: (isoPath: string) => Promise<boolean>,
+): Promise<{ kind: DiscKind; discRoot: string } | null> {
   const info = await stat(path).catch((error: unknown) => {
     if (isNotFound(error)) return null;
     throw error;
   });
   if (!info) return null;
-  if (info.isFile()) return /\.iso$/i.test(path) ? { kind: 'iso', discRoot: path } : null;
+  if (info.isFile()) return /\.iso$/i.test(path) && (await isBlurayIso(path)) ? { kind: 'iso', discRoot: path } : null;
   if (!info.isDirectory()) return null;
   if (basename(path).toLowerCase() === 'bdmv' && (await hasIndex(path)))
     return { kind: 'bdmv', discRoot: dirname(path) };
@@ -103,7 +107,10 @@ export interface DiscAnalysis {
   encryption: { encrypted: boolean; markers: string[] };
   /** Every parsed playlist, by name. */
   playlists: MplsPlaylist[];
+  /** "<playlist>: <error>" for every MPLS that could not be parsed. */
   parseErrors: string[];
+  /** Non-fatal problems, e.g. a CLPI that could not be parsed for language fallback. */
+  warnings: string[];
   duplicateOf: Record<string, string>;
   pick: MainTitlePick;
   volumeLabel: string | null;
@@ -124,29 +131,35 @@ async function readPlaylists(source: DiscSource): Promise<{ playlists: MplsPlayl
     try {
       playlists.push(parseMpls(name, bytes));
     } catch (error) {
-      errors.push(error instanceof Error ? error.message : String(error));
+      errors.push(`${name}: ${errorMessage(error)}`);
     }
   }
   return { playlists, errors };
 }
 
 /** Streams without a language in the playlist get the one recorded in the first clip's CLPI. */
-async function fillClipLanguages(source: DiscSource, playlists: MplsPlaylist[]): Promise<MplsPlaylist[]> {
+async function fillClipLanguages(
+  source: DiscSource,
+  playlists: MplsPlaylist[],
+): Promise<{ playlists: MplsPlaylist[]; warnings: string[] }> {
   const missing = (playlist: MplsPlaylist) =>
     playlist.streams.some((stream) => (stream.kind === 'audio' || stream.kind === 'subtitle') && !stream.language);
   const clipIds = [...new Set(playlists.filter(missing).flatMap((p) => p.playItems.slice(0, 1).map((i) => i.clipId)))];
-  if (clipIds.length === 0) return playlists;
+  if (clipIds.length === 0) return { playlists, warnings: [] };
   const files = await source.readFiles(clipIds.map((clip) => `BDMV/CLIPINF/${clip}.clpi`));
-  return playlists.map((playlist) => {
+  const warnings = new Set<string>();
+  const filled = playlists.map((playlist) => {
     const clipId = playlist.playItems[0]?.clipId;
     const bytes = clipId ? files.get(`BDMV/CLIPINF/${clipId}.clpi`) : undefined;
     if (!clipId || !bytes || !missing(playlist)) return playlist;
     try {
       return withClipLanguages(playlist, parseClpi(clipId, bytes));
-    } catch {
+    } catch (error) {
+      warnings.add(`${clipId}.clpi: ${errorMessage(error)} (languages of ${playlist.name} not filled in)`);
       return playlist;
     }
   });
+  return { playlists: filled, warnings: [...warnings] };
 }
 
 async function readVolumeLabel(source: DiscSource): Promise<string | null> {
@@ -163,30 +176,35 @@ export async function analyzeDisc(
 ): Promise<DiscAnalysis> {
   const encryption = detectEncryption(source.entries.map((entry) => (entry.directory ? `${entry.path}/` : entry.path)));
   const read = await readPlaylists(source);
-  const playlists = await fillClipLanguages(source, read.playlists);
+  const { playlists, warnings } = await fillClipLanguages(source, read.playlists);
   return {
     source,
     encryption,
     playlists,
     parseErrors: read.errors,
+    warnings,
     duplicateOf: dedupePlaylists(playlists).duplicateOf,
     pick: pickMainTitle(playlists, options),
     volumeLabel: await readVolumeLabel(source),
   };
 }
 
-/** Bytes of the M2TS clips a playlist plays; withAngles also counts the other angles (needed when extracting). */
+/**
+ * Bytes of the M2TS clips the playlists play; withAngles also counts the other angles (needed when extracting). Each
+ * playlist counts its clips once, and clips shared by two playlists count for both: every title is extracted and muxed
+ * into its own file.
+ */
 export function clipBytes(
   entries: readonly DiscEntry[],
   playlists: readonly MplsPlaylist[],
   withAngles: boolean,
 ): number {
-  const clips = new Set(
-    playlists.flatMap((playlist) =>
-      playlist.playItems.flatMap((item) => (withAngles ? [item.clipId, ...item.angleClipIds] : [item.clipId])),
-    ),
-  );
   let total = 0;
-  for (const clip of clips) total += findEntry(entries, `BDMV/STREAM/${clip}.m2ts`)?.sizeBytes ?? 0;
+  for (const playlist of playlists) {
+    const clips = new Set(
+      playlist.playItems.flatMap((item) => (withAngles ? [item.clipId, ...item.angleClipIds] : [item.clipId])),
+    );
+    for (const clip of clips) total += findEntry(entries, `BDMV/STREAM/${clip}.m2ts`)?.sizeBytes ?? 0;
+  }
   return total;
 }

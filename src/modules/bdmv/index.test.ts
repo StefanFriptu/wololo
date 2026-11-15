@@ -1,19 +1,161 @@
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { cleanupSetup, conversionPlan, feature, JAMON, setup } from '../../../test/fixtures/bdmv/service.ts';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { writeDiscFolder } from '../../../test/fixtures/bdmv/disc.ts';
+import { writeFake7z, writeFakeIso } from '../../../test/fixtures/bdmv/fake7z.ts';
+import { cleanupSetup, conversionPlan, feature, JAMON, STN, setup, T } from '../../../test/fixtures/bdmv/service.ts';
 import { insertJob, insertLibrary, insertMediaFile } from '../../../test/helpers/seed.ts';
 import { stubService } from '../../../test/helpers/stubs.ts';
 import type { DownloadClientService } from '../../contracts/integrations.ts';
 import type { MediaService } from '../../contracts/probe-scan.ts';
-import type { TorrentInfo } from '../../shared/domain.ts';
-import { deleteSourceMessage } from './index.ts';
+import type { BdmvDecision, TorrentInfo } from '../../shared/domain.ts';
+import { deleteSourceMessage, mainTitleChoiceError } from './index.ts';
 
 afterEach(cleanupSetup);
+
+const EDITIONS = { '00800.mpls': feature('00001', 6000), '00801.mpls': feature('00002', 5800) };
 test('bdmv.detect - disc folder and non-disc path', async () => {
   const { t, disc, root } = setup();
   expect(await t.ctx.services.bdmv.detect(disc)).toEqual({ kind: 'bdmv', discRoot: disc });
   expect(await t.ctx.services.bdmv.detect(root)).toBeNull();
+});
+
+test('bdmv.detect - an .iso counts only when its listing has BDMV/index.bdmv; an unlistable one is kept', async () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'wololo-detect-'));
+  try {
+    const bluray = writeDiscFolder(join(scratch, 'bluray'), { playlists: { '00800.mpls': feature('00001', 60) } });
+    mkdirSync(join(scratch, 'dvd', 'VIDEO_TS'), { recursive: true });
+    writeFileSync(join(scratch, 'dvd', 'VIDEO_TS', 'VIDEO_TS.IFO'), 'DVDVIDEO-VMG');
+    const movie = writeFakeIso(join(scratch, 'Movie.iso'), bluray);
+    const dvd = writeFakeIso(join(scratch, 'Dvd.iso'), join(scratch, 'dvd'));
+    const broken = writeFakeIso(join(scratch, 'Broken.iso'), null);
+    const { t } = setup({ env: { WOLOLO__7Z: writeFake7z(scratch) } });
+    expect(await t.ctx.services.bdmv.detect(movie)).toEqual({ kind: 'iso', discRoot: movie });
+    expect(await t.ctx.services.bdmv.detect(dvd)).toBeNull();
+    expect(await t.ctx.services.bdmv.detect(broken)).toEqual({ kind: 'iso', discRoot: broken });
+    expect(t.ctx.logs.entries({ module: 'bdmv', level: 'warn' }).map((entry) => entry.message)).toContain(
+      'could not list the .iso, treating it as a Blu-ray image',
+    );
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test('bdmv.evaluate - editions sharing clips need free space for every title', async () => {
+  const shared = (clips: [string, number][]) => ({
+    playItems: clips.map(([clipId, seconds]) => ({ clipId, inTime: 0, outTime: seconds * T, stn: STN })),
+  });
+  const { t, mediaFileId } = setup({
+    settings: { bdmv: { onAmbiguous: 'editions' } },
+    playlists: {
+      '00800.mpls': shared([
+        ['00001', 5800],
+        ['00002', 200],
+      ]),
+      '00801.mpls': shared([['00001', 5800]]),
+    },
+  });
+  const evaluation = await t.ctx.services.bdmv.evaluate(mediaFileId);
+  expect(evaluation.plan?.titles.map((title) => title.playlist)).toEqual(['00800.mpls', '00801.mpls']);
+  expect(evaluation.plan?.estimatedOutputBytes).toBe(5000 + 3000 + 5000);
+  expect(evaluation.plan?.extractBytes).toBe(0);
+});
+
+test('bdmv.evaluate - an unreadable playlist asks for the main title instead of silently picking another', async () => {
+  const { t, mediaFileId } = setup({
+    playlists: { '00801.mpls': feature('00002', 1200) },
+    files: { 'BDMV/PLAYLIST/00800.mpls': 'MPLS0200 truncated' },
+  });
+  const evaluation = await t.ctx.services.bdmv.evaluate(mediaFileId);
+  expect(evaluation.status).toBe('needs_work');
+  expect(evaluation.plan).toBeNull();
+  expect(evaluation.reason).toMatch(
+    /^waiting for a decision: could not read 00800\.mpls: .+; the main title may be among them, confirm it: 00801\.mpls \(0h 20m 00s\)$/,
+  );
+  const decision = await t.ctx.services.bdmv.getDecision(evaluation.decisionId as number);
+  expect(decision.titleCandidates.map((candidate) => candidate.playlist)).toEqual(['00801.mpls']);
+  const warning = t.ctx.logs.entries({ module: 'bdmv', level: 'warn' })[0];
+  expect(warning?.message).toBe('BDMV disc has unreadable playlist or clip files');
+
+  await t.ctx.services.bdmv.resolveDecision(decision.id, {
+    kind: 'main_title',
+    playlists: ['00801.mpls'],
+    asEditions: false,
+    editionNames: {},
+  });
+  expect((await t.ctx.services.bdmv.evaluate(mediaFileId)).plan?.titles.map((title) => title.playlist)).toEqual([
+    '00801.mpls',
+  ]);
+});
+
+test('bdmv.evaluate - a resolved choice whose playlist vanished asks again instead of failing for good', async () => {
+  const { t, disc, mediaFileId } = setup({ playlists: { ...EDITIONS, '00802.mpls': feature('00003', 5900) } });
+  const first = (await t.ctx.services.bdmv.evaluate(mediaFileId)).decisionId as number;
+  await t.ctx.services.bdmv.resolveDecision(first, {
+    kind: 'main_title',
+    playlists: ['00802.mpls'],
+    asEditions: false,
+    editionNames: {},
+  });
+  rmSync(join(disc, 'BDMV', 'PLAYLIST', '00802.mpls'));
+  const again = await t.ctx.services.bdmv.evaluate(mediaFileId);
+  expect(again.reason).toStartWith('waiting for a decision: the chosen 00802.mpls no longer exist on the disc');
+  expect(again.decisionId).not.toBe(first);
+});
+
+test('bdmv.evaluate - an output inside the source disc folder fails instead of writing into the source', async () => {
+  const { t, disc, mediaFileId } = setup({ discName: 'Jamón Jamón (1992)' });
+  const evaluation = await t.ctx.services.bdmv.evaluate(mediaFileId);
+  expect(evaluation.status).toBe('failed');
+  expect(evaluation.plan).toBeNull();
+  expect(evaluation.reason).toBe(
+    `the output ${join(disc, 'Jamón Jamón (1992).mkv')} would be inside the source disc ${disc}, which must stay ` +
+      'untouched: move the disc out of the Radarr movie folder or set a BDMV output root folder',
+  );
+});
+
+test('mainTitleChoiceError - playlists must be offered, edition names must belong to exported playlists', () => {
+  const decision = { titleCandidates: [{ playlist: '00800.mpls' }, { playlist: '00801.mpls' }] } as Pick<
+    BdmvDecision,
+    'titleCandidates'
+  >;
+  const choice = (playlists: string[], asEditions = false, editionNames: Record<string, string> = {}) => ({
+    kind: 'main_title' as const,
+    playlists,
+    asEditions,
+    editionNames,
+  });
+  expect(mainTitleChoiceError(decision, choice(['00801.mpls']))).toBeNull();
+  expect(
+    mainTitleChoiceError(decision, choice(['00800.mpls', '00801.mpls'], true, { '00801.mpls': 'Cut' })),
+  ).toBeNull();
+  expect(mainTitleChoiceError(decision, choice(['00999.mpls']))).toBe(
+    '00999.mpls is not among the offered playlists (00800.mpls, 00801.mpls)',
+  );
+  expect(mainTitleChoiceError(decision, choice(['00800.mpls'], false, { '00801.mpls': 'Cut' }))).toBe(
+    'edition names given for playlists that are not exported: 00801.mpls',
+  );
+});
+
+test('bdmv.resolveDecision - a main_title choice outside the candidates is 422 and the decision stays pending', async () => {
+  const { t, mediaFileId, calls } = setup({ playlists: EDITIONS });
+  const id = (await t.ctx.services.bdmv.evaluate(mediaFileId)).decisionId as number;
+  await expect(
+    t.ctx.services.bdmv.resolveDecision(id, {
+      kind: 'main_title',
+      playlists: ['00999.mpls'],
+      asEditions: false,
+      editionNames: {},
+    }),
+  ).rejects.toThrow(`decision ${id}: 00999.mpls is not among the offered playlists`);
+  const response = await t.request(`/api/v1/bdmv/decisions/${id}/resolve`, {
+    method: 'POST',
+    body: JSON.stringify({ kind: 'main_title', playlists: ['00999.mpls'] }),
+  });
+  expect(response.status).toBe(422);
+  expect((await t.ctx.services.bdmv.getDecision(id)).state).toBe('pending');
+  expect(calls.checkPath).toBeUndefined();
 });
 
 test('bdmv.evaluate - single main title becomes a needs_work plan into the Radarr root folder', async () => {
@@ -285,6 +427,26 @@ const TORRENT: TorrentInfo = {
   goalMet: true,
 };
 
+/** A converted output outside the disc, recorded on a completed bdmv job. */
+function converted(s: { t: ReturnType<typeof setup>['t']; root: string; disc: string; mediaFileId: number }) {
+  const outputPath = join(s.root, 'Jamón Jamón (1992)', 'Jamón Jamón (1992).mkv');
+  mkdirSync(dirname(outputPath), { recursive: true });
+  writeFileSync(outputPath, 'matroska');
+  insertJob(s.t.ctx.db, {
+    type: 'bdmv',
+    state: 'completed',
+    sourcePath: s.disc,
+    mediaFileId: s.mediaFileId,
+    outputPath,
+  });
+  return outputPath;
+}
+
+async function confirmDeletion(s: ReturnType<typeof setup>) {
+  const offer = await s.t.ctx.services.bdmv.offerSourceDeletion(s.mediaFileId, TORRENT);
+  return s.t.ctx.services.bdmv.resolveDecision(offer?.id as number, { kind: 'delete_source', confirm: true });
+}
+
 test('deleteSourceMessage - names the torrent, its ratio, seeding time and output', () => {
   expect(deleteSourceMessage(TORRENT, '/d/Jamon', '/m/J (1992).mkv')).toBe(
     '"Jamon.Jamon.1992.1080p.BluRay.x264-GRP" met its seeding goal (ratio 2.03, seeded 3 days). Delete the source /d/Jamon? It was converted to /m/J (1992).mkv.',
@@ -316,26 +478,75 @@ test('bdmv.deleteSource - refuses without a confirmed decision', async () => {
 });
 
 test('bdmv.resolveDecision - confirmed delete_source removes the folder and records history', async () => {
-  const { t, disc, mediaFileId, calls } = setup({ settings: { bdmv: { deleteSourceWhenSeeded: true } } });
-  insertJob(t.ctx.db, { type: 'bdmv', state: 'completed', sourcePath: disc, mediaFileId, outputPath: '/m/out.mkv' });
-  const offer = await t.ctx.services.bdmv.offerSourceDeletion(mediaFileId, TORRENT);
-  expect(existsSync(disc)).toBe(true);
-  await t.ctx.services.bdmv.resolveDecision(offer?.id as number, { kind: 'delete_source', confirm: true });
-  expect(existsSync(disc)).toBe(false);
-  expect(calls.addHistory?.[0]?.[0]).toMatchObject({ event: 'source_deleted', path: disc, mediaFileId, data: null });
+  const s = setup({ settings: { bdmv: { deleteSourceWhenSeeded: true } } });
+  const output = converted(s);
+  expect(existsSync(s.disc)).toBe(true);
+  await confirmDeletion(s);
+  expect(existsSync(s.disc)).toBe(false);
+  expect(existsSync(output)).toBe(true);
+  expect(s.calls.addHistory?.[0]?.[0]).toMatchObject({
+    event: 'source_deleted',
+    path: s.disc,
+    mediaFileId: s.mediaFileId,
+    data: null,
+  });
 });
 
-test('bdmv.deleteSource - a torrent that owns the path is removed with its files instead', async () => {
-  const { t, disc, mediaFileId, calls } = setup({
+test('bdmv.deleteSource - a torrent whose content is the disc is removed with its files instead', async () => {
+  const s = setup({
     settings: { bdmv: { deleteSourceWhenSeeded: true } },
-    torrent: TORRENT,
+    torrent: (path) => ({ ...TORRENT, contentPath: `/remote${path}` }),
   });
-  insertJob(t.ctx.db, { type: 'bdmv', state: 'completed', sourcePath: disc, mediaFileId });
-  const offer = await t.ctx.services.bdmv.offerSourceDeletion(mediaFileId, TORRENT);
-  await t.ctx.services.bdmv.resolveDecision(offer?.id as number, { kind: 'delete_source', confirm: true });
-  expect(calls.deleteTorrent).toEqual([['abc123', true]]);
-  expect(existsSync(disc)).toBe(true);
-  expect(calls.addHistory?.[0]?.[0]).toMatchObject({ event: 'source_deleted', data: { torrentHash: 'abc123' } });
+  converted(s);
+  s.t.ctx.services.pathMappings.toLocal = async (_scope, path) => path.replace(/^\/remote/, '');
+  await confirmDeletion(s);
+  expect(s.calls.deleteTorrent).toEqual([['abc123', true]]);
+  expect(existsSync(s.disc)).toBe(true);
+  expect(s.calls.addHistory?.[0]?.[0]).toMatchObject({ event: 'source_deleted', data: { torrentHash: 'abc123' } });
+});
+
+test('bdmv.deleteSource - a torrent inside the disc folder is removed, then the rest of the disc', async () => {
+  const s = setup({
+    settings: { bdmv: { deleteSourceWhenSeeded: true } },
+    torrent: (path) => ({ ...TORRENT, contentPath: join(path, 'BDMV') }),
+  });
+  converted(s);
+  await confirmDeletion(s);
+  expect(s.calls.deleteTorrent).toEqual([['abc123', true]]);
+  expect(existsSync(s.disc)).toBe(false);
+});
+
+test('bdmv.deleteSource - a torrent holding more than the disc (a multi-disc pack) is refused', async () => {
+  const s = setup({
+    settings: { bdmv: { deleteSourceWhenSeeded: true } },
+    torrent: (path) => ({ ...TORRENT, contentPath: dirname(path) }),
+  });
+  converted(s);
+  await expect(confirmDeletion(s)).rejects.toThrow(`refusing to delete torrent "${TORRENT.name}": it holds more than`);
+  expect(s.calls.deleteTorrent).toBeUndefined();
+  expect(existsSync(s.disc)).toBe(true);
+});
+
+test('bdmv.deleteSource - refuses while the converted output is unrecorded, missing, empty or inside the source', async () => {
+  const s = setup({ settings: { bdmv: { deleteSourceWhenSeeded: true } } });
+  insertJob(s.t.ctx.db, { type: 'bdmv', state: 'completed', sourcePath: s.disc, mediaFileId: s.mediaFileId });
+  const offer = await s.t.ctx.services.bdmv.offerSourceDeletion(s.mediaFileId, TORRENT);
+  const id = offer?.id as number;
+  const confirm = () => s.t.ctx.services.bdmv.resolveDecision(id, { kind: 'delete_source', confirm: true });
+  const setOutput = (path: string) => s.t.ctx.dbHandle.sqlite.run('update jobs set output_path = ?', [path]);
+
+  await expect(confirm()).rejects.toThrow('the completed conversion has no recorded output');
+  setOutput(join(s.root, 'gone.mkv'));
+  await expect(confirm()).rejects.toThrow(`the converted ${join(s.root, 'gone.mkv')} is gone`);
+  writeFileSync(join(s.root, 'empty.mkv'), '');
+  setOutput(join(s.root, 'empty.mkv'));
+  await expect(confirm()).rejects.toThrow('is gone');
+  writeFileSync(join(s.disc, 'Jamón Jamón (1992).mkv'), 'matroska');
+  setOutput(join(s.disc, 'Jamón Jamón (1992).mkv'));
+  await expect(confirm()).rejects.toThrow(`refusing to delete ${s.disc}: the converted`);
+
+  expect(existsSync(s.disc)).toBe(true);
+  expect((await s.t.ctx.services.bdmv.getDecision(id)).state).toBe('pending');
 });
 
 test('bdmv.deleteSource - refuses to delete a library root or an unconverted disc', async () => {
@@ -400,18 +611,19 @@ test('routes - list, get, resolve validation, dismiss and disc analysis', async 
 });
 
 test('bdmv.resolveDecision - a failed deletion leaves the decision pending for a retry', async () => {
-  const { t, disc, mediaFileId } = setup({
+  const s = setup({
     settings: { bdmv: { deleteSourceWhenSeeded: true } },
     overrides: {
       downloadClient: stubService<DownloadClientService>('downloadClient', {
-        findTorrentByPath: async () => TORRENT,
+        findTorrentByPath: async (path) => ({ ...TORRENT, contentPath: path }),
         deleteTorrent: async () => {
           throw new Error('qBittorrent unreachable');
         },
       }),
     },
   });
-  insertJob(t.ctx.db, { type: 'bdmv', state: 'completed', sourcePath: disc, mediaFileId });
+  const { t, mediaFileId } = s;
+  converted(s);
   const offer = await t.ctx.services.bdmv.offerSourceDeletion(mediaFileId, TORRENT);
   const id = offer?.id as number;
   await expect(t.ctx.services.bdmv.resolveDecision(id, { kind: 'delete_source', confirm: true })).rejects.toThrow(

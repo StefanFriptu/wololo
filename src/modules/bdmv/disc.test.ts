@@ -38,17 +38,28 @@ const FEATURE = {
   ],
 };
 
-test('detectDisc - folder with BDMV/index.bdmv, the BDMV folder itself, an .iso, and other paths', async () => {
+test('detectDisc - folder with BDMV/index.bdmv, the BDMV folder itself, a Blu-ray .iso, and other paths', async () => {
   const disc = writeDiscFolder(join(scratch, 'Jamon.Jamon.1992'), { playlists: { '00800.mpls': FEATURE } });
   writeFileSync(join(scratch, 'Movie.ISO'), 'x');
+  writeFileSync(join(scratch, 'Dvd.iso'), 'x');
   writeFileSync(join(scratch, 'movie.mkv'), 'x');
   mkdirSync(join(scratch, 'empty'), { recursive: true });
-  expect(await detectDisc(disc)).toEqual({ kind: 'bdmv', discRoot: disc });
-  expect(await detectDisc(join(disc, 'BDMV'))).toEqual({ kind: 'bdmv', discRoot: disc });
-  expect(await detectDisc(join(scratch, 'Movie.ISO'))).toEqual({ kind: 'iso', discRoot: join(scratch, 'Movie.ISO') });
-  expect(await detectDisc(join(scratch, 'movie.mkv'))).toBeNull();
-  expect(await detectDisc(join(scratch, 'empty'))).toBeNull();
-  expect(await detectDisc(join(scratch, 'missing'))).toBeNull();
+  const checked: string[] = [];
+  const isBlurayIso = async (path: string) => {
+    checked.push(path);
+    return path.endsWith('Movie.ISO');
+  };
+  expect(await detectDisc(disc, isBlurayIso)).toEqual({ kind: 'bdmv', discRoot: disc });
+  expect(await detectDisc(join(disc, 'BDMV'), isBlurayIso)).toEqual({ kind: 'bdmv', discRoot: disc });
+  expect(await detectDisc(join(scratch, 'Movie.ISO'), isBlurayIso)).toEqual({
+    kind: 'iso',
+    discRoot: join(scratch, 'Movie.ISO'),
+  });
+  expect(await detectDisc(join(scratch, 'Dvd.iso'), isBlurayIso)).toBeNull();
+  expect(await detectDisc(join(scratch, 'movie.mkv'), isBlurayIso)).toBeNull();
+  expect(await detectDisc(join(scratch, 'empty'), isBlurayIso)).toBeNull();
+  expect(await detectDisc(join(scratch, 'missing'), isBlurayIso)).toBeNull();
+  expect(checked).toEqual([join(scratch, 'Movie.ISO'), join(scratch, 'Dvd.iso')]);
 });
 
 test('analyzeDisc - parses playlists, fills languages from CLPI, picks the main title and reads the disc title', async () => {
@@ -71,7 +82,8 @@ test('analyzeDisc - parses playlists, fills languages from CLPI, picks the main 
   const analysis = await analyzeDisc(source, { ambiguityPercent: 5, extrasMinMinutes: 2 });
   expect(analysis.encryption).toEqual({ encrypted: false, markers: [] });
   expect(analysis.playlists.map((p) => p.name).sort()).toEqual(['00010.mpls', '00800.mpls', '00801.mpls']);
-  expect(analysis.parseErrors).toHaveLength(1);
+  expect(analysis.parseErrors).toEqual([expect.stringMatching(/^00999\.mpls: /)]);
+  expect(analysis.warnings).toEqual([]);
   expect(analysis.duplicateOf).toEqual({ '00801.mpls': '00800.mpls' });
   expect(analysis.pick.main?.name).toBe('00800.mpls');
   expect(analysis.pick.main?.streams.find((s) => s.kind === 'audio')?.language).toBe('spa');
@@ -79,6 +91,21 @@ test('analyzeDisc - parses playlists, fills languages from CLPI, picks the main 
   expect(analysis.pick.extras.map((p) => p.name)).toEqual(['00010.mpls']);
   expect(analysis.volumeLabel).toBe('JAMON JAMON');
   expect(clipBytes(source.entries, analysis.playlists.slice(0, 1), false)).toBeGreaterThan(0);
+});
+
+test('analyzeDisc - an unreadable CLPI is reported as a warning, the playlist is kept', async () => {
+  const disc = writeDiscFolder(join(scratch, 'bad-clpi'), {
+    playlists: { '00800.mpls': FEATURE },
+    files: { 'BDMV/CLIPINF/00001.clpi': 'garbage!' },
+  });
+  const analysis = await analyzeDisc(await openDisc(disc, 'bdmv', noIso), {
+    ambiguityPercent: 5,
+    extrasMinMinutes: null,
+  });
+  expect(analysis.pick.main?.name).toBe('00800.mpls');
+  expect(analysis.warnings).toEqual([
+    expect.stringMatching(/^00001\.clpi: .*\(languages of 00800\.mpls not filled in\)$/),
+  ]);
 });
 
 test('analyzeDisc - encryption markers at the disc root', async () => {
@@ -118,7 +145,7 @@ test.each([
   expect(parseDiscTitle(xml)).toBe(title);
 });
 
-test('clipBytes - counts each clip once and angles only when asked', () => {
+test('clipBytes - each clip once per playlist, shared clips once per title, angles only when asked', () => {
   const entries: DiscEntry[] = [
     { path: 'BDMV/STREAM/00001.m2ts', sizeBytes: 100, directory: false },
     { path: 'BDMV/STREAM/00002.m2ts', sizeBytes: 10, directory: false },
@@ -139,6 +166,7 @@ test('clipBytes - counts each clip once and angles only when asked', () => {
     marks: [],
     chapterTimesSec: [],
   };
-  expect(clipBytes(entries, [playlist, playlist], false)).toBe(100);
+  expect(clipBytes(entries, [playlist], false)).toBe(100);
   expect(clipBytes(entries, [playlist], true)).toBe(110);
+  expect(clipBytes(entries, [playlist, { ...playlist, name: '00002.mpls' }], false)).toBe(200);
 });

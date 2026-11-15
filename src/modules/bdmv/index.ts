@@ -1,6 +1,6 @@
-import { rm } from 'node:fs/promises';
+import { rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { resolve } from 'node:path';
+import { resolve, sep } from 'node:path';
 import type { AppContext } from '../../app/context.ts';
 import type { BdmvService } from '../../contracts/bdmv.ts';
 import { AppError } from '../../core/errors.ts';
@@ -15,7 +15,7 @@ import {
 } from './decisions.ts';
 import { analyzeDisc, detectDisc, openDisc } from './disc.ts';
 import { createBdmvExecutor } from './execute.ts';
-import { createIsoReader } from './iso.ts';
+import { createIsoReader, findEntry } from './iso.ts';
 import { completedBdmvJob, createDiscPlanner, loadDiscRow, pickOptions, playlistViews } from './planner.ts';
 
 function seededFor(seconds: number): string {
@@ -28,6 +28,25 @@ export function deleteSourceMessage(torrent: TorrentInfo, sourcePath: string, ou
     `"${torrent.name}" met its seeding goal (ratio ${torrent.ratio.toFixed(2)}, seeded ${seededFor(torrent.seedingTimeSec)}). ` +
     `Delete the source ${sourcePath}?${outputPath ? ` It was converted to ${outputPath}.` : ''}`
   );
+}
+
+function isWithin(path: string, folder: string): boolean {
+  return path === folder || path.startsWith(folder.endsWith(sep) ? folder : `${folder}${sep}`);
+}
+
+/** Pure: why a main_title choice does not fit the decision, or null when it does. */
+export function mainTitleChoiceError(
+  decision: Pick<BdmvDecision, 'titleCandidates'>,
+  choice: Extract<BdmvDecisionChoice, { kind: 'main_title' }>,
+): string | null {
+  const offered = new Set(decision.titleCandidates.map((candidate) => candidate.playlist));
+  const unknown = choice.playlists.filter((playlist) => !offered.has(playlist));
+  if (unknown.length > 0)
+    return `${unknown.join(', ')} ${unknown.length === 1 ? 'is' : 'are'} not among the offered playlists (${[...offered].join(', ')})`;
+  const chosen = new Set(choice.asEditions ? choice.playlists : choice.playlists.slice(0, 1));
+  const strayNames = Object.keys(choice.editionNames).filter((playlist) => !chosen.has(playlist));
+  if (strayNames.length > 0) return `edition names given for playlists that are not exported: ${strayNames.join(', ')}`;
+  return null;
 }
 
 export function createBdmvService(ctx: AppContext): BdmvService {
@@ -62,28 +81,56 @@ export function createBdmvService(ctx: AppContext): BdmvService {
     ctx.events.emit('bdmv.decision', { decisionId: decision.id, mediaFileId: decision.mediaFileId });
   };
 
+  /** The converted output must exist on its own, outside the source, before anything of the source is deleted. */
+  const requireConvertedOutput = async (mediaFileId: number, sourcePath: string): Promise<string> => {
+    const converted = completedBdmvJob(ctx, mediaFileId);
+    if (!converted)
+      throw new AppError('precondition_failed', 'the disc has no completed conversion; refusing to delete it');
+    if (!converted.outputPath)
+      throw new AppError('precondition_failed', 'the completed conversion has no recorded output; refusing to delete');
+    const outputPath = resolve(converted.outputPath);
+    if (isWithin(outputPath, sourcePath))
+      throw new AppError(
+        'precondition_failed',
+        `refusing to delete ${sourcePath}: the converted ${outputPath} is in it`,
+      );
+    const output = await stat(outputPath).catch(() => null);
+    if (!output?.isFile() || output.size === 0)
+      throw new AppError(
+        'precondition_failed',
+        `refusing to delete ${sourcePath}: the converted ${outputPath} is gone`,
+      );
+    return outputPath;
+  };
+
   const removeSource = async (mediaFileId: number): Promise<void> => {
     const disc = loadDiscRow(ctx, mediaFileId);
-    if (!completedBdmvJob(ctx, mediaFileId))
-      throw new AppError('precondition_failed', 'the disc has no completed conversion; refusing to delete it');
     const path = resolve(disc.row.path);
     if (path === resolve(disc.rootPath) || path === resolve('/'))
       throw new AppError('precondition_failed', `refusing to delete ${path}: it is a library root`);
+    await requireConvertedOutput(mediaFileId, path);
 
     const torrent = await ctx.services.downloadClient.findTorrentByPath(path);
-    if (torrent) {
-      await ctx.services.downloadClient.deleteTorrent(torrent.hash, true);
-    } else {
-      await rm(path, { recursive: disc.kind === 'bdmv', force: false });
-    }
-    const message = torrent ? `removed torrent "${torrent.name}" and its files` : `deleted ${path}`;
-    log.info('BDMV source deleted', { mediaFileId, path, torrent: torrent?.hash ?? null });
+    const torrentContent = torrent
+      ? resolve(await ctx.services.pathMappings.toLocal('qbittorrent', torrent.contentPath))
+      : null;
+    if (torrent && torrentContent && path !== torrentContent && isWithin(path, torrentContent))
+      throw new AppError(
+        'precondition_failed',
+        `refusing to delete torrent "${torrent.name}": it holds more than ${path} (${torrentContent})`,
+      );
+    const ownedTorrent = torrent && torrentContent && isWithin(torrentContent, path) ? torrent : null;
+    if (ownedTorrent) await ctx.services.downloadClient.deleteTorrent(ownedTorrent.hash, true);
+    if (!ownedTorrent || torrentContent !== path)
+      await rm(path, { recursive: disc.kind === 'bdmv', force: !!ownedTorrent });
+    const message = ownedTorrent ? `removed torrent "${ownedTorrent.name}" and its files` : `deleted ${path}`;
+    log.info('BDMV source deleted', { mediaFileId, path, torrent: ownedTorrent?.hash ?? null });
     await ctx.services.jobs.addHistory({
       event: 'source_deleted',
       path,
       message,
       mediaFileId,
-      data: torrent ? { torrentHash: torrent.hash } : null,
+      data: ownedTorrent ? { torrentHash: ownedTorrent.hash } : null,
     });
   };
 
@@ -109,7 +156,15 @@ export function createBdmvService(ctx: AppContext): BdmvService {
   };
 
   return {
-    detect: (path) => detectDisc(path),
+    detect: (path) =>
+      detectDisc(path, async (isoPath) => {
+        try {
+          return findEntry(await isoReader.entries(isoPath), 'BDMV/index.bdmv') !== null;
+        } catch (error) {
+          log.warn('could not list the .iso, treating it as a Blu-ray image', { path: isoPath, error });
+          return true;
+        }
+      }),
 
     analyze: async (mediaFileId) => {
       const disc = loadDiscRow(ctx, mediaFileId);
@@ -143,6 +198,8 @@ export function createBdmvService(ctx: AppContext): BdmvService {
         throw new AppError('validation', `decision ${id} is a ${decision.kind} decision, not ${choice.kind}`);
       if (decision.state !== 'pending')
         throw new AppError('conflict', `BDMV decision ${decision.id} is already ${decision.state}`);
+      const invalid = choice.kind === 'main_title' ? mainTitleChoiceError(decision, choice) : null;
+      if (invalid) throw new AppError('unprocessable', `decision ${id}: ${invalid}`);
       if (choice.kind === 'delete_source' && choice.confirm) await removeSource(decision.mediaFileId);
       await closePending(decision, 'resolved', choice);
       if (choice.kind !== 'delete_source') await reevaluate(decision);

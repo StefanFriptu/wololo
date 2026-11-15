@@ -2,10 +2,15 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Services } from '../../../src/app/context.ts';
-import type { ArrService, DownloadClientService, NotifierService } from '../../../src/contracts/integrations.ts';
+import type {
+  ArrService,
+  DownloadClientService,
+  NotifierService,
+  PathMappingService,
+} from '../../../src/contracts/integrations.ts';
 import type { JobsService } from '../../../src/contracts/jobs.ts';
 import type { LibraryService, MediaService, ProbeService } from '../../../src/contracts/probe-scan.ts';
-import type { FfmpegService, RulesService } from '../../../src/contracts/rules-ffmpeg.ts';
+import type { FfmpegService, RulesInput, RulesService } from '../../../src/contracts/rules-ffmpeg.ts';
 import type { MediaFileSummary } from '../../../src/shared/api-types.ts';
 import type {
   ArrInstance,
@@ -13,6 +18,7 @@ import type {
   EffectiveProfile,
   Library,
   MovieMatchCandidate,
+  PlannedStream,
   ProbeResult,
   TorrentInfo,
 } from '../../../src/shared/domain.ts';
@@ -98,6 +104,29 @@ export function conversionPlan(action: ConversionPlan['action'] = 'convert'): Co
   };
 }
 
+/** Copies every video, audio and subtitle stream of the probe with the probe's language, as a rules plan would. */
+export function planFromProbe(probe: ProbeResult): ConversionPlan {
+  const streams = probe.streams.flatMap((stream): PlannedStream[] =>
+    stream.kind === 'video' || stream.kind === 'audio' || stream.kind === 'subtitle'
+      ? [
+          {
+            sourceIndex: stream.index,
+            kind: stream.kind,
+            op: 'copy',
+            codec: stream.codec,
+            encode: null,
+            language: stream.language,
+            retagged: false,
+            title: null,
+            default: stream.kind !== 'subtitle',
+            forced: false,
+          },
+        ]
+      : [],
+  );
+  return { ...conversionPlan(), streams };
+}
+
 export const SUMMARY: MediaFileSummary = {
   id: 0,
   libraryId: 1,
@@ -142,12 +171,17 @@ export function setup(
     files?: Record<string, string>;
     settings?: DeepPartial<Settings>;
     lookups?: MovieMatchCandidate[];
-    plan?: ConversionPlan;
+    /** Fixed plan, or a function of the rules input; default planFromProbe(input.probe). */
+    plan?: ConversionPlan | ((input: RulesInput) => ConversionPlan);
     radarr?: ArrInstance | null;
-    torrent?: TorrentInfo | null;
+    /** Torrent found for the looked-up path (or a function of it). */
+    torrent?: TorrentInfo | null | ((path: string) => TorrentInfo | null);
     arr?: Partial<ArrService>;
-    probe?: (path: string) => ProbeResult | Promise<ProbeResult>;
+    probe?: (path: string, options?: { playlist?: string }) => ProbeResult | Promise<ProbeResult>;
     overrides?: Partial<Services>;
+    /** Folder name of the synthetic disc below the library root. */
+    discName?: string;
+    env?: Record<string, string>;
     /** Use an existing disc (e.g. authored with tsMuxeR) instead of the synthetic folder. */
     existingDisc?: { path: string; kind: 'bdmv' | 'iso' };
   } = {},
@@ -164,6 +198,7 @@ export function setup(
   const holder: { library?: Library } = {};
   const t = createTestContext({
     settings: options.settings,
+    env: options.env,
     overrides: {
       libraries: stubService<LibraryService>('libraries', {
         get: async () => holder.library as Library,
@@ -186,10 +221,13 @@ export function setup(
         ],
         addMovie: record('addMovie', async () => 99),
         importMovieFolder: record('importMovieFolder', async () => {}),
+        rescan: record('rescan', async () => {}),
         ...options.arr,
       }),
       probe: stubService<ProbeService>('probe', {
-        probe: record('probe', async (path: string) => (options.probe ? options.probe(path) : PROBE)),
+        probe: record('probe', async (path: string, probeOptions?: { playlist?: string }) =>
+          options.probe ? options.probe(path, probeOptions) : PROBE,
+        ),
       }),
       ffmpeg: stubService<FfmpegService>('ffmpeg', {
         buildAudioConversionArgs: record('buildAudioConversionArgs', (input) => [
@@ -218,7 +256,11 @@ export function setup(
       notifier: stubService<NotifierService>('notifier', { fileChanged: record('fileChanged', async () => {}) }),
       rules: stubService<RulesService>('rules', {
         effectiveProfileForLibrary: async () => PROFILE,
-        plan: () => options.plan ?? conversionPlan(),
+        plan: record('rulesPlan', (input: RulesInput) => {
+          const plan = options.plan;
+          if (typeof plan === 'function') return plan(input);
+          return plan ?? planFromProbe(input.probe);
+        }),
       }),
       media: stubService<MediaService>('media', {
         checkPath: record('checkPath', async () => ({
@@ -230,9 +272,13 @@ export function setup(
         setIgnored: record('setIgnored', async (id: number) => ({ ...SUMMARY, id, status: 'ignored' as const })),
         recordJobResult: record('recordJobResult', async () => {}),
       }),
+      pathMappings: stubService<PathMappingService>('pathMappings', {
+        toLocal: record('toLocal', async (_scope: string, path: string) => path),
+      }),
       jobs: stubService<JobsService>('jobs', { addHistory: record('addHistory', async () => {}) }),
       downloadClient: stubService<DownloadClientService>('downloadClient', {
-        findTorrentByPath: async () => options.torrent ?? null,
+        findTorrentByPath: async (path: string) =>
+          (typeof options.torrent === 'function' ? options.torrent(path) : options.torrent) ?? null,
         deleteTorrent: record('deleteTorrent', async () => {}),
       }),
       ...options.overrides,
@@ -243,7 +289,7 @@ export function setup(
   mkdirSync(root, { recursive: true });
   const disc =
     options.existingDisc?.path ??
-    writeDiscFolder(join(root, 'Jamon.Jamon.1992.1080p.BluRay.x264-GRP'), {
+    writeDiscFolder(join(root, options.discName ?? 'Jamon.Jamon.1992.1080p.BluRay.x264-GRP'), {
       playlists: options.playlists ?? { '00800.mpls': feature('00001', 5706) },
       clips: { '00001': { streamBytes: 5000 }, '00002': { streamBytes: 3000 } },
       files: options.files,

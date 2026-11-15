@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
+import { link, mkdir, readFile, rename, rm, stat, unlink } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import type { AppContext } from '../../app/context.ts';
 import type { MplsPlaylist } from '../../contracts/bdmv.ts';
@@ -104,8 +104,8 @@ export interface OutputTrack extends MkvmergeTrackRequest {
 }
 
 /**
- * Pure: planned streams -> mkvmerge output tracks, video first, then the plan order. Streams without a PID (not in the
- * playlist's transport stream), attachments/data and dropped PIDs (secondary video) are skipped.
+ * Pure: planned streams -> mkvmerge output tracks, video first, then the plan order. Attachments/data and dropped PIDs
+ * (secondary video) are skipped; a planned stream without a PID cannot be selected in the playlist and fails the job.
  */
 export function outputTracks(input: {
   plan: ConversionPlan;
@@ -121,7 +121,9 @@ export function outputTracks(input: {
     const kind = planned.kind;
     if (kind !== 'video' && kind !== 'audio' && kind !== 'subtitle') continue;
     const source = findStream(input.probe, planned.sourceIndex);
-    if (source?.streamId == null || input.dropPids?.has(source.streamId)) continue;
+    if (source?.streamId == null)
+      throw new AppError('unprocessable', `planned ${kind} stream ${planned.sourceIndex} has no PID in the playlist`);
+    if (input.dropPids?.has(source.streamId)) continue;
     const replacementPath = input.sideFiles.get(planned.sourceIndex) ?? null;
     (kind === 'video' ? video : rest).push({
       kind,
@@ -193,6 +195,23 @@ async function exists(path: string): Promise<boolean> {
     () => true,
     () => false,
   );
+}
+
+const NO_HARD_LINKS = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS', 'EMLINK']);
+
+/** Moves a file into place, refusing to overwrite an existing target. */
+export async function placeFile(from: string, to: string): Promise<void> {
+  try {
+    await link(from, to);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code ?? '';
+    if (code === 'EEXIST') throw new AppError('conflict', `output already exists: ${to}`);
+    if (!NO_HARD_LINKS.has(code)) throw error;
+    if (await exists(to)) throw new AppError('conflict', `output already exists: ${to}`);
+    await rename(from, to);
+    return;
+  }
+  await unlink(from);
 }
 
 export function createBdmvExecutor(
@@ -293,6 +312,12 @@ export function createBdmvExecutor(
     run.setStep('verifying', `verifying ${basename(work.title.outputPath)}`);
     const packets = await run.run({ command: tools().ffprobe, args: buildPacketCountArgs(disc, work.title.playlist) });
     ensureRan(packets, 'ffprobe packet count');
+    const expectedVideoPackets = parsePacketCount(packets.stdout);
+    if (expectedVideoPackets === null)
+      throw new AppError(
+        'unprocessable',
+        `could not count the video packets of ${work.title.playlist} (ffprobe printed "${packets.stdout.trim()}")`,
+      );
     const verification = await run.verify({
       sourcePath: disc,
       outputPath: work.tempOutput,
@@ -300,7 +325,7 @@ export function createBdmvExecutor(
       durationToleranceSec: DURATION_TOLERANCE_SEC,
       expectedStreamCount: work.tracks.length,
       compareVideoHash: false,
-      expectedVideoPackets: parsePacketCount(packets.stdout) ?? undefined,
+      expectedVideoPackets,
       decodeAudioStreams: work.tracks.flatMap((track, i) => (track.replacementPath ? [i] : [])),
       expectedChapterCount: work.playlist.chapterTimesSec.length,
       expectedLanguages: work.tracks.map((track) => ({ kind: track.kind, language: track.language })),
@@ -338,13 +363,42 @@ export function createBdmvExecutor(
       });
       return { movieId, error: null };
     } catch (error) {
+      const message = `Radarr import failed: ${errorMessage(error)}`;
       deps.log.warn('Radarr import of BDMV output failed', { jobId: run.job.id, movieDir, error });
-      run.log.line(`Radarr import failed: ${errorMessage(error)}`);
-      return { movieId, error: `Radarr import failed: ${errorMessage(error)}` };
+      run.log.line(message);
+      await services.jobs.addHistory({
+        event: 'failed',
+        path: main.title.outputPath,
+        message: `${message}; the converted file stays in ${movieDir}`,
+        jobId: run.job.id,
+        mediaFileId,
+        data: { outputPath: main.title.outputPath, arrInstanceId: plan.radarrInstanceId, error: errorMessage(error) },
+      });
+      const rescanned = movieId === null ? null : await rescanMovie(run, plan.radarrInstanceId, movieId);
+      return { movieId, error: rescanned ? `${message}; asked Radarr to rescan the movie instead` : message };
     }
   }
 
-  async function finish(run: JobRunContext, plan: BdmvJobPlan, work: TitleWork[], mediaFileId: number) {
+  /** Fallback after a failed import: RescanMovie picks the file up from the movie folder once Radarr is back. */
+  async function rescanMovie(run: JobRunContext, instanceId: number, movieId: number): Promise<boolean> {
+    try {
+      await services.arr.rescan({ instanceId, kind: 'radarr', itemId: movieId, fileId: null });
+      run.log.line(`asked Radarr to rescan movie ${movieId}`);
+      return true;
+    } catch (error) {
+      deps.log.warn('Radarr rescan after a failed BDMV import failed too', { jobId: run.job.id, movieId, error });
+      run.log.line(`Radarr rescan failed: ${errorMessage(error)}`);
+      return false;
+    }
+  }
+
+  async function finish(
+    run: JobRunContext,
+    plan: BdmvJobPlan,
+    work: TitleWork[],
+    mediaFileId: number,
+    skipped: readonly string[],
+  ) {
     const main = work[0] as TitleWork;
     const imported = await importIntoRadarr(run, plan, main, mediaFileId);
     const reason = `converted to ${main.title.outputPath}`;
@@ -380,8 +434,32 @@ export function createBdmvExecutor(
       verification: main.verification,
       bytesAfter,
       recycleBinEntryId: null,
-      message: [reason, ...extras, ...(imported.error ? [imported.error] : [])].join('; '),
+      message: [reason, ...extras, ...skipped, ...(imported.error ? [imported.error] : [])].join('; '),
     } satisfies JobOutcome;
+  }
+
+  /**
+   * Moves every verified temp file into the library without overwriting: link + unlink fails with EEXIST when a file
+   * appeared meanwhile (rename where hard links are unsupported). A failure removes the outputs this run placed.
+   */
+  async function placeOutputs(run: JobRunContext, work: readonly TitleWork[]): Promise<void> {
+    for (const item of work) await mkdir(dirname(item.title.outputPath), { recursive: true });
+    const placed: string[] = [];
+    try {
+      for (const item of work) {
+        await placeFile(item.tempOutput, item.title.outputPath);
+        placed.push(item.title.outputPath);
+        run.log.line(`wrote ${item.title.outputPath}`);
+      }
+    } catch (error) {
+      for (const path of placed) {
+        await rm(path, { force: true }).catch((cause: unknown) =>
+          deps.log.error('could not remove a partially placed BDMV output', { path, error: cause }),
+        );
+        run.log.line(`removed ${path} again`);
+      }
+      throw error;
+    }
   }
 
   return async (run) => {
@@ -417,6 +495,7 @@ export function createBdmvExecutor(
       const of = plan.titles.length;
 
       const work: TitleWork[] = [];
+      const skipped: string[] = [];
       for (const [index, title] of plan.titles.entries()) {
         const playlist = playlists.find((candidate) => candidate.name === title.playlist);
         if (!playlist) throw new AppError('unprocessable', `playlist ${title.playlist} not found on the disc`);
@@ -431,9 +510,16 @@ export function createBdmvExecutor(
           index === 0 && plan.audioPlan
             ? plan.audioPlan
             : services.rules.plan({ probe, profile, library, originalLanguage: disc.row.originalLanguage });
+        if (conversion.action === 'blocked') {
+          const why = `blocked: ${conversion.reasons.join('; ') || 'the device profile cannot play it'}`;
+          if (title.role !== 'extra') throw new AppError('unprocessable', `${title.role} ${title.playlist} is ${why}`);
+          skipped.push(`extra ${title.playlist} skipped (${why})`);
+          run.log.line(`extra ${title.playlist} skipped: ${why}`);
+          continue;
+        }
         const item: TitleWork = {
           title,
-          index,
+          index: work.length,
           playlist,
           probe,
           plan: conversion,
@@ -451,25 +537,20 @@ export function createBdmvExecutor(
         reportStep(run, { index, of }, 'preparing', 1);
         work.push(item);
       }
+      const titles = work.length;
 
       for (const item of work) {
-        await encodeTitle(run, item, discPath, tempDir, of);
-        await muxTitle(run, item, plan.movie, of);
+        await encodeTitle(run, item, discPath, tempDir, titles);
+        await muxTitle(run, item, plan.movie, titles);
         item.verification = await verifyTitle(run, item, discPath);
-        reportStep(run, { index: item.index, of }, 'verifying', 1);
+        reportStep(run, { index: item.index, of: titles }, 'verifying', 1);
       }
 
-      for (const item of work) {
-        await mkdir(dirname(item.title.outputPath), { recursive: true });
-        if (await exists(item.title.outputPath))
-          throw new AppError('conflict', `output already exists: ${item.title.outputPath}`);
-        await rename(item.tempOutput, item.title.outputPath);
-        run.log.line(`wrote ${item.title.outputPath}`);
-      }
+      await placeOutputs(run, work);
       finished = true;
       await rm(tempDir, { recursive: true, force: true });
       await run.setTempPath(null);
-      return await finish(run, plan, work, mediaFileId);
+      return await finish(run, plan, work, mediaFileId, skipped);
     } finally {
       if (!finished) {
         await rm(tempDir, { recursive: true, force: true }).catch((error: unknown) =>

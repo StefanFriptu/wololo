@@ -1,4 +1,4 @@
-import { basename, dirname, sep } from 'node:path';
+import { basename, dirname, resolve, sep } from 'node:path';
 import { and, desc, eq } from 'drizzle-orm';
 import type { AppContext } from '../../app/context.ts';
 import type { BdmvEvaluation, MplsPlaylist } from '../../contracts/bdmv.ts';
@@ -113,7 +113,7 @@ export function discLookupName(path: string, volumeLabel: string | null): string
   return volumeLabel ?? own;
 }
 
-function isWithin(path: string, folder: string): boolean {
+export function isWithin(path: string, folder: string): boolean {
   const base = folder.endsWith(sep) ? folder : `${folder}${sep}`;
   return path === folder || path.startsWith(base);
 }
@@ -190,26 +190,33 @@ export function createDiscPlanner(ctx: AppContext, deps: { isoReader: SevenZipIs
     settings: Settings['bdmv'],
     mode: Mode,
   ): TitleSelection[] | DiscPlan {
-    const { pick } = analysis;
+    const { pick, parseErrors } = analysis;
     const main = pick.main as MplsPlaylist;
     const extras = pick.extras.map((playlist): TitleSelection => ({ playlist, role: 'extra', edition: null }));
-    if (!pick.ambiguous) return [{ playlist: main, role: 'main', edition: null }, ...extras];
+    if (!pick.ambiguous && parseErrors.length === 0)
+      return [{ playlist: main, role: 'main', edition: null }, ...extras];
 
     const byName = new Map(analysis.playlists.map((p) => [p.name, p]));
     const choice = resolvedChoice(disc.row.id, 'main_title');
-    if (choice) {
-      const chosen = choice.playlists.map((name) => byName.get(name)).filter((p): p is MplsPlaylist => p != null);
-      if (chosen.length === 0) throw new AppError('unprocessable', 'the chosen playlists no longer exist on the disc');
+    const missing = choice?.playlists.filter((name) => !byName.has(name)) ?? [];
+    if (choice && missing.length === 0) {
+      const chosen = choice.playlists.map((name) => byName.get(name) as MplsPlaylist);
       const titles = choice.asEditions ? chosen : chosen.slice(0, 1);
       return editionsOf(titles, choice.asEditions ? choice.editionNames : null).concat(extras);
     }
-    if (settings.onAmbiguous === 'editions') return editionsOf(pick.candidates, {}).concat(extras);
+    if (!choice && parseErrors.length === 0 && settings.onAmbiguous === 'editions')
+      return editionsOf(pick.candidates, {}).concat(extras);
     const names = pick.candidates.map((p) => `${p.name} (${formatDuration(p.durationSec)})`).join(', ');
+    let message = `several playlists could be the main title: ${names}`;
+    if (parseErrors.length > 0)
+      message = `could not read ${parseErrors.join('; ')}; the main title may be among them, confirm it: ${names}`;
+    if (missing.length > 0)
+      message = `the chosen ${missing.join(', ')} no longer exist on the disc, choose again: ${names}`;
     return requireDecision(
       disc,
       mode,
       'main_title',
-      `several playlists could be the main title: ${names}`,
+      message,
       { titleCandidates: pick.candidates.map(titleCandidate) },
       analysis,
     );
@@ -284,6 +291,13 @@ export function createDiscPlanner(ctx: AppContext, deps: { isoReader: SevenZipIs
     const library = await services.libraries.get(disc.row.libraryId);
     const source = await openDisc(disc.row.path, disc.kind, deps.isoReader);
     const analysis = await analyzeDisc(source, pickOptions(settings));
+    if (analysis.parseErrors.length > 0 || analysis.warnings.length > 0)
+      log.warn('BDMV disc has unreadable playlist or clip files', {
+        mediaFileId: disc.row.id,
+        path: disc.row.path,
+        parseErrors: analysis.parseErrors,
+        warnings: analysis.warnings,
+      });
     if (analysis.encryption.encrypted)
       return result(
         'failed',
@@ -291,7 +305,10 @@ export function createDiscPlanner(ctx: AppContext, deps: { isoReader: SevenZipIs
         { analysis },
       );
     const main = analysis.pick.main;
-    if (!main) return result('failed', 'no playable playlist found on the disc', { analysis });
+    if (!main) {
+      const unreadable = analysis.parseErrors.length > 0 ? `; could not read ${analysis.parseErrors.join('; ')}` : '';
+      return result('failed', `no playable playlist found on the disc${unreadable}`, { analysis });
+    }
 
     const titles = selectTitles(disc, analysis, settings, mode);
     if (!Array.isArray(titles)) return titles;
@@ -303,6 +320,19 @@ export function createDiscPlanner(ctx: AppContext, deps: { isoReader: SevenZipIs
 
     const rootFolderPath = await resolveRootFolder(disc, radarr, settings);
     if (!rootFolderPath) return result('failed', `Radarr "${radarr.name}" has no accessible root folder`, { analysis });
+    const outputs = buildOutputPaths(
+      rootFolderPath,
+      movie,
+      titles.map((title) => ({ playlist: title.playlist.name, role: title.role, edition: title.edition })),
+    );
+    const insideSource = [rootFolderPath, ...outputs].find((path) => isWithin(resolve(path), resolve(disc.row.path)));
+    if (insideSource)
+      return result(
+        'failed',
+        `the output ${insideSource} would be inside the source disc ${disc.row.path}, which must stay untouched: ` +
+          'move the disc out of the Radarr movie folder or set a BDMV output root folder',
+        { analysis },
+      );
 
     const mainTitle = titles.find((title) => title.role === 'main') ?? titles[0];
     const mainPlaylist = mainTitle?.playlist ?? main;
@@ -318,11 +348,6 @@ export function createDiscPlanner(ctx: AppContext, deps: { isoReader: SevenZipIs
       originalLanguage: disc.row.originalLanguage,
     });
 
-    const outputs = buildOutputPaths(
-      rootFolderPath,
-      movie,
-      titles.map((title) => ({ playlist: title.playlist.name, role: title.role, edition: title.edition })),
-    );
     const playlists = titles.map((title) => title.playlist);
     const jobPlan: BdmvJobPlan = {
       sourcePath: disc.row.path,
