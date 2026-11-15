@@ -11,7 +11,6 @@ function upsert(items: readonly JobSummary[], job: JobSummary): JobSummary[] {
   return [...rest, job].sort(compareQueue);
 }
 
-/** Keeps the queue list (queued + running jobs) in step with job.* events; other events return the input array. */
 export function applyQueueEvent(items: readonly JobSummary[], event: ServerEvent): readonly JobSummary[] {
   switch (event.name) {
     case 'job.queued':

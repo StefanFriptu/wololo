@@ -34,6 +34,10 @@ export class Resource<T> {
     }
   }
 
+  get inFlight(): boolean {
+    return this.#controller !== null;
+  }
+
   set(data: T): void {
     this.data = data;
   }
@@ -42,5 +46,11 @@ export class Resource<T> {
     this.#controller?.abort();
     this.#controller = null;
     this.loading = false;
+  }
+
+  reset(): void {
+    this.abort();
+    this.data = undefined;
+    this.error = null;
   }
 }

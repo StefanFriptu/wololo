@@ -1,5 +1,7 @@
 import { expect, test } from 'bun:test';
-import { isActiveChild, NAV, sectionOf } from './nav.ts';
+import { isActiveChild } from './isActiveChild.ts';
+import { NAV } from './nav.ts';
+import { sectionOf } from './sectionOf.ts';
 
 test.each([
   ['/library', '/library'],

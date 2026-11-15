@@ -1,4 +1,4 @@
-import type { RuntimeConfig } from '#lib/runtime.ts';
+import type { RuntimeConfig } from '#lib/RuntimeConfig.ts';
 
 declare global {
   namespace App {}

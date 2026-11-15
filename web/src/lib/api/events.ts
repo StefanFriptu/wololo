@@ -1,11 +1,10 @@
 import { runtimeConfig } from '#lib/runtime.ts';
 import { EVENT_NAMES, type EventMap, type EventName, type ServerEvent } from '#lib/shared.ts';
+import type { EventHandler } from './EventHandler.ts';
 import { reconnectDelay } from './reconnectDelay.ts';
+import type { StreamStatus } from './StreamStatus.ts';
 
-export type EventHandler = (event: ServerEvent) => void;
-export type StreamStatus = 'connecting' | 'open' | 'reconnecting';
-
-export interface SubscribeOptions {
+interface SubscribeOptions {
   apiKey: string;
   /** Only these events; omit for every event except log.entry (the server sends it only when asked). */
   names?: readonly EventName[];
@@ -44,7 +43,8 @@ export function subscribeEvents(handler: EventHandler, options: SubscribeOptions
         let payload: EventMap[typeof name];
         try {
           payload = JSON.parse(message.data);
-        } catch {
+        } catch (error) {
+          console.error(`[events] dropped ${name} with an unreadable payload`, error);
           return;
         }
         handler({ name, payload } as ServerEvent);

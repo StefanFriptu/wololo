@@ -6,7 +6,7 @@
   import Icon from '#lib/components/Icon.svelte';
   import { formatDuration } from '#lib/format/formatDuration.ts';
   import { Resource } from '#lib/resource.svelte.ts';
-  import { attempt } from '#lib/toast.svelte.ts';
+  import { attempt } from '#lib/attempt.ts';
 
   let { libraryId, onfinished }: { libraryId?: number; onfinished?: () => void } = $props();
 

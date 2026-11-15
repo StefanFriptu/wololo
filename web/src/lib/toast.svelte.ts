@@ -1,7 +1,7 @@
 import { errorMessage } from '#lib/api/errorMessage.ts';
 import type { Tone } from '#lib/labels.ts';
 
-export interface Toast {
+interface Toast {
   id: number;
   tone: Tone;
   message: string;
@@ -33,18 +33,3 @@ class ToastState {
 }
 
 export const toasts = new ToastState();
-
-/** Runs a user action: shows a success toast, or an error toast instead of throwing. */
-export async function attempt<T>(
-  action: () => Promise<T>,
-  success?: string | ((result: T) => string),
-): Promise<T | undefined> {
-  try {
-    const result = await action();
-    if (success) toasts.success(typeof success === 'function' ? success(result) : success);
-    return result;
-  } catch (error) {
-    toasts.error(error);
-    return undefined;
-  }
-}

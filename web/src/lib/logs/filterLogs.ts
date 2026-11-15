@@ -1,8 +1,7 @@
 import type { LogEntry, LogLevel } from '#lib/shared.ts';
+import { LOG_LEVELS } from './logLevels.ts';
 
-export const LOG_LEVELS: readonly LogLevel[] = ['trace', 'debug', 'info', 'warn', 'error'];
-
-export interface LogFilter {
+interface LogFilter {
   /** Minimum level shown. */
   level: LogLevel;
   module: string | null;

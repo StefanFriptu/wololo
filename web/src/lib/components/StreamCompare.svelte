@@ -4,7 +4,8 @@
   import { formatChannels } from '#lib/format/formatChannels.ts';
   import { DROP_REASON_LABELS, type Tone } from '#lib/labels.ts';
   import type { MediaStream, PlannedStream } from '#lib/shared.ts';
-  import type { StreamChange, StreamRow } from '#lib/streams/pairStreams.ts';
+  import type { StreamChange } from '#lib/streams/StreamChange.ts';
+  import type { StreamRow } from '#lib/streams/StreamRow.ts';
 
   let {
     rows,

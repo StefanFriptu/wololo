@@ -9,9 +9,10 @@
   import { formatBytes } from '#lib/format/formatBytes.ts';
   import { formatDateTime } from '#lib/format/formatDateTime.ts';
   import { formatEstimate } from '#lib/format/formatEstimate.ts';
+  import { dryRunGroupLinks } from '#lib/library/dryRunGroupLinks.ts';
   import { href } from '#lib/paths.ts';
   import { Resource } from '#lib/resource.svelte.ts';
-  import { attempt } from '#lib/toast.svelte.ts';
+  import { attempt } from '#lib/attempt.ts';
 
   let libraryId = $state<number | undefined>(undefined);
   let profileId = $state<number | undefined>(undefined);
@@ -44,21 +45,13 @@
 
   const toNumber = (value: string): number | undefined => (value === '' ? undefined : Number(value));
 
-  function libraryLink(codec: string): string {
-    const query = new URLSearchParams({ status: 'needs_work' });
-    if (codec.startsWith('video:')) query.set('codec', codec.slice(6));
-    else if (codec === 'bdmv') query.delete('status');
-    else query.set('failingCodec', codec);
-    if (codec === 'bdmv') query.set('kind', 'bdmv');
-    if (libraryId !== undefined) query.set('libraryId', String(libraryId));
-    return href(`/library?${query}`);
-  }
-
   async function processAll(): Promise<void> {
     const library = libraries.data?.find((item) => item.id === libraryId);
-    if (!confirm(`Queue every file that needs work ${library ? `in ${library.name}` : 'in every library'}?`)) return;
+    const files = report.data?.totals.needsWork;
+    const count = files === undefined ? 'every file' : `all ${files} file(s)`;
+    if (!confirm(`Queue ${count} that need work ${library ? `in ${library.name}` : 'in every library'}?`)) return;
     await attempt(
-      () => api('POST /api/v1/jobs', { body: { filter: { libraryId, status: 'needs_work', profileId } } }),
+      () => api('POST /api/v1/jobs', { body: { filter: { libraryId, status: 'needs_work' } } }),
       (result) => `Queued ${result.jobs.length} job(s)${result.skipped.length ? `, skipped ${result.skipped.length}` : ''}`,
     );
   }
@@ -151,7 +144,13 @@
             <tbody>
               {#each data.groups as group (group.codec)}
                 <tr>
-                  <td><a class="mono" href={libraryLink(group.codec)}>{group.codec}</a></td>
+                  <td>
+                    {#if group.codec === 'bdmv'}<span class="mono">bdmv</span>:{/if}
+                    {#each dryRunGroupLinks(group.codec, libraryId) as link, index (link.query)}
+                      {#if index > 0}·{/if}
+                      <a class="mono" href={href(`/library${link.query}`)}>{link.label}</a>
+                    {/each}
+                  </td>
                   <td class="num">{group.files}</td>
                   <td class="num hide-sm">{formatEstimate(group.durationSec)}</td>
                   <td class="num">{formatBytes(group.sizeBytes)}</td>

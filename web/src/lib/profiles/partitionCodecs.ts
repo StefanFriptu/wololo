@@ -1,6 +1,6 @@
 import type { CodecInfo } from '#lib/shared.ts';
 
-export interface CodecPartition {
+interface CodecPartition {
   /** Allowed codecs that the catalog lists (shown as checkboxes). */
   known: string[];
   /** Allowed entries the catalog does not list, wildcards included ("pcm_*"), kept as free text. */

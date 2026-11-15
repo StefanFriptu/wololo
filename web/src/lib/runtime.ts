@@ -1,9 +1,4 @@
-export interface RuntimeConfig {
-  apiKey: string;
-  urlBase: string;
-  version: string;
-  instanceName: string;
-}
+import type { RuntimeConfig } from '#lib/RuntimeConfig.ts';
 
 /** Injected by the backend into index.html; in `vite dev` falls back to VITE_WOLOLO_API_KEY. */
 export function runtimeConfig(): RuntimeConfig {

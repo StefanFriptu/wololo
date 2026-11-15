@@ -19,7 +19,7 @@ type ParamsOption<K extends RouteKey> =
 type QueryOption<K extends RouteKey> = RouteQuery<K> extends undefined ? { query?: never } : { query?: RouteQuery<K> };
 type BodyOption<K extends RouteKey> = RouteBody<K> extends undefined ? { body?: never } : { body: RouteBody<K> };
 
-export type RequestOptions<K extends RouteKey> = ParamsOption<K> &
+type RequestOptions<K extends RouteKey> = ParamsOption<K> &
   QueryOption<K> &
   BodyOption<K> & { signal?: AbortSignal; apiKey?: string };
 

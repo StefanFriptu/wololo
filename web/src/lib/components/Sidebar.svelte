@@ -1,11 +1,20 @@
 <script lang="ts">
   import { page } from '$app/state';
   import Icon from '#lib/components/Icon.svelte';
-  import { isActiveChild, NAV, sectionOf } from '#lib/nav.ts';
+  import { isActiveChild } from '#lib/isActiveChild.ts';
+  import { NAV } from '#lib/nav.ts';
+  import { sectionOf } from '#lib/sectionOf.ts';
   import { href } from '#lib/paths.ts';
   import { runtimeConfig } from '#lib/runtime.ts';
 
-  let { open = false, onnavigate }: { open?: boolean; onnavigate?: () => void } = $props();
+  let {
+    open = false,
+    onnavigate,
+    badges = {},
+  }: { open?: boolean; onnavigate?: () => void; badges?: Readonly<Record<string, number>> } = $props();
+
+  const childBadges = (children: readonly { href: string }[] | undefined): number =>
+    (children ?? []).reduce((sum, child) => sum + (badges[child.href] ?? 0), 0);
 
   const urlBase = runtimeConfig().urlBase;
   const pathname = $derived(page.url.pathname.slice(urlBase.length) || '/');
@@ -20,6 +29,9 @@
         <a href={href(item.href)} class="top" class:active onclick={onnavigate}>
           <Icon name={item.icon} />
           <span>{item.label}</span>
+          {#if !active && childBadges(item.children) > 0}
+            <span class="count">{childBadges(item.children)}<span class="sr-only"> waiting</span></span>
+          {/if}
         </a>
         {#if item.children && active}
           <ul class="children">
@@ -30,7 +42,9 @@
                   href={href(child.href)}
                   class:active={current}
                   aria-current={current ? 'page' : undefined}
-                  onclick={onnavigate}>{child.label}</a
+                  onclick={onnavigate}
+                  >{child.label}
+                  {#if badges[child.href]}<span class="count">{badges[child.href]}<span class="sr-only"> waiting</span></span>{/if}</a
                 >
               </li>
             {/each}
@@ -84,6 +98,18 @@
   .children a.active {
     color: #5fd6c4;
     font-weight: 600;
+  }
+  .count {
+    margin-left: auto;
+    min-width: 1.4rem;
+    padding: 0 0.4rem;
+    border-radius: 999px;
+    background: var(--warning-bg);
+    color: var(--warning-fg);
+    font-size: 0.8em;
+    font-weight: 700;
+    line-height: 1.4rem;
+    text-align: center;
   }
   a:focus-visible {
     outline-offset: -2px;

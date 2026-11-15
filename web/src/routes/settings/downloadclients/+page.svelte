@@ -100,7 +100,10 @@
       </div>
       <div class="field">
         <label for="qb-password">Password</label>
-        <div class="control"><input id="qb-password" type="password" bind:value={form.password} autocomplete="off" /></div>
+        <div class="control">
+          <input id="qb-password" type="password" bind:value={form.password} autocomplete="off" aria-describedby={client.data ? 'qb-password-hint' : undefined} />
+          {#if client.data}<span id="qb-password-hint" class="hint">The saved password is kept unless you type a new one.</span>{/if}
+        </div>
       </div>
       <div class="field">
         <label for="qb-category">Category</label>

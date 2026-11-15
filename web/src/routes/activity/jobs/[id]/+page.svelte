@@ -16,6 +16,7 @@
   import { formatDuration } from '#lib/format/formatDuration.ts';
   import { formatSpeed } from '#lib/format/formatSpeed.ts';
   import { patchJob } from '#lib/jobs/patchJob.ts';
+  import { syncJobLog } from '#lib/jobs/syncJobLog.svelte.ts';
   import {
     JOB_STATE_LABELS,
     JOB_STATE_TONES,
@@ -28,7 +29,8 @@
   import { href } from '#lib/paths.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import { pairStreams } from '#lib/streams/pairStreams.ts';
-  import { attempt, toasts } from '#lib/toast.svelte.ts';
+  import { attempt } from '#lib/attempt.ts';
+  import { toasts } from '#lib/toast.svelte.ts';
 
   const LOG_POLL_MS = 3000;
 
@@ -43,16 +45,14 @@
 
   $effect(() => {
     void id;
-    untrack(() => job.load());
+    untrack(() => {
+      job.reset();
+      log.reset();
+      job.load();
+    });
   });
 
-  $effect(() => {
-    if (!job.data?.hasLog) return;
-    untrack(() => log.load({ silent: log.data !== undefined }));
-    if (job.data.state !== 'running') return;
-    const timer = setInterval(() => log.load({ silent: true }), LOG_POLL_MS);
-    return () => clearInterval(timer);
-  });
+  syncJobLog(job, log, LOG_POLL_MS);
 
   $effect(() => {
     void log.data;

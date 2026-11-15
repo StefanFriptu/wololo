@@ -24,10 +24,12 @@
     PLAN_ACTION_LABELS,
     PLAN_ACTION_TONES,
   } from '#lib/labels.ts';
+  import { fileProcessAction } from '#lib/library/fileProcessAction.ts';
   import { href } from '#lib/paths.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import { pairStreams } from '#lib/streams/pairStreams.ts';
-  import { attempt, toasts } from '#lib/toast.svelte.ts';
+  import { attempt } from '#lib/attempt.ts';
+  import { toasts } from '#lib/toast.svelte.ts';
 
   const id = $derived(Number(page.params.id));
 
@@ -43,6 +45,9 @@
   $effect(() => {
     void id;
     untrack(() => {
+      detail.reset();
+      history.reset();
+      disc.reset();
       detail.load();
       history.load();
       libraries.load();
@@ -111,11 +116,10 @@
     <PageHeader title={fileName(file.path)} subtitle={file.path}>
       {#snippet actions()}
         <button onclick={reprobe} disabled={busy}><Icon name="refresh" size={16} /> Re-check</button>
-        {#if file.status === 'needs_work' || file.status === 'failed'}
-          <button class="primary" onclick={() => process(false)} disabled={busy}><Icon name="play" size={16} /> Process now</button>
-        {:else if file.status === 'compatible'}
-          <button onclick={() => process(true)} disabled={busy} title="Queue a job even though the file passes the profile">
-            <Icon name="play" size={16} /> Process anyway
+        {@const action = fileProcessAction(file.status)}
+        {#if action}
+          <button class:primary={action.primary} onclick={() => process(action.force)} disabled={busy} title={action.title}>
+            <Icon name="play" size={16} /> {action.label}
           </button>
         {/if}
         {#if file.status === 'ignored'}

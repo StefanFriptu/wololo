@@ -12,10 +12,12 @@
   import { formatBytes } from '#lib/format/formatBytes.ts';
   import { formatDateTime } from '#lib/format/formatDateTime.ts';
   import { LOG_LEVEL_TONES } from '#lib/labels.ts';
-  import { filterLogs, LOG_LEVELS } from '#lib/logs/filterLogs.ts';
-  import { mergeLogs } from '#lib/logs/mergeLogs.ts';
+  import { filterLogs } from '#lib/logs/filterLogs.ts';
+  import { LOG_LEVELS } from '#lib/logs/logLevels.ts';
+  import type { LiveLogs } from '#lib/logs/LiveLogs.ts';
+  import { updateLiveLogs } from '#lib/logs/updateLiveLogs.ts';
   import { Resource } from '#lib/resource.svelte.ts';
-  import type { LogEntry, LogFileInfo, LogLevel } from '#lib/shared.ts';
+  import type { LogFileInfo, LogLevel } from '#lib/shared.ts';
   import { toasts } from '#lib/toast.svelte.ts';
 
   const MAX_ENTRIES = 1000;
@@ -25,23 +27,22 @@
   let level = $state<LogLevel>('info');
   let moduleName = $state<string | null>(null);
   let search = $state('');
-  let paused = $state(false);
-  let entries = $state.raw<LogEntry[]>([]);
-  let buffered = $state.raw<LogEntry[]>([]);
+  let feed = $state.raw<LiveLogs>({ entries: [], buffered: [], paused: false });
   let openFile = $state<{ name: string; text: string } | null>(null);
 
   const initial = new Resource((signal) => api('GET /api/v1/system/logs', { query: { limit: MAX_ENTRIES }, signal }));
   const files = new Resource((signal) => api('GET /api/v1/system/logs/files', { signal }));
 
-  const modules = $derived([...new Set(entries.map((entry) => entry.module))].sort());
-  const visible = $derived(filterLogs(entries, { level, module: moduleName, search }).reverse());
+  const modules = $derived([...new Set(feed.entries.map((entry) => entry.module))].sort());
+  const visible = $derived(filterLogs(feed.entries, { level, module: moduleName, search }).reverse());
 
   $effect(() => {
     untrack(() => initial.load());
   });
 
   $effect(() => {
-    if (initial.data) entries = mergeLogs(untrack(() => entries), initial.data, MAX_ENTRIES);
+    const snapshot = initial.data;
+    if (snapshot) feed = updateLiveLogs(untrack(() => feed), { type: 'snapshot', entries: snapshot }, MAX_ENTRIES);
   });
 
   $effect(() => {
@@ -52,17 +53,15 @@
     subscribeEvents(
       (event) => {
         if (event.name !== 'log.entry') return;
-        if (paused) buffered = [...buffered, event.payload];
-        else entries = mergeLogs(entries, [event.payload], MAX_ENTRIES);
+        feed = updateLiveLogs(feed, { type: 'entry', entry: event.payload }, MAX_ENTRIES);
       },
-      { apiKey: auth.key, names: ['log.entry'], onOpen: (reconnected) => reconnected && initial.load({ silent: true }) },
+      { apiKey: auth.key, names: ['log.entry'], onOpen: (reconnected) => reconnected && reload() },
     ),
   );
 
-  function resume(): void {
-    entries = mergeLogs(entries, buffered, MAX_ENTRIES);
-    buffered = [];
-    paused = false;
+  function reload(): void {
+    feed = updateLiveLogs(feed, { type: 'reconnect' }, MAX_ENTRIES);
+    initial.load({ silent: true });
   }
 
   async function view(file: LogFileInfo): Promise<void> {
@@ -112,16 +111,18 @@
         <span>Search</span>
         <input type="search" bind:value={search} placeholder="Message contains…" />
       </label>
-      {#if paused}
-        <button type="button" onclick={resume}><Icon name="play" size={14} /> Resume ({buffered.length} new)</button>
+      {#if feed.paused}
+        <button type="button" onclick={() => (feed = updateLiveLogs(feed, { type: 'resume' }, MAX_ENTRIES))}>
+          <Icon name="play" size={14} /> Resume ({feed.buffered.length} new)
+        </button>
       {:else}
-        <button type="button" onclick={() => (paused = true)}><Icon name="pause" size={14} /> Pause</button>
+        <button type="button" onclick={() => (feed = updateLiveLogs(feed, { type: 'pause' }, MAX_ENTRIES))}><Icon name="pause" size={14} /> Pause</button>
       {/if}
     </form>
 
-    {#if initial.error && entries.length === 0}
+    {#if initial.error && feed.entries.length === 0}
       <p class="alert tone-danger" role="alert">{errorMessage(initial.error)}</p>
-    {:else if initial.loading && entries.length === 0}
+    {:else if initial.loading && feed.entries.length === 0}
       <p class="muted" role="status">Loading…</p>
     {:else if visible.length === 0}
       <p class="muted empty">No log entries match.</p>

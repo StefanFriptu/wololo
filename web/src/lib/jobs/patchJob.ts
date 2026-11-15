@@ -1,6 +1,5 @@
 import type { JobSummary, ServerEvent } from '#lib/shared.ts';
 
-/** Applies one SSE event to a job; returns the same object when the event is about another job. */
 export function patchJob(job: JobSummary, event: ServerEvent): JobSummary {
   switch (event.name) {
     case 'job.queued':

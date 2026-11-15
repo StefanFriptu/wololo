@@ -1,4 +1,5 @@
-import { DEFAULT_MEDIA_FILTERS, type MediaFilters } from './parseMediaFilters.ts';
+import { DEFAULT_MEDIA_FILTERS } from './defaultMediaFilters.ts';
+import type { MediaFilters } from './MediaFilters.ts';
 
 const ORDER: readonly (keyof MediaFilters)[] = [
   'libraryId',

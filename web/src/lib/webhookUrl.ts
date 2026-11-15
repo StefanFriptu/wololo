@@ -1,6 +1,6 @@
 import type { ArrKind } from '#lib/shared.ts';
 
-export interface WebhookUrlInput {
+interface WebhookUrlInput {
   origin: string;
   urlBase: string;
   kind: ArrKind;

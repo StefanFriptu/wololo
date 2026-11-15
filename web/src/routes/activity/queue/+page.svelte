@@ -15,7 +15,8 @@
   import { href } from '#lib/paths.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import type { JobSummary } from '#lib/shared.ts';
-  import { attempt, toasts } from '#lib/toast.svelte.ts';
+  import { attempt } from '#lib/attempt.ts';
+  import { toasts } from '#lib/toast.svelte.ts';
 
   const queue = new Resource((signal) => api('GET /api/v1/queue', { signal }));
   const settings = new Resource((signal) => api('GET /api/v1/settings', { signal }));

@@ -1,12 +1,12 @@
 import type { BdmvDecisionChoice } from '#lib/shared.ts';
 
-export interface MainTitleSelection {
+interface MainTitleSelection {
   playlists: readonly string[];
   asEditions: boolean;
   editionNames: Readonly<Record<string, string>>;
 }
 
-export type MainTitleResult =
+type MainTitleResult =
   | { ok: true; choice: Extract<BdmvDecisionChoice, { kind: 'main_title' }> }
   | { ok: false; reason: string };
 

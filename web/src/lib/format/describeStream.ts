@@ -1,7 +1,7 @@
 import type { MediaStream } from '#lib/shared.ts';
 import { formatChannels } from './formatChannels.ts';
 
-export interface StreamDescription {
+interface StreamDescription {
   /** Codec as people know it: the ffprobe profile when present ("DTS-HD MA"), else the codec name upper-cased. */
   codec: string;
   /** Layout, resolution, bit rate and similar facts, joined for one table cell. */

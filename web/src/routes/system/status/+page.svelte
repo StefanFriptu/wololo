@@ -10,16 +10,14 @@
   import { formatEstimate } from '#lib/format/formatEstimate.ts';
   import type { Tone } from '#lib/labels.ts';
   import { Resource } from '#lib/resource.svelte.ts';
-  import { restartAndReload } from '#lib/restart.ts';
+  import { restarter } from '#lib/restarter.svelte.ts';
   import { runtimeConfig } from '#lib/runtime.ts';
   import type { HealthCheck } from '#lib/shared.ts';
-  import { toasts } from '#lib/toast.svelte.ts';
 
   const HEALTH_TONES: Record<HealthCheck['level'], Tone> = { notice: 'info', warning: 'warning', error: 'danger' };
 
   const status = new Resource((signal) => api('GET /api/v1/system/status', { signal }));
   const health = new Resource((signal) => api('GET /api/v1/system/health', { signal }));
-  let restarting = $state(false);
   const urlBase = runtimeConfig().urlBase;
 
   $effect(() => {
@@ -28,24 +26,11 @@
       health.load();
     });
   });
-
-  async function restart(): Promise<void> {
-    if (!confirm('Restart Wololo now? Running jobs are stopped and picked up again after the restart.')) return;
-    restarting = true;
-    try {
-      const back = await restartAndReload();
-      if (!back) toasts.show('warning', 'Wololo did not come back within two minutes. Check the container logs.');
-    } catch (error) {
-      toasts.error(error);
-    } finally {
-      restarting = false;
-    }
-  }
 </script>
 
 <PageHeader title="Status">
   {#snippet actions()}
-    <button onclick={restart} disabled={restarting}><Icon name="power" size={16} /> {restarting ? 'Restarting…' : 'Restart'}</button>
+    <button onclick={() => restarter.run()} disabled={restarter.restarting}><Icon name="power" size={16} /> {restarter.restarting ? 'Restarting…' : 'Restart'}</button>
   {/snippet}
 </PageHeader>
 

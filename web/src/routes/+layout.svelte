@@ -1,8 +1,9 @@
 <script lang="ts">
   import '#lib/styles/app.css';
-  import type { Snippet } from 'svelte';
+  import { type Snippet, untrack } from 'svelte';
   import { auth } from '#lib/api/auth.svelte.ts';
   import { live } from '#lib/api/live.svelte.ts';
+  import { pendingDecisions } from '#lib/bdmv/pendingDecisions.ts';
   import ApiKeyPrompt from '#lib/components/ApiKeyPrompt.svelte';
   import Icon from '#lib/components/Icon.svelte';
   import Sidebar from '#lib/components/Sidebar.svelte';
@@ -10,6 +11,7 @@
   import { href } from '#lib/paths.ts';
   import { runtimeConfig } from '#lib/runtime.ts';
   import { theme } from '#lib/theme.svelte.ts';
+  import { toasts } from '#lib/toast.svelte.ts';
 
   let { children }: { children: Snippet } = $props();
   let menuOpen = $state(false);
@@ -25,6 +27,29 @@
     if (auth.needsKey) return;
     return live.connect(auth.key);
   });
+
+  async function refreshDecisions(announce: boolean): Promise<void> {
+    const before = pendingDecisions.data?.length ?? 0;
+    await pendingDecisions.load({ silent: true });
+    if (pendingDecisions.error) console.error('[decisions] could not count pending decisions', pendingDecisions.error);
+    const after = pendingDecisions.data?.length ?? 0;
+    if (announce && after > before) toasts.show('warning', 'A Blu-ray disc needs a decision: see Library > Decisions.');
+  }
+
+  $effect(() => {
+    if (auth.needsKey) return;
+    untrack(() => refreshDecisions(false));
+    const stopEvents = live.on((event) => {
+      if (event.name === 'bdmv.decision') refreshDecisions(true);
+    });
+    const stopReconnect = live.onReconnect(() => refreshDecisions(false));
+    return () => {
+      stopEvents();
+      stopReconnect();
+    };
+  });
+
+  const badges = $derived({ '/library/decisions': pendingDecisions.data?.length ?? 0 });
 </script>
 
 <svelte:window onkeydown={(event) => event.key === 'Escape' && menuOpen && (menuOpen = false)} />
@@ -60,7 +85,7 @@
       </button>
     </header>
     <div class="body">
-      <Sidebar open={menuOpen} onnavigate={() => (menuOpen = false)} />
+      <Sidebar open={menuOpen} onnavigate={() => (menuOpen = false)} {badges} />
       {#if menuOpen}
         <button class="scrim" aria-label="Close menu" tabindex="-1" onclick={() => (menuOpen = false)}></button>
       {/if}

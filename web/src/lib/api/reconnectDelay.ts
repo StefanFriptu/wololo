@@ -1,4 +1,4 @@
-export const MAX_RECONNECT_DELAY_MS = 30_000;
+const MAX_RECONNECT_DELAY_MS = 30_000;
 
 /** Exponential back-off for the event stream: 1 s, 2 s, 4 s ... capped at 30 s. */
 export function reconnectDelay(attempt: number): number {

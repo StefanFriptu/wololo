@@ -7,6 +7,7 @@
   import Icon from '#lib/components/Icon.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import Pagination from '#lib/components/Pagination.svelte';
+  import { pageInRange } from '#lib/pageInRange.ts';
   import { formatBytes } from '#lib/format/formatBytes.ts';
   import { formatDateTime } from '#lib/format/formatDateTime.ts';
   import { formatRelativeTime } from '#lib/format/formatRelativeTime.ts';
@@ -30,6 +31,11 @@
     void event;
     void pageNumber;
     untrack(() => history.load({ silent: history.data !== undefined }));
+  });
+
+  $effect(() => {
+    const target = history.data ? pageInRange(history.data) : null;
+    if (target !== null) pageNumber = target;
   });
 
   $effect(() => {

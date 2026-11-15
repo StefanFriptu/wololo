@@ -15,12 +15,16 @@
   import { formatDuration } from '#lib/format/formatDuration.ts';
   import { formatRelativeTime } from '#lib/format/formatRelativeTime.ts';
   import { MEDIA_KIND_LABELS, MEDIA_STATUS_LABELS, MEDIA_STATUS_TONES } from '#lib/labels.ts';
-  import { type MediaFilters, PAGE_SIZES, parseMediaFilters } from '#lib/library/parseMediaFilters.ts';
+  import type { MediaFilters } from '#lib/library/MediaFilters.ts';
+  import { PAGE_SIZES } from '#lib/library/pageSizes.ts';
+  import { parseMediaFilters } from '#lib/library/parseMediaFilters.ts';
+  import { needsWorkScope } from '#lib/library/needsWorkScope.ts';
   import { serializeMediaFilters } from '#lib/library/serializeMediaFilters.ts';
+  import { pageInRange } from '#lib/pageInRange.ts';
   import { href } from '#lib/paths.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import { MEDIA_FILE_KINDS, MEDIA_FILE_STATUSES, type MediaSortKey } from '#lib/shared.ts';
-  import { attempt } from '#lib/toast.svelte.ts';
+  import { attempt } from '#lib/attempt.ts';
 
   const REFRESH_DEBOUNCE_MS = 1500;
 
@@ -54,6 +58,11 @@
       selected.clear();
       media.load({ silent: media.data !== undefined });
     });
+  });
+
+  $effect(() => {
+    const target = media.data ? pageInRange(media.data) : null;
+    if (target !== null) untrack(() => update({ page: target }));
   });
 
   $effect(() => {
@@ -126,24 +135,21 @@
     ),
   );
 
+  const bulkScope = $derived(
+    needsWorkScope({
+      filters,
+      libraryName: libraries.data?.find((item) => item.id === filters.libraryId)?.name ?? null,
+      profileName: profiles.data?.find((item) => item.id === filters.profileId)?.name ?? null,
+      kindLabels: MEDIA_KIND_LABELS,
+      listedTotal: media.data?.total ?? null,
+    }),
+  );
+
   async function processNeedsWork(): Promise<void> {
-    const library = libraries.data?.find((item) => item.id === filters.libraryId);
-    const scope = library ? `in ${library.name}` : 'in every library';
-    const extra = filters.failingCodec ? ` failing on ${filters.failingCodec}` : '';
-    if (!confirm(`Queue every file that needs work${extra} ${scope}?`)) return;
+    const scope = bulkScope;
+    if (!scope.ok || !confirm(scope.question)) return;
     await attempt(
-      () =>
-        api('POST /api/v1/jobs', {
-          body: {
-            filter: {
-              libraryId: filters.libraryId,
-              status: 'needs_work',
-              failingCodec: filters.failingCodec,
-              kind: filters.kind,
-              profileId: filters.profileId,
-            },
-          },
-        }),
+      () => api('POST /api/v1/jobs', { body: { filter: scope.filter } }),
       (result) => `Queued ${result.jobs.length} job(s)${result.skipped.length ? `, skipped ${result.skipped.length}` : ''}`,
     );
   }
@@ -171,7 +177,16 @@
     {#if selected.size > 0}
       <button onclick={processSelected}><Icon name="play" size={16} /> Process {selected.size} selected</button>
     {/if}
-    <button class="primary" onclick={processNeedsWork}><Icon name="play" size={16} /> Process needs-work</button>
+    <button
+      class="primary"
+      onclick={processNeedsWork}
+      disabled={!bulkScope.ok}
+      title={bulkScope.ok ? undefined : bulkScope.reason}
+      aria-describedby={bulkScope.ok ? undefined : 'bulk-hint'}
+    >
+      <Icon name="play" size={16} /> Process needs-work
+    </button>
+    {#if !bulkScope.ok}<span id="bulk-hint" class="sr-only">{bulkScope.reason}</span>{/if}
   {/snippet}
 </PageHeader>
 

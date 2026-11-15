@@ -9,10 +9,12 @@
   import { formatBytes } from '#lib/format/formatBytes.ts';
   import { formatDateTime } from '#lib/format/formatDateTime.ts';
   import { formatRelativeTime } from '#lib/format/formatRelativeTime.ts';
+  import { pageInRange } from '#lib/pageInRange.ts';
   import { href } from '#lib/paths.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import type { RecycleBinEntry } from '#lib/shared.ts';
-  import { attempt, toasts } from '#lib/toast.svelte.ts';
+  import { attempt } from '#lib/attempt.ts';
+  import { toasts } from '#lib/toast.svelte.ts';
 
   const PAGE_SIZE = 50;
 
@@ -27,6 +29,11 @@
   $effect(() => {
     void pageNumber;
     untrack(() => entries.load({ silent: entries.data !== undefined }));
+  });
+
+  $effect(() => {
+    const target = entries.data ? pageInRange(entries.data) : null;
+    if (target !== null) pageNumber = target;
   });
 
   const isActive = (entry: RecycleBinEntry): boolean => entry.restoredAt === null && entry.purgedAt === null;

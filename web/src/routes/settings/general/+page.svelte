@@ -6,13 +6,14 @@
   import CopyButton from '#lib/components/CopyButton.svelte';
   import Icon from '#lib/components/Icon.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
-  import { LOG_LEVELS } from '#lib/logs/filterLogs.ts';
+  import { LOG_LEVELS } from '#lib/logs/logLevels.ts';
   import { Resource } from '#lib/resource.svelte.ts';
-  import { restartAndReload } from '#lib/restart.ts';
+  import { restarter } from '#lib/restarter.svelte.ts';
   import { runtimeConfig } from '#lib/runtime.ts';
   import { AUTHENTICATION_MODES, type AuthenticationMode, type GeneralConfigUpdate } from '#lib/shared.ts';
-  import { type ThemeChoice, theme } from '#lib/theme.svelte.ts';
-  import { attempt, toasts } from '#lib/toast.svelte.ts';
+  import type { ThemeChoice } from '#lib/ThemeChoice.ts';
+  import { theme } from '#lib/theme.svelte.ts';
+  import { attempt } from '#lib/attempt.ts';
 
   const AUTH_LABELS: Record<AuthenticationMode, { label: string; hint: string }> = {
     disabled_for_local_addresses: {
@@ -36,7 +37,6 @@
   let form = $state<Required<GeneralConfigUpdate> | null>(null);
   let showKey = $state(false);
   let busy = $state(false);
-  let restarting = $state(false);
 
   const patch = $derived.by((): GeneralConfigUpdate | null => {
     const current = general.data;
@@ -84,19 +84,6 @@
     }
     busy = false;
   }
-
-  async function restart(): Promise<void> {
-    if (!confirm('Restart Wololo now? Running jobs are stopped and picked up again after the restart.')) return;
-    restarting = true;
-    try {
-      const back = await restartAndReload();
-      if (!back) toasts.show('warning', 'Wololo did not come back within two minutes. Check the container logs.');
-    } catch (error) {
-      toasts.error(error);
-    } finally {
-      restarting = false;
-    }
-  }
 </script>
 
 <PageHeader title="General" />
@@ -106,8 +93,8 @@
     {#if current.restartRequired}
       <div class="alert tone-warning" role="status">
         <p>Port, bind address or URL base changed. Restart Wololo to apply them.</p>
-        <button class="small" onclick={restart} disabled={restarting}>
-          <Icon name="power" size={14} /> {restarting ? 'Restarting…' : 'Restart now'}
+        <button class="small" onclick={() => restarter.run()} disabled={restarter.restarting}>
+          <Icon name="power" size={14} /> {restarter.restarting ? 'Restarting…' : 'Restart now'}
         </button>
       </div>
     {/if}

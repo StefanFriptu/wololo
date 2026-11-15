@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from '#lib/api/client.ts';
+  import { pendingDecisions } from '#lib/bdmv/pendingDecisions.ts';
   import { errorMessage } from '#lib/api/errorMessage.ts';
   import { mainTitleChoice } from '#lib/bdmv/mainTitleChoice.ts';
   import Badge from '#lib/components/Badge.svelte';
@@ -8,7 +9,7 @@
   import { DECISION_KIND_LABELS } from '#lib/labels.ts';
   import { href } from '#lib/paths.ts';
   import type { ArrInstance, BdmvDecision, BdmvDecisionChoice, MovieMatchCandidate } from '#lib/shared.ts';
-  import { attempt } from '#lib/toast.svelte.ts';
+  import { attempt } from '#lib/attempt.ts';
 
   let {
     decision,
@@ -44,7 +45,9 @@
       success,
     );
     busy = false;
-    if (result) onchange();
+    if (!result) return;
+    pendingDecisions.load({ silent: true });
+    onchange();
   }
 
   function resolveMainTitle(): void {
@@ -89,7 +92,9 @@
       'Decision dismissed',
     );
     busy = false;
-    if (result) onchange();
+    if (!result) return;
+    pendingDecisions.load({ silent: true });
+    onchange();
   }
 
   function describeChoice(choice: BdmvDecisionChoice): string {

@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { beforeNavigate } from '$app/navigation';
   import { api } from '#lib/api/client.ts';
+  import { errorMessage } from '#lib/api/errorMessage.ts';
   import { live } from '#lib/api/live.svelte.ts';
   import Async from '#lib/components/Async.svelte';
   import Badge from '#lib/components/Badge.svelte';
@@ -12,6 +13,7 @@
   import { LIBRARY_KIND_LABELS, LIBRARY_MODE_LABELS } from '#lib/labels.ts';
   import { parseLines } from '#lib/parseLines.ts';
   import { parseList } from '#lib/parseList.ts';
+  import { href } from '#lib/paths.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import { diffSettings } from '#lib/settings/diffSettings.ts';
   import type { ArrQualityProfile, ArrRootFolder, Library, Settings } from '#lib/shared.ts';
@@ -27,6 +29,8 @@
   let patternsText = $state('');
   let rootFolders = $state<ArrRootFolder[]>([]);
   let qualityProfiles = $state<ArrQualityProfile[]>([]);
+  let rootFoldersError = $state<string | null>(null);
+  let qualityProfilesError = $state<string | null>(null);
   let editing = $state<Library | null>(null);
   let editorOpen = $state(false);
   let saving = $state(false);
@@ -62,11 +66,25 @@
     if (!radarr) return;
     untrack(() => {
       api('GET /api/v1/arr/:id/rootfolders', { params: { id: radarr.id } })
-        .then((folders) => (rootFolders = folders))
-        .catch(() => (rootFolders = []));
+        .then((folders) => {
+          rootFolders = folders;
+          rootFoldersError = null;
+        })
+        .catch((error: unknown) => {
+          console.error('[settings] radarr root folders', error);
+          rootFolders = [];
+          rootFoldersError = `Could not load the Radarr root folders: ${errorMessage(error)}`;
+        });
       api('GET /api/v1/arr/:id/qualityprofiles', { params: { id: radarr.id } })
-        .then((list) => (qualityProfiles = list))
-        .catch(() => (qualityProfiles = []));
+        .then((list) => {
+          qualityProfiles = list;
+          qualityProfilesError = null;
+        })
+        .catch((error: unknown) => {
+          console.error('[settings] radarr quality profiles', error);
+          qualityProfiles = [];
+          qualityProfilesError = `Could not load the Radarr quality profiles: ${errorMessage(error)}`;
+        });
     });
   });
 
@@ -227,7 +245,7 @@
           <div class="field">
             <span class="label">Plex</span>
             <div class="control">
-              <label class="check"><input type="checkbox" bind:checked={form.processing.pauseWhilePlexStreaming} /> Pause new jobs while Plex is streaming</label>
+              <span class="hint">Pausing while someone streams is set on the <a href={href('/settings/plex')}>Plex page</a>.</span>
             </div>
           </div>
           <div class="field">
@@ -391,6 +409,7 @@
                   placeholder="The one holding the disc's library"
                 />
               {/if}
+              {#if rootFoldersError}<span class="hint tone-danger" role="alert">{rootFoldersError}</span>{/if}
             </div>
           </div>
           <div class="field">
@@ -417,6 +436,7 @@
                   placeholder="First profile"
                 />
               {/if}
+              {#if qualityProfilesError}<span class="hint tone-danger" role="alert">{qualityProfilesError}</span>{/if}
               <span class="hint">Used when Wololo adds a movie Radarr does not know yet.</span>
             </div>
           </div>

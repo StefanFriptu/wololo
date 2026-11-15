@@ -3,22 +3,13 @@ import {
   MEDIA_FILE_STATUSES,
   type MediaFileKind,
   type MediaFileStatus,
-  type MediaQuery,
   type MediaSortKey,
 } from '#lib/shared.ts';
+import { DEFAULT_MEDIA_FILTERS } from './defaultMediaFilters.ts';
+import type { MediaFilters } from './MediaFilters.ts';
+import { PAGE_SIZES } from './pageSizes.ts';
 
-export const MEDIA_SORT_KEYS: readonly MediaSortKey[] = ['path', 'size', 'status', 'updatedAt', 'duration'];
-export const PAGE_SIZES: readonly number[] = [25, 50, 100, 250];
-
-export interface MediaFilters extends MediaQuery {
-  page: number;
-  pageSize: number;
-  sortKey: MediaSortKey;
-  sortDir: 'asc' | 'desc';
-  status?: MediaFileStatus;
-}
-
-export const DEFAULT_MEDIA_FILTERS: Readonly<MediaFilters> = { page: 1, pageSize: 50, sortKey: 'path', sortDir: 'asc' };
+const MEDIA_SORT_KEYS: readonly MediaSortKey[] = ['path', 'size', 'status', 'updatedAt', 'duration'];
 
 const positiveInt = (value: string | null): number | undefined => {
   if (value == null || !/^\d+$/.test(value)) return undefined;

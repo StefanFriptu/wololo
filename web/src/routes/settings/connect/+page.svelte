@@ -13,7 +13,8 @@
   import { Resource } from '#lib/resource.svelte.ts';
   import { runtimeConfig } from '#lib/runtime.ts';
   import type { ArrInstance, ArrKind, PathMapping } from '#lib/shared.ts';
-  import { attempt, toasts } from '#lib/toast.svelte.ts';
+  import { attempt } from '#lib/attempt.ts';
+  import { toasts } from '#lib/toast.svelte.ts';
   import { webhookUrl } from '#lib/webhookUrl.ts';
 
   const instances = new Resource((signal) => api('GET /api/v1/arr', { signal }));

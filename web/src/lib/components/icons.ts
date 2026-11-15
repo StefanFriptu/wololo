@@ -30,5 +30,3 @@ export const ICONS = {
   history: 'M3 12a9 9 0 1 0 3-6.7M3 4v5h5M12 7v5l3 2',
   sort: 'M8 4v16M4 16l4 4 4-4M16 20V4M12 8l4-4 4 4',
 } as const;
-
-export type IconName = keyof typeof ICONS;

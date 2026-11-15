@@ -1,17 +1,8 @@
-import type { ConversionPlan, DroppedStream, MediaStream, PlannedStream, StreamKind } from '#lib/shared.ts';
+import type { ConversionPlan, MediaStream } from '#lib/shared.ts';
+import type { StreamChange } from './StreamChange.ts';
+import type { StreamRow } from './StreamRow.ts';
 
-export type StreamChange = 'copy' | 'encode' | 'retag' | 'drop' | 'add' | 'none';
-
-export interface StreamRow {
-  kind: StreamKind;
-  before: MediaStream | null;
-  planned: PlannedStream | null;
-  after: MediaStream | null;
-  change: StreamChange;
-  dropReason: DroppedStream['reason'] | null;
-}
-
-export interface PairStreamsInput {
+interface PairStreamsInput {
   before: readonly MediaStream[] | null;
   plan: ConversionPlan | null;
   /** Streams of the written file, in output order (plan.streams order). */
@@ -58,12 +49,8 @@ function byPosition(before: readonly MediaStream[], after: readonly MediaStream[
   });
 }
 
-/**
- * Side-by-side rows for "before / after": with a plan, output streams in output order (matched to their source by
- * sourceIndex and to the written file by position), then dropped sources; without one, streams paired by position.
- */
 export function pairStreams({ before, plan, after = null }: PairStreamsInput): StreamRow[] {
   const sources = before ?? [];
-  if (plan) return fromPlan(sources, plan, after ?? []);
+  if (plan && (plan.streams.length > 0 || plan.dropped.length > 0)) return fromPlan(sources, plan, after ?? []);
   return byPosition(sources, after);
 }

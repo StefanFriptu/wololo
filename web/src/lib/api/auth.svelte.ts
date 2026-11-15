@@ -24,13 +24,11 @@ class AuthState {
   key = $state(typeof window === 'undefined' ? '' : resolveApiKey(runtimeConfig().apiKey, readStored()));
   needsKey = $derived(this.key === '');
 
-  /** A key the server accepted: remember it in this browser. */
   accept(key: string): void {
     writeStored(key);
     this.key = key;
   }
 
-  /** The server answered 401: forget the key and show the prompt. */
   reject(): void {
     writeStored(null);
     this.key = '';

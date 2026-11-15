@@ -9,9 +9,10 @@
   import { formatBytes } from '#lib/format/formatBytes.ts';
   import { formatDateTime } from '#lib/format/formatDateTime.ts';
   import { Resource } from '#lib/resource.svelte.ts';
-  import { restartAndReload } from '#lib/restart.ts';
+  import { restarter } from '#lib/restarter.svelte.ts';
   import type { BackupInfo, RestoreResult } from '#lib/shared.ts';
-  import { attempt, toasts } from '#lib/toast.svelte.ts';
+  import { attempt } from '#lib/attempt.ts';
+  import { toasts } from '#lib/toast.svelte.ts';
 
   const KIND_LABELS: Record<BackupInfo['kind'], string> = {
     manual: 'Manual',
@@ -22,7 +23,6 @@
   const backups = new Resource((signal) => api('GET /api/v1/system/backups', { signal }));
   let busy = $state(false);
   let restartPending = $state(false);
-  let restarting = $state(false);
   let upload = $state<FileList | null>(null);
 
   $effect(() => {
@@ -80,18 +80,6 @@
     restored(await attempt(() => api('POST /api/v1/system/backups/restore', { body }), 'Restore prepared'));
     busy = false;
   }
-
-  async function restart(): Promise<void> {
-    restarting = true;
-    try {
-      const back = await restartAndReload();
-      if (!back) toasts.show('warning', 'Wololo did not come back within two minutes. Check the container logs.');
-    } catch (error) {
-      toasts.error(error);
-    } finally {
-      restarting = false;
-    }
-  }
 </script>
 
 <PageHeader title="Backup" subtitle="The database and settings, as a zip. Media files are not included.">
@@ -103,7 +91,7 @@
 {#if restartPending}
   <div class="alert tone-warning" role="status">
     <p>The restore is staged. Restart Wololo to apply it.</p>
-    <button class="small" onclick={restart} disabled={restarting}><Icon name="power" size={14} /> {restarting ? 'Restarting…' : 'Restart now'}</button>
+    <button class="small" onclick={() => restarter.run()} disabled={restarter.restarting}><Icon name="power" size={14} /> {restarter.restarting ? 'Restarting…' : 'Restart now'}</button>
   </div>
 {/if}
 

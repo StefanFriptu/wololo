@@ -13,7 +13,7 @@
   import { formatRelativeTime } from '#lib/format/formatRelativeTime.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import type { ScheduledTaskInfo } from '#lib/shared.ts';
-  import { attempt } from '#lib/toast.svelte.ts';
+  import { attempt } from '#lib/attempt.ts';
 
   const tasks = new Resource((signal) => api('GET /api/v1/system/tasks', { signal }));
   let now = $state(Date.now());

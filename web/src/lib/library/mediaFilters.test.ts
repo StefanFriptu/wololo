@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
-import { DEFAULT_MEDIA_FILTERS, parseMediaFilters } from './parseMediaFilters.ts';
+import { DEFAULT_MEDIA_FILTERS } from './defaultMediaFilters.ts';
+import { parseMediaFilters } from './parseMediaFilters.ts';
 import { serializeMediaFilters } from './serializeMediaFilters.ts';
 
 const parse = (query: string) => parseMediaFilters(new URLSearchParams(query));

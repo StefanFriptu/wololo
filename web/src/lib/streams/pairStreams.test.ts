@@ -86,3 +86,11 @@ test('pairStreams - extra written streams are additions', () => {
 test('pairStreams - no streams at all yields no rows', () => {
   expect(pairStreams({ before: null, plan: null })).toEqual([]);
 });
+
+test('pairStreams - a blocked plan without planned or dropped streams still lists the source streams', () => {
+  const rows = pairStreams({ before: [video, dts], plan: plan({ action: 'blocked', streams: [], dropped: [] }) });
+  expect(rows.map((row) => [row.before?.index, row.change])).toEqual([
+    [0, 'none'],
+    [1, 'none'],
+  ]);
+});
