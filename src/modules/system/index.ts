@@ -1,9 +1,9 @@
-import { accessSync, constants, existsSync, readdirSync, readFileSync, rmSync, statfsSync, statSync } from 'node:fs';
+import { constants, existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { access, statfs } from 'node:fs/promises';
 import { release, type } from 'node:os';
 import { join } from 'node:path';
 import type { AppContext } from '../../app/context.ts';
 import type { SystemService } from '../../contracts/platform.ts';
-import { errorMessage } from '../../core/errors.ts';
 import { findExecutable, runProcess } from '../../core/process.ts';
 import { MIGRATIONS_DIR } from '../../db/client.ts';
 import type { SystemStatus } from '../../shared/api-types.ts';
@@ -13,8 +13,10 @@ import { buildHealthChecks, type LibraryRootFact } from './healthChecks.ts';
 import { enabledLibraryRootsQuery, libraryCountQuery } from './libraryRootsQuery.ts';
 import { platformOpenApi } from './platformOpenApi.ts';
 import { RESTORE_DIR } from './restore.ts';
+import { ROOT_PROBE_TIMEOUT_MS, rootProblem } from './rootProblem.ts';
 import { JOB_LOG_MAX_AGE_DAYS, jobIdOfLog, selectStaleJobLogs } from './staleJobLogs.ts';
 import { probeTools, type ToolReport } from './tools.ts';
+import { withTimeout } from './withTimeout.ts';
 
 const TOOL_CACHE_MS = 5 * 60 * 1000;
 export const RESTART_DELAY_MS = 250;
@@ -34,33 +36,20 @@ function fileSize(path: string): number {
   }
 }
 
-function rootProblem(path: string): string | null {
-  try {
-    if (!statSync(path).isDirectory()) return 'not a directory';
-    accessSync(path, constants.R_OK | constants.X_OK);
-    return null;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    return code ?? errorMessage(error);
-  }
+function isWritable(path: string): Promise<boolean> {
+  const check = access(path, constants.W_OK).then(
+    () => true,
+    () => false,
+  );
+  return withTimeout(check, ROOT_PROBE_TIMEOUT_MS, false);
 }
 
-function isWritable(path: string): boolean {
-  try {
-    accessSync(path, constants.W_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function freeBytes(path: string): number | null {
-  try {
-    const stats = statfsSync(path);
-    return Number(stats.bavail) * Number(stats.bsize);
-  } catch {
-    return null;
-  }
+function freeBytes(path: string): Promise<number | null> {
+  const check = statfs(path).then(
+    (stats) => Number(stats.bavail) * Number(stats.bsize),
+    () => null,
+  );
+  return withTimeout(check, ROOT_PROBE_TIMEOUT_MS, null);
 }
 
 export function createSystemService(ctx: AppContext): SystemService {
@@ -79,7 +68,12 @@ export function createSystemService(ctx: AppContext): SystemService {
   let toolCache: { at: number; report: Promise<ToolReport> } | null = null;
   const toolReport = (): Promise<ToolReport> => {
     if (toolCache && Date.now() - toolCache.at < TOOL_CACHE_MS) return toolCache.report;
-    const report = probeTools(config().tools, { which: findExecutable, run: runProcess, signal: ctx.shutdownSignal });
+    const report = probeTools(config().tools, {
+      which: findExecutable,
+      run: runProcess,
+      signal: ctx.shutdownSignal,
+      log,
+    });
     toolCache = { at: Date.now(), report };
     return report;
   };
@@ -111,20 +105,26 @@ export function createSystemService(ctx: AppContext): SystemService {
 
   const health = async () => {
     const current = config();
-    const roots: LibraryRootFact[] = enabledLibraryRootsQuery(ctx.db).map((root) => ({
-      ...root,
-      problem: rootProblem(root.path),
-    }));
+    const [roots, configWritable, configFreeBytes, tools] = await Promise.all([
+      Promise.all(
+        enabledLibraryRootsQuery(ctx.db)
+          .all()
+          .map(async (root): Promise<LibraryRootFact> => ({ ...root, problem: await rootProblem(root.path) })),
+      ),
+      isWritable(current.configDir),
+      freeBytes(current.configDir),
+      toolReport(),
+    ]);
     return buildHealthChecks({
       platform: process.platform,
       isDocker: current.isDocker,
       uid: process.getuid?.() ?? null,
-      tools: await toolReport(),
-      libraryCount: libraryCountQuery(ctx.db),
+      tools,
+      libraryCount: libraryCountQuery(ctx.db).get()?.total ?? 0,
       roots,
       configDir: current.configDir,
-      configWritable: isWritable(current.configDir),
-      configFreeBytes: freeBytes(current.configDir),
+      configWritable,
+      configFreeBytes,
       processingEnabled: ctx.settings.section('processing').enabled,
       restorePending: existsSync(join(current.configDir, RESTORE_DIR)),
     });
@@ -140,7 +140,7 @@ export function createSystemService(ctx: AppContext): SystemService {
     const ids = files.map((file) => jobIdOfLog(file.name) as number);
     const stale = selectStaleJobLogs({
       files,
-      existingJobIds: existingJobIdsQuery(ctx.db, ids),
+      existingJobIds: new Set(existingJobIdsQuery(ctx.db, ids).flatMap((query) => query.all().map((row) => row.id))),
       nowMs: Date.now(),
     });
     for (const name of stale) rmSync(join(dir, name), { force: true });

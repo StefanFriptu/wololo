@@ -7,13 +7,13 @@ export const JOB_LOG_MAX_AGE_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const JOB_LOG_PATTERN = /^(\d+)\.txt$/;
 
-/** Pure: job id of a per-job log file name ("42.txt" -> 42), null for anything else. */
+/** Job id of a per-job log file name ("42.txt" -> 42), null for anything else. */
 export function jobIdOfLog(name: string): number | null {
   const id = JOB_LOG_PATTERN.exec(name)?.[1];
   return id === undefined ? null : Number(id);
 }
 
-/** Pure: job logs older than the age limit whose job no longer exists. */
+/** Job logs older than the age limit whose job no longer exists. */
 export function selectStaleJobLogs(input: {
   files: readonly JobLogFile[];
   existingJobIds: ReadonlySet<number>;

@@ -9,12 +9,12 @@ const VERSION_PATTERNS: Readonly<Record<ToolInfo['name'], RegExp>> = {
   ionice: /^ionice from util-linux (\d+(?:\.\d+)+)/m,
 };
 
-/** Pure: version string from a tool's version output, null when the output does not look like that tool. */
+/** Version string from a tool's version output, null when the output does not look like that tool. */
 export function parseToolVersion(name: ToolInfo['name'], output: string): string | null {
   return VERSION_PATTERNS[name].exec(output.trim())?.[1] ?? null;
 }
 
-/** Pure: whether `ffmpeg -protocols` output lists the protocol (e.g. "bluray", needs libbluray). */
+/** Whether `ffmpeg -protocols` output lists the protocol (e.g. "bluray", needs libbluray). */
 export function hasFfmpegProtocol(output: string, protocol: string): boolean {
   return output.split(/\r?\n/).some((line) => line.trim() === protocol);
 }

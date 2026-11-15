@@ -97,7 +97,7 @@ table{border-collapse:collapse;margin:8px 0;font-size:13px;width:100%}td,th{bord
 nav a{margin-right:12px;color:var(--accent)}a{color:var(--accent)}summary{cursor:pointer;color:var(--muted)}
 `;
 
-/** Pure: a self-contained HTML reference (no external scripts, works offline) rendered from the OpenAPI document. */
+/** A self-contained HTML reference (no external scripts, works offline) rendered from the OpenAPI document. */
 export function renderApiDocsPage(document: OpenApiDocument): string {
   const groups = entriesByTag(document);
   const descriptions = new Map(document.tags.map((tag) => [tag.name, tag.description]));

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { z } from 'zod';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
 import type { RouteSchemas } from '../../api/http.ts';
+import { AppError, type ErrorCode } from '../../core/errors.ts';
 import { API_ROUTE_META, type RouteMeta, splitRouteKey } from '../../shared/api-routes.ts';
 import type { RouteKey } from '../../shared/api-types.ts';
 import {
@@ -177,6 +178,14 @@ test('openapi.json - describes responses by response type', () => {
   expect(Object.keys(operationOf(served, 'GET /api/v1/events').responses['200'] ?? {})).toContain('content');
   expect(served.components.schemas.HealthCheck).toMatchObject({ title: 'HealthCheck' });
   expect(served.components.schemas.ApiErrorBody).toMatchObject({ required: ['error', 'message'] });
+});
+
+test('openapi.json - lists every error code with its HTTP status', () => {
+  const codes = (served.components.schemas.ApiErrorBody as { properties: { error: { enum: ErrorCode[] } } }).properties
+    .error.enum;
+  expect(codes.map((code) => new AppError(code, code).status).sort()).toEqual([
+    400, 401, 404, 409, 412, 422, 500, 501, 502,
+  ]);
 });
 
 const META: RouteMeta = { module: 'platform', auth: 'apikey', responseType: 'json', summary: 'Test route' };

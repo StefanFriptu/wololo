@@ -49,7 +49,7 @@ function genericSchema(name: string, args: JsonSchema[], expression: string): Js
 }
 
 /**
- * Pure: turns a TypeScript type expression from ApiRoutes ("HealthCheck[]", "Paginated<JobSummary>", "ScanStatus | null",
+ * Turns a TypeScript type expression from ApiRoutes ("HealthCheck[]", "Paginated<JobSummary>", "ScanStatus | null",
  * "Record<string, unknown>") into a JSON Schema whose named types are $refs to components.
  */
 export function typeExpressionSchema(expression: string): TypeExpressionSchema {

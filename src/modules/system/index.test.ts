@@ -62,6 +62,18 @@ test('createBackup - scheduled backups are pruned to the newest ones', async () 
   expect(readdirSync(t.ctx.config.get().backupDir).filter((name) => name.startsWith('.'))).toEqual([]);
 });
 
+test('createBackup - removes temp files left by an interrupted backup', async () => {
+  const dir = t.ctx.config.get().backupDir;
+  mkdirSync(dir, { recursive: true });
+  const leftovers = [
+    '.wololo_backup_scheduled_2026.11.01_03.00.00.zip.db',
+    '.wololo_backup_manual_2026.11.01_03.00.00.zip.partial',
+  ];
+  for (const name of [...leftovers, '.keep']) writeFileSync(join(dir, name), 'x');
+  await t.ctx.services.system.createBackup('manual');
+  expect(readdirSync(dir).filter((name) => name.startsWith('.'))).toEqual(['.keep']);
+});
+
 test('createBackup - concurrent calls get distinct names', async () => {
   const created = await Promise.all([1, 2, 3].map(() => t.ctx.services.system.createBackup('manual')));
   expect(new Set(created.map((backup) => backup.name)).size).toBe(3);

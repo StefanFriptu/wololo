@@ -46,7 +46,7 @@ function toolChecks(facts: HealthFacts): HealthCheck[] {
     .map((tool) => ({
       source: 'tools',
       level: MISSING_TOOL[tool.name].level,
-      message: `${tool.name} not found: ${MISSING_TOOL[tool.name].impact}`,
+      message: `${tool.name} ${tool.path ? `at ${tool.path} cannot be run` : 'not found'}: ${MISSING_TOOL[tool.name].impact}`,
     }));
   if (facts.tools.ffmpegBluray === false) {
     checks.push({
@@ -123,7 +123,7 @@ function runtimeChecks(facts: HealthFacts): HealthCheck[] {
   return checks;
 }
 
-/** Pure: health warnings from facts gathered by the system service; most severe first. */
+/** Health warnings from facts gathered by the system service; most severe first. */
 export function buildHealthChecks(facts: HealthFacts): HealthCheck[] {
   const rank: Record<HealthCheck['level'], number> = { error: 0, warning: 1, notice: 2 };
   return [...toolChecks(facts), ...libraryChecks(facts), ...configChecks(facts), ...runtimeChecks(facts)].sort(

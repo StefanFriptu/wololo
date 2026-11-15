@@ -34,6 +34,8 @@ const EXTRACT_LIMITS: Readonly<Record<string, number>> = {
   [CONFIG_FILE]: 1024 * 1024,
 };
 
+const INTERRUPTED_TEMP_FILE = /^\.wololo_backup_.+\.(db|partial)$/;
+
 async function* single(bytes: Uint8Array): AsyncGenerator<Uint8Array> {
   yield bytes;
 }
@@ -76,8 +78,16 @@ export function createBackupStore(deps: BackupStoreDeps): BackupStore {
     }
   };
 
+  const removeInterruptedTempFiles = () => {
+    for (const name of readdirSync(deps.backupDir).filter((entry) => INTERRUPTED_TEMP_FILE.test(entry))) {
+      rmSync(join(deps.backupDir, name), { force: true });
+      deps.log.warn('removed a temp file left by an interrupted backup', { name });
+    }
+  };
+
   const createUnlocked = async (kind: BackupKind): Promise<BackupInfo> => {
     mkdirSync(deps.backupDir, { recursive: true });
+    removeInterruptedTempFiles();
     const date = deps.now();
     let clash = 0;
     while (existsSync(join(deps.backupDir, formatBackupName(kind, date, clash)))) clash += 1;

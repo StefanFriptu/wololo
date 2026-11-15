@@ -14,7 +14,7 @@ export const BACKUPS_KEPT: Readonly<Record<BackupKind, number | null>> = {
 
 const pad = (value: number) => String(value).padStart(2, '0');
 
-/** Pure: "wololo_backup_<kind>_<yyyy.MM.dd_HH.mm.ss>.zip" in local time (the container's TZ), "_<n>" on a clash. */
+/** "wololo_backup_<kind>_<yyyy.MM.dd_HH.mm.ss>.zip" in local time (the container's TZ), "_<n>" on a clash. */
 export function formatBackupName(kind: BackupKind, date: Date, clash = 0): string {
   const stamp =
     `${date.getFullYear()}.${pad(date.getMonth() + 1)}.${pad(date.getDate())}_` +
@@ -22,13 +22,13 @@ export function formatBackupName(kind: BackupKind, date: Date, clash = 0): strin
   return `wololo_backup_${kind}_${stamp}${clash > 0 ? `_${clash}` : ''}.zip`;
 }
 
-/** Pure: the kind of a backup file name, null for anything that is not a Wololo backup name. */
+/** The kind of a backup file name, null for anything that is not a Wololo backup name. */
 export function parseBackupKind(name: string): BackupKind | null {
   const kind = NAME_PATTERN.exec(name)?.[1];
   return kind === 'manual' || kind === 'scheduled' || kind === 'pre_restore' ? kind : null;
 }
 
-/** Pure: names of backups beyond the per-kind limit, oldest first out. */
+/** Names of backups beyond the per-kind limit, oldest first out. */
 export function selectBackupsToPrune(
   backups: readonly BackupInfo[],
   kept: Readonly<Record<BackupKind, number | null>> = BACKUPS_KEPT,

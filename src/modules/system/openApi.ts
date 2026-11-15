@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { RouteSchemas } from '../../api/http.ts';
+import type { ErrorCode } from '../../core/errors.ts';
 import { type ModuleKey, type RouteMeta, splitRouteKey } from '../../shared/api-routes.ts';
 import type { RouteKey } from '../../shared/api-types.ts';
 import { type JsonSchema, typeExpressionSchema } from './typeExpressionSchema.ts';
@@ -79,24 +80,23 @@ const SECURITY_SCHEMES = {
   bearer: { type: 'http', scheme: 'bearer' },
 } as const;
 
+const ERROR_CODES: Readonly<Record<ErrorCode, true>> = {
+  not_found: true,
+  validation: true,
+  unprocessable: true,
+  conflict: true,
+  unauthorized: true,
+  precondition_failed: true,
+  upstream: true,
+  not_implemented: true,
+  internal: true,
+};
+
 const ERROR_SCHEMA: JsonSchema = {
   type: 'object',
   required: ['error', 'message'],
   properties: {
-    error: {
-      type: 'string',
-      enum: [
-        'not_found',
-        'validation',
-        'unprocessable',
-        'conflict',
-        'unauthorized',
-        'precondition_failed',
-        'upstream',
-        'not_implemented',
-        'internal',
-      ],
-    },
+    error: { type: 'string', enum: Object.keys(ERROR_CODES) },
     message: { type: 'string' },
     details: {},
   },
@@ -247,7 +247,7 @@ function successResponse(meta: RouteMeta, typeName: string, refs: Set<string>): 
 }
 
 /**
- * Pure: OpenAPI 3.1 document from the route metadata, the zod schemas registered by route() and the response type
+ * OpenAPI 3.1 document from the route metadata, the zod schemas registered by route() and the response type
  * names of ApiRoutes. Paths are relative to the URL base, which is the single server entry.
  */
 export function buildOpenApiDocument(input: OpenApiInput): OpenApiResult {

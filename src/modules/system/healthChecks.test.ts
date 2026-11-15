@@ -49,6 +49,13 @@ test.each<[ToolInfo['name'], HealthCheck['level']]>([
   expectCheck(checks, level, `${name} not found`);
 });
 
+test('buildHealthChecks - a tool that is found but cannot run says so', () => {
+  const base = facts();
+  const tools = base.tools.tools.map((tool) => (tool.name === 'mkvmerge' ? { ...tool, available: false } : tool));
+  const checks = buildHealthChecks({ ...base, tools: { ...base.tools, tools } });
+  expectCheck(checks, 'warning', 'mkvmerge at /usr/bin/mkvmerge cannot be run');
+});
+
 test('buildHealthChecks - missing ionice is expected outside Linux', () => {
   expect(buildHealthChecks(facts({ platform: 'darwin' }, ['ionice']))).toEqual([]);
 });
