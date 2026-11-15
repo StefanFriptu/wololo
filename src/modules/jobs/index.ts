@@ -26,7 +26,7 @@ export function createJobsService(ctx: AppContext): JobsService {
     resume: () => notImplemented('jobs.resume'),
     history: async () => notImplemented('jobs.history'),
     addHistory: async () => notImplemented('jobs.addHistory'),
-    recover: async () => ({ requeued: 0, tempFilesDeleted: 0 }),
+    recover: async () => ({ requeued: 0, completed: 0, tempFilesDeleted: 0 }),
     housekeeping: async () => notImplemented('jobs.housekeeping'),
     start: async () => {},
     stop: async () => {},

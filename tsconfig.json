@@ -16,5 +16,5 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["src", "test", "docker", "drizzle.config.ts"]
+  "include": ["src", "test", "docker", "drizzle.config.ts", "web/src/**/*.test.ts"]
 }

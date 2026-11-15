@@ -3,11 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Hono } from 'hono';
 import type { AppEnv } from '../../src/api/http.ts';
-import {
-  type AppContext,
-  createAppContext,
-  type Services,
-} from '../../src/app/context.ts';
+import { type AppContext, createAppContext, type Services } from '../../src/app/context.ts';
 import { createHttpApp } from '../../src/app/server.ts';
 import { ConfigStore } from '../../src/core/config.ts';
 import { LogHub } from '../../src/core/logger.ts';
@@ -23,6 +19,8 @@ export interface TestContext {
   dir: string;
   /** app.request with the API key header set. */
   request(path: string, init?: RequestInit): Promise<Response>;
+  /** Number of ctx.requestRestart() calls (the real one stops the process). */
+  restarts(): number;
   cleanup(): void;
 }
 
@@ -33,9 +31,7 @@ export interface TestContextOptions {
 }
 
 /** Fresh temp config dir + migrated SQLite db + full AppContext (real core, module services as currently implemented). */
-export function createTestContext(
-  options: TestContextOptions = {},
-): TestContext {
+export function createTestContext(options: TestContextOptions = {}): TestContext {
   const dir = mkdtempSync(join(tmpdir(), 'wololo-test-'));
   const config = new ConfigStore({
     configDir: dir,
@@ -48,11 +44,15 @@ export function createTestContext(
   const logs = new LogHub({ level: 'debug', logDir: null, console: false });
   const dbHandle = openDatabase(join(dir, 'wololo.db'));
   runMigrations(dbHandle);
+  let restarts = 0;
   const ctx = createAppContext({
     config,
     logs,
     dbHandle,
     overrides: options.overrides,
+    requestRestart: () => {
+      restarts += 1;
+    },
   });
   if (options.settings) ctx.settings.update(options.settings);
   const app = createHttpApp(ctx);
@@ -66,6 +66,7 @@ export function createTestContext(
       if (!headers.has('x-api-key')) headers.set('x-api-key', TEST_API_KEY);
       return Promise.resolve(app.request(path, { ...init, headers }));
     },
+    restarts: () => restarts,
     cleanup: () => {
       ctx.requestShutdown();
       logs.close();

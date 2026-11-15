@@ -3,26 +3,12 @@
  * Generated files are cached under test/.cache/fixtures, keyed by a hash of the spec.
  */
 import { createHash } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hasBinary } from './binaries.ts';
 
-export type FixtureAudioCodec =
-  | 'ac3'
-  | 'eac3'
-  | 'dts'
-  | 'truehd'
-  | 'flac'
-  | 'aac'
-  | 'pcm_s24le'
-  | 'opus';
+export type FixtureAudioCodec = 'ac3' | 'eac3' | 'dts' | 'truehd' | 'flac' | 'aac' | 'pcm_s24le' | 'opus';
 export type FixtureLayout = 'mono' | 'stereo' | '5.0' | '5.1' | '7.1';
 
 export interface FixtureAudioTrack {
@@ -58,10 +44,7 @@ const FIXTURE_FORMAT_VERSION = 1;
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 export const FIXTURE_CACHE_DIR = join(ROOT, 'test', '.cache', 'fixtures');
 
-const ENCODERS: Record<
-  FixtureAudioCodec,
-  { encoder: string; experimental: boolean }
-> = {
+const ENCODERS: Record<FixtureAudioCodec, { encoder: string; experimental: boolean }> = {
   ac3: { encoder: 'ac3', experimental: false },
   eac3: { encoder: 'eac3', experimental: false },
   dts: { encoder: 'dca', experimental: true },
@@ -95,11 +78,7 @@ export const MAX_CHANNELS: Record<FixtureAudioCodec, number> = {
   opus: 8,
 };
 
-function aevalsrc(
-  layout: FixtureLayout,
-  durationSec: number,
-  seed: number,
-): string {
+function aevalsrc(layout: FixtureLayout, durationSec: number, seed: number): string {
   const exprs = Array.from(
     { length: CHANNELS[layout] },
     (_, channel) => `0.2*sin(${220 + seed * 40 + channel * 55}*2*PI*t)`,
@@ -142,8 +121,7 @@ export function buildFixtureArgs(
   sideFiles: { subtitles: string[]; chapters: string | null },
 ): string[] {
   const duration = spec.durationSec ?? 3;
-  const video =
-    spec.video === undefined ? { codec: 'h264' as const } : spec.video;
+  const video = spec.video === undefined ? { codec: 'h264' as const } : spec.video;
   const args = ['-hide_banner', '-nostdin', '-y', '-v', 'error'];
   const maps: string[] = [];
   let input = 0;
@@ -189,13 +167,9 @@ export function buildFixtureArgs(
     experimental ||= exp;
     args.push(`-c:a:${i}`, encoder);
     if (track.bitrateKbps) args.push(`-b:a:${i}`, `${track.bitrateKbps}k`);
-    if (track.language)
-      args.push(`-metadata:s:a:${i}`, `language=${track.language}`);
+    if (track.language) args.push(`-metadata:s:a:${i}`, `language=${track.language}`);
     if (track.title) args.push(`-metadata:s:a:${i}`, `title=${track.title}`);
-    args.push(
-      `-disposition:a:${i}`,
-      (track.default ?? i === 0) ? 'default' : '0',
-    );
+    args.push(`-disposition:a:${i}`, (track.default ?? i === 0) ? 'default' : '0');
   });
   if (experimental) args.push('-strict', '-2');
 
@@ -203,9 +177,7 @@ export function buildFixtureArgs(
     args.push(`-c:s:${i}`, spec.container === 'mp4' ? 'mov_text' : 'srt');
     args.push(`-metadata:s:s:${i}`, `language=${track.language}`);
     if (track.title) args.push(`-metadata:s:s:${i}`, `title=${track.title}`);
-    const flags = [track.default ? 'default' : '', track.forced ? 'forced' : '']
-      .filter(Boolean)
-      .join('+');
+    const flags = [track.default ? 'default' : '', track.forced ? 'forced' : ''].filter(Boolean).join('+');
     args.push(`-disposition:s:${i}`, flags || '0');
   });
 
@@ -224,10 +196,7 @@ export async function ensureFixture(spec: FixtureSpec): Promise<string> {
   if (existsSync(output)) return output;
 
   const duration = spec.durationSec ?? 3;
-  const work = join(
-    FIXTURE_CACHE_DIR,
-    `.work-${process.pid}-${Math.random().toString(36).slice(2)}`,
-  );
+  const work = join(FIXTURE_CACHE_DIR, `.work-${process.pid}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(work, { recursive: true });
   try {
     const subtitles = (spec.subtitles ?? []).map((track, i) => {
@@ -241,21 +210,12 @@ export async function ensureFixture(spec: FixtureSpec): Promise<string> {
       writeFileSync(chapters, chaptersMetadata(duration, spec.chapters));
     }
     const temp = join(work, `out.${spec.container ?? 'mkv'}`);
-    const proc = Bun.spawn(
-      ['ffmpeg', ...buildFixtureArgs(spec, temp, { subtitles, chapters })],
-      {
-        stdout: 'ignore',
-        stderr: 'pipe',
-      },
-    );
-    const [exitCode, stderr] = await Promise.all([
-      proc.exited,
-      new Response(proc.stderr).text(),
-    ]);
-    if (exitCode !== 0)
-      throw new Error(
-        `fixture ${spec.name} failed (${exitCode}): ${stderr.trim()}`,
-      );
+    const proc = Bun.spawn(['ffmpeg', ...buildFixtureArgs(spec, temp, { subtitles, chapters })], {
+      stdout: 'ignore',
+      stderr: 'pipe',
+    });
+    const [exitCode, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+    if (exitCode !== 0) throw new Error(`fixture ${spec.name} failed (${exitCode}): ${stderr.trim()}`);
     renameSync(temp, output);
     return output;
   } finally {
@@ -263,7 +223,19 @@ export async function ensureFixture(spec: FixtureSpec): Promise<string> {
   }
 }
 
-/** Shared catalogue. Add new fixtures here only through docs/CONTRACT-CHANGES.md; define module-local specs in your own tests. */
+/**
+ * Copies a cached fixture into dir (default name: the cache file name) and returns the copy's path. Use it for every
+ * test that renames, replaces, recycles or deletes the file, so the shared cache stays intact.
+ */
+export async function ensureFixtureCopy(spec: FixtureSpec, dir: string, name?: string): Promise<string> {
+  const source = await ensureFixture(spec);
+  mkdirSync(dir, { recursive: true });
+  const target = join(dir, name ?? fixtureFileName(spec));
+  copyFileSync(source, target);
+  return target;
+}
+
+/** Shared catalogue. Add new fixtures here only through docs/contract-changes/<module>.md; define module-local specs in your own tests. */
 export const FIXTURES = {
   dts51: {
     name: 'dts51',
@@ -326,11 +298,7 @@ export const FIXTURES = {
       },
       { codec: 'aac', layout: 'stereo', language: 'ger', default: false },
     ],
-    subtitles: [
-      { language: 'eng' },
-      { language: 'spa', forced: true },
-      { language: 'ger' },
-    ],
+    subtitles: [{ language: 'eng' }, { language: 'spa', forced: true }, { language: 'ger' }],
     chapters: 4,
   },
   untaggedLanguage: {

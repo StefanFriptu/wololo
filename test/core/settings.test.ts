@@ -15,9 +15,7 @@ describe('SettingsStore', () => {
     t = createTestContext();
     expect(t.ctx.settings.get()).toEqual(DEFAULT_SETTINGS);
     const changed: string[][] = [];
-    t.ctx.events.on('settings.changed', ({ sections }) =>
-      changed.push(sections),
-    );
+    t.ctx.events.on('settings.changed', ({ sections }) => changed.push(sections));
     t.ctx.settings.update({
       processing: { window: { enabled: true } },
       recycleBin: { retentionDays: 3 },
@@ -34,9 +32,7 @@ describe('SettingsStore', () => {
 
   test('rejects invalid values', () => {
     t = createTestContext();
-    expect(() =>
-      t?.ctx.settings.update({ processing: { concurrency: 0 } }),
-    ).toThrow(AppError);
+    expect(() => t?.ctx.settings.update({ processing: { concurrency: 0 } })).toThrow(AppError);
     expect(t.ctx.settings.section('processing').concurrency).toBe(1);
   });
 

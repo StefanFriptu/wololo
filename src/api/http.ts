@@ -1,33 +1,52 @@
+import type { Server } from 'bun';
 import type { Context, Hono } from 'hono';
 import { z } from 'zod';
 import { AppError } from '../core/errors.ts';
 import { API_ROUTE_META, splitRouteKey } from '../shared/api-routes.ts';
 import type { RouteKey, RouteResponse } from '../shared/api-types.ts';
 
-export type AppEnv = Record<string, never>;
+/** server is passed by Bun.serve (`fetch: (req, server) => app.fetch(req, { server })`); absent in app.request() tests. */
+export interface AppBindings {
+  server?: Server<undefined>;
+}
+export type AppEnv = { Bindings: AppBindings };
 export type ApiApp = Hono<AppEnv>;
 export type ApiContext = Context<AppEnv>;
 
 type MaybePromise<T> = T | Promise<T>;
-export type RouteHandler<K extends RouteKey> = (
-  c: ApiContext,
-) => MaybePromise<RouteResponse<K> | Response>;
+export type RouteHandler<K extends RouteKey> = (c: ApiContext) => MaybePromise<RouteResponse<K> | Response>;
 
 const METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'] as const;
 type Method = (typeof METHODS)[number];
 
+/** Zod schemas a handler validates with; recorded for the OpenAPI document (system.openApiDocument). */
+export interface RouteSchemas {
+  params?: z.ZodType;
+  query?: z.ZodType;
+  body?: z.ZodType;
+}
+
+const ROUTE_SCHEMAS = new Map<RouteKey, RouteSchemas>();
+
+export function routeSchemas(): ReadonlyMap<RouteKey, RouteSchemas> {
+  return ROUTE_SCHEMAS;
+}
+
+/** Remote address of the request when served by Bun.serve; null under app.request(). */
+export function requestIp(c: ApiContext): string | null {
+  const server = (c.env as AppBindings | undefined)?.server;
+  return server?.requestIP(c.req.raw)?.address ?? null;
+}
+
 /**
  * Registers a handler for a route of the shared ApiRoutes map. The return value is type-checked against
  * the contract and serialised as JSON; undefined becomes 204 No Content; a Response (text/blob/sse) passes through.
+ * Pass the zod schemas the handler parses with, so the OpenAPI document can describe them.
  */
-export function route<K extends RouteKey>(
-  app: ApiApp,
-  key: K,
-  handler: RouteHandler<K>,
-): void {
+export function route<K extends RouteKey>(app: ApiApp, key: K, handler: RouteHandler<K>, schemas?: RouteSchemas): void {
   const { method, path } = splitRouteKey(key);
-  if (!METHODS.includes(method as Method))
-    throw new Error(`unsupported method in route key ${key}`);
+  if (!METHODS.includes(method as Method)) throw new Error(`unsupported method in route key ${key}`);
+  if (schemas) ROUTE_SCHEMAS.set(key, schemas);
   app.on(method, path, async (c) => {
     const result = await handler(c);
     if (result instanceof Response) return result;
@@ -37,10 +56,7 @@ export function route<K extends RouteKey>(
 }
 
 /** Registers a 501 handler for each key not implemented yet. Register real handlers first: the first match wins. */
-export function registerNotImplemented(
-  app: ApiApp,
-  keys: readonly RouteKey[],
-): void {
+export function registerNotImplemented(app: ApiApp, keys: readonly RouteKey[]): void {
   for (const key of keys) {
     const { method, path } = splitRouteKey(key);
     app.on(method, path, (c) =>
@@ -55,18 +71,9 @@ export function registerNotImplemented(
   }
 }
 
-function parseWith<T extends z.ZodType>(
-  schema: T,
-  value: unknown,
-  where: string,
-): z.infer<T> {
+function parseWith<T extends z.ZodType>(schema: T, value: unknown, where: string): z.infer<T> {
   const parsed = schema.safeParse(value);
-  if (!parsed.success)
-    throw new AppError(
-      'validation',
-      `invalid ${where}`,
-      z.treeifyError(parsed.error),
-    );
+  if (!parsed.success) throw new AppError('validation', `invalid ${where}`, z.treeifyError(parsed.error));
   return parsed.data;
 }
 
@@ -74,10 +81,7 @@ export const idParamSchema = z.object({
   id: z.coerce.number().int().positive(),
 });
 
-export function parseParams<T extends z.ZodType>(
-  c: ApiContext,
-  schema: T,
-): z.infer<T> {
+export function parseParams<T extends z.ZodType>(c: ApiContext, schema: T): z.infer<T> {
   return parseWith(schema, c.req.param(), 'path parameters');
 }
 
@@ -86,17 +90,11 @@ export function parseId(c: ApiContext): number {
 }
 
 /** Query strings arrive as strings: use z.coerce for numbers and booleans. */
-export function parseQuery<T extends z.ZodType>(
-  c: ApiContext,
-  schema: T,
-): z.infer<T> {
+export function parseQuery<T extends z.ZodType>(c: ApiContext, schema: T): z.infer<T> {
   return parseWith(schema, c.req.query(), 'query');
 }
 
-export async function parseBody<T extends z.ZodType>(
-  c: ApiContext,
-  schema: T,
-): Promise<z.infer<T>> {
+export async function parseBody<T extends z.ZodType>(c: ApiContext, schema: T): Promise<z.infer<T>> {
   let body: unknown;
   try {
     const text = await c.req.text();

@@ -33,13 +33,7 @@ describe('migrations', () => {
 
   test('enable foreign keys and WAL', () => {
     const sqlite = t.ctx.dbHandle.sqlite;
-    expect(
-      sqlite.query<{ foreign_keys: number }, []>('PRAGMA foreign_keys').get()
-        ?.foreign_keys,
-    ).toBe(1);
-    expect(
-      sqlite.query<{ journal_mode: string }, []>('PRAGMA journal_mode').get()
-        ?.journal_mode,
-    ).toBe('wal');
+    expect(sqlite.query<{ foreign_keys: number }, []>('PRAGMA foreign_keys').get()?.foreign_keys).toBe(1);
+    expect(sqlite.query<{ journal_mode: string }, []>('PRAGMA journal_mode').get()?.journal_mode).toBe('wal');
   });
 });

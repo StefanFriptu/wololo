@@ -8,7 +8,5 @@ if (!ffmpegAvailable()) {
 for (const spec of Object.values(FIXTURES)) {
   const started = performance.now();
   const path = await ensureFixture(spec);
-  console.log(
-    `${spec.name.padEnd(16)} ${Math.round(performance.now() - started)} ms  ${path}`,
-  );
+  console.log(`${spec.name.padEnd(16)} ${Math.round(performance.now() - started)} ms  ${path}`);
 }

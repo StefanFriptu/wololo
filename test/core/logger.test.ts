@@ -2,7 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { LogHub } from '../../src/core/logger.ts';
+import { formatLogLine, LogHub } from '../../src/core/logger.ts';
+import type { LogEntry } from '../../src/shared/domain.ts';
 
 describe('LogHub', () => {
   test('filters by level, keeps a bounded ring buffer and returns newest first', () => {
@@ -26,9 +27,7 @@ describe('LogHub', () => {
     const hub = new LogHub({ level: 'trace', logDir: null, console: false });
     hub.logger('jobs').child('worker').info('a');
     hub.logger('scan').info('b');
-    expect(hub.entries({ module: 'jobs' }).map((e) => e.module)).toEqual([
-      'jobs.worker',
-    ]);
+    expect(hub.entries({ module: 'jobs' }).map((e) => e.module)).toEqual(['jobs.worker']);
   });
 
   test('writes and rotates the log file', () => {
@@ -47,16 +46,28 @@ describe('LogHub', () => {
         hub.flush();
       }
       hub.close();
-      expect(hub.listFiles().map((f) => f.name)).toEqual([
-        'wololo.0.txt',
-        'wololo.1.txt',
-        'wololo.txt',
-      ]);
-      expect(readFileSync(join(dir, 'wololo.txt'), 'utf8')).toContain(
-        '|INFO|t|line 9',
-      );
+      expect(hub.listFiles().map((f) => f.name)).toEqual(['wololo.0.txt', 'wololo.1.txt', 'wololo.txt']);
+      expect(readFileSync(join(dir, 'wololo.txt'), 'utf8')).toContain('|INFO|t|line 9');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('serialisation never throws', () => {
+  const cyclic: Record<string, unknown> = { name: 'loop' };
+  cyclic.self = cyclic;
+
+  test.each([
+    ['cyclic object', { obj: cyclic }, '"self":"[Circular]"'],
+    ['bigint', { n: 10n }, '"n":"10"'],
+    ['error with cause', { error: new Error('outer', { cause: new Error('inner') }) }, '"inner"'],
+  ])('%s', (_name, data, expected) => {
+    const hub = new LogHub({ level: 'trace', logDir: null, console: false });
+    expect(() => hub.logger('t').error('boom', data)).not.toThrow();
+    const [entry] = hub.entries();
+    expect(entry?.message).toBe('boom');
+    expect(formatLogLine(entry as LogEntry)).toContain(expected);
+    expect(() => JSON.stringify(entry)).not.toThrow();
   });
 });

@@ -23,15 +23,9 @@ export class ApiError extends Error {
 }
 
 type ParamsOption<K extends RouteKey> =
-  RouteParams<K> extends undefined
-    ? { params?: never }
-    : { params: RouteParams<K> };
-type QueryOption<K extends RouteKey> =
-  RouteQuery<K> extends undefined
-    ? { query?: never }
-    : { query?: RouteQuery<K> };
-type BodyOption<K extends RouteKey> =
-  RouteBody<K> extends undefined ? { body?: never } : { body: RouteBody<K> };
+  RouteParams<K> extends undefined ? { params?: never } : { params: RouteParams<K> };
+type QueryOption<K extends RouteKey> = RouteQuery<K> extends undefined ? { query?: never } : { query?: RouteQuery<K> };
+type BodyOption<K extends RouteKey> = RouteBody<K> extends undefined ? { body?: never } : { body: RouteBody<K> };
 
 export type RequestOptions<K extends RouteKey> = ParamsOption<K> &
   QueryOption<K> &
@@ -41,14 +35,9 @@ type RequiredKeys<T> = {
   [P in keyof T]-?: undefined extends T[P] ? never : P;
 }[keyof T];
 type OptionsArgs<K extends RouteKey> =
-  RequiredKeys<RequestOptions<K>> extends never
-    ? [options?: RequestOptions<K>]
-    : [options: RequestOptions<K>];
+  RequiredKeys<RequestOptions<K>> extends never ? [options?: RequestOptions<K>] : [options: RequestOptions<K>];
 
-export function buildPath(
-  path: string,
-  params?: Record<string, string | number>,
-): string {
+export function buildPath(path: string, params?: Record<string, string | number>): string {
   return path.replace(/:([A-Za-z]+)/g, (_, name: string) => {
     const value = params?.[name];
     if (value === undefined) throw new Error(`missing path parameter ${name}`);
@@ -68,10 +57,7 @@ export function buildQuery(query?: Record<string, unknown>): string {
 }
 
 /** Typed call against the shared route map: api('GET /api/v1/jobs/:id', { params: { id: 1 } }). */
-export async function api<K extends RouteKey>(
-  key: K,
-  ...args: OptionsArgs<K>
-): Promise<RouteResponse<K>> {
+export async function api<K extends RouteKey>(key: K, ...args: OptionsArgs<K>): Promise<RouteResponse<K>> {
   const options = (args[0] ?? {}) as {
     params?: Record<string, string | number>;
     query?: Record<string, unknown>;
@@ -100,9 +86,7 @@ export async function api<K extends RouteKey>(
     signal: options.signal,
   });
   if (!response.ok) {
-    const error = (await response
-      .json()
-      .catch(() => null)) as ApiErrorBody | null;
+    const error = (await response.json().catch(() => null)) as ApiErrorBody | null;
     throw new ApiError(
       response.status,
       error?.error ?? 'http_error',

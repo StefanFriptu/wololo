@@ -1,6 +1,15 @@
 /**
  * Contract: jobs module (src/modules/jobs, src/modules/recycle-bin).
  * Owns writes to: jobs, job_history, recycle_bin.
+ *
+ * Replace sequence of an audio job (never leaves the library path empty, never loses a file):
+ *   1. jobs row: step "replacing", temp_path = verified temp file (persisted BEFORE touching the original).
+ *   2. recycleBin.recycleForReplace(original): hard link original -> bin path (same filesystem) + recycle_bin row,
+ *      jobs.recycle_bin_entry_id set. Recycle bin disabled: no link, no row.
+ *   3. rename(temp, original): atomically swaps the inode at the library path (uid/gid/mode copied first).
+ *   4. jobs row: step "notifying", temp_path = null.
+ * If the filesystem refuses hard links (EPERM/ENOTSUP on some FUSE/SMB mounts), step 2 falls back to rename(original,
+ * bin) and recover() below closes the short window where the library path is empty.
  */
 import type { RunOptions, RunResult } from '../core/process.ts';
 import type {
@@ -16,6 +25,7 @@ import type {
 import type {
   BdmvJobPlan,
   ConversionPlan,
+  HistoryData,
   HistoryEntry,
   HistoryEventType,
   JobDetail,
@@ -27,10 +37,15 @@ import type {
   QueuePauseReason,
   QueueState,
   RecycleBinEntry,
+  StreamKind,
   VerificationResult,
 } from '../shared/domain.ts';
 
-/** Temp outputs are "<dir>/<stem>.wololo-tmp.<ext>" next to the source, so crash recovery can find and delete them. */
+/**
+ * Audio jobs write "<dir>/<stem>.wololo-tmp.<ext>" next to the source. BDMV jobs write everything (ISO extraction,
+ * audio side files, the temp mkv) into one directory "<radarr root>/.wololo-tmp-<jobId>/". Either path is stored in
+ * jobs.temp_path before the first byte is written, so recovery can find it.
+ */
 export const TEMP_FILE_MARKER = '.wololo-tmp';
 
 export interface NewJob {
@@ -47,6 +62,10 @@ export interface NewJob {
 export interface JobsService {
   /** Idempotent per media file: returns the existing queued/running job instead of creating a second one. */
   enqueue(job: NewJob): Promise<JobSummary>;
+  /**
+   * mediaFileIds or filter (expanded through media.list in pages of 500; default status "needs_work").
+   * Rows not in needs_work are skipped unless force; disc rows (kind bdmv|iso) are enqueued with their evaluated plan.
+   */
   enqueueMany(request: EnqueueRequest): Promise<EnqueueResponse>;
   list(query: JobQuery): Promise<Paginated<JobSummary>>;
   get(id: number): Promise<JobDetail>;
@@ -66,11 +85,23 @@ export interface JobsService {
     message: string;
     jobId?: number | null;
     mediaFileId?: number | null;
-    data?: Record<string, unknown> | null;
+    data?: HistoryData | null;
   }): Promise<void>;
-  /** Startup crash recovery: delete stale "*.wololo-tmp.*" files of interrupted jobs and re-queue them. */
-  recover(): Promise<{ requeued: number; tempFilesDeleted: number }>;
-  /** Periodic cleanup (old job logs, orphaned temp files). Returns a short summary for the task list. */
+  /**
+   * Startup crash recovery, for every job left in state "running", in this order:
+   *   1. step "replacing" (audio): resolve the swap first.
+   *      - temp file exists and original path exists -> the rename did not happen: keep the original, drop the bin
+   *        link/row if one was made (the original is intact), delete the temp file, re-queue.
+   *      - temp file exists and original path missing -> fallback rename happened: rename(temp, original), keep the bin row,
+   *        finish the job as completed (verification already passed before "replacing").
+   *      - temp file missing and original path exists -> the swap completed: finish the job as completed.
+   *      - both missing -> restore from the bin row when there is one, else mark failed ("source missing").
+   *   2. any other step: delete jobs.temp_path (file or directory, only if its name contains TEMP_FILE_MARKER), re-queue
+   *      with trigger "recovery".
+   * Only after that, housekeeping-style sweeps may delete orphaned "*.wololo-tmp*" entries.
+   */
+  recover(): Promise<{ requeued: number; completed: number; tempFilesDeleted: number }>;
+  /** Periodic cleanup (old job logs, orphaned temp files of jobs that are not running). Returns a short summary. */
   housekeeping(): Promise<string>;
   /** Starts the worker loop (honours concurrency, processing window and Plex auto-pause). */
   start(): Promise<void>;
@@ -92,8 +123,14 @@ export interface VerifyRequest {
   expectedStreamCount: number;
   /** Compare the video stream hash (ffmpeg -f streamhash -hash md5) of source and output. Off for BDMV (packetisation differs). */
   compareVideoHash: boolean;
+  /** Video packet count of the output (ffprobe -count_packets); BDMV's substitute for the hash. Skipped when omitted. */
+  expectedVideoPackets?: number;
   /** Output audio stream indexes to decode fully (`-f null`). */
   decodeAudioStreams: number[];
+  /** Chapter count the output must have (source probe, or the playlist's chapter marks). Skipped when omitted. */
+  expectedChapterCount?: number;
+  /** Language tag per output stream, in output order (from the plan). Skipped when omitted. */
+  expectedLanguages?: { kind: StreamKind; language: string | null }[];
 }
 
 /** Handed by the worker to an executor for one job run. */
@@ -108,6 +145,8 @@ export interface JobRunContext {
     etaSec?: number | null;
     outTimeSec?: number | null;
   }): void;
+  /** Persists jobs.temp_path (file or directory) BEFORE the executor writes to it; null clears it after the final rename. */
+  setTempPath(path: string | null): Promise<void>;
   /** runProcess with the job's AbortSignal, low priority (nice/ionice) and argv + stderr mirrored to the job log. */
   run(options: Omit<RunOptions, 'signal' | 'lowPriority'>): Promise<RunResult>;
   /** Throws AppError('precondition_failed') when the filesystem of dir has less than bytes * (1 + margin). */
@@ -130,12 +169,21 @@ export type JobExecutor = (ctx: JobRunContext) => Promise<JobOutcome>;
 
 export interface RecycleBinService {
   list(query: PageQuery): Promise<Paginated<RecycleBinEntry>>;
-  /** Moves a file into the recycle bin on the same filesystem (rename, never copy across devices). */
-  recycle(
+  /** Moves a file into the recycle bin on the same filesystem (rename, never copy across devices). Used for deletions. */
+  recycle(path: string, refs: { jobId?: number | null; mediaFileId?: number | null }): Promise<RecycleBinEntry>;
+  /**
+   * Replace step 2 (see header): hard-links path into the bin and records the row; the original stays in place until
+   * the caller renames the temp file over it. Falls back to a rename when hard links are unsupported (mode "move").
+   */
+  recycleForReplace(
     path: string,
-    refs: { jobId?: number | null; mediaFileId?: number | null },
-  ): Promise<RecycleBinEntry>;
-  /** Moves the original back; the current file at originalPath goes to the bin first. */
+    refs: { jobId: number; mediaFileId: number | null },
+  ): Promise<{ entry: RecycleBinEntry; mode: 'link' | 'move' }>;
+  /**
+   * Undo for a bad rule: moves the original back (the current file at originalPath goes to the bin first), then
+   * media.setIgnored(mediaFileId, true, "restored from recycle bin") so scans do not convert it again until the user
+   * un-ignores it, notifier.fileChanged({ kind: 'replaced' }) and a "restored" history entry.
+   */
   restore(id: number): Promise<RecycleBinEntry>;
   remove(id: number): Promise<void>;
   purge(options: { all?: boolean }): Promise<RecycleBinPurgeResult>;

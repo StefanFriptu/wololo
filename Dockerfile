@@ -25,10 +25,10 @@ LABEL org.opencontainers.image.title="Wololo" \
       org.opencontainers.image.version="${VERSION}"
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg mkvtoolnix ca-certificates tzdata \
+ && apt-get install -y --no-install-recommends ffmpeg mkvtoolnix 7zip ca-certificates tzdata \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --gid 1000 wololo \
- && useradd --uid 1000 --gid 1000 --no-create-home --home-dir /config --shell /usr/sbin/nologin wololo \
+ && useradd --uid 1000 --gid 1000 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin wololo \
  && mkdir -p /config /data
 
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
@@ -41,7 +41,8 @@ COPY --from=web /app/web/build web/build
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY docker/healthcheck.ts /app/docker/healthcheck.ts
 
-ENV PUID=1000 \
+ENV WOLOLO_VERSION=${VERSION} \
+    PUID=1000 \
     PGID=1000 \
     UMASK=002 \
     TZ=Etc/UTC \
@@ -51,7 +52,8 @@ ENV PUID=1000 \
     WOLOLO_WEB_DIR=/app/web/build
 
 EXPOSE 8585
+STOPSIGNAL SIGTERM
 VOLUME ["/config"]
-HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 CMD ["bun", "/app/docker/healthcheck.ts"]
+HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --start-interval=5s --retries=3 CMD ["bun", "/app/docker/healthcheck.ts"]
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["bun", "src/index.ts"]

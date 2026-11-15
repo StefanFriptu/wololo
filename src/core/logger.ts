@@ -1,11 +1,4 @@
-import {
-  appendFileSync,
-  existsSync,
-  readdirSync,
-  renameSync,
-  rmSync,
-  statSync,
-} from 'node:fs';
+import { appendFileSync, existsSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { LogEntry, LogLevel } from '../shared/domain.ts';
 
@@ -47,22 +40,39 @@ const LEVEL_RANK: Record<LogLevel, number> = {
 const LOG_FILE = 'wololo.txt';
 const FLUSH_INTERVAL_MS = 500;
 
-function serializeError(value: unknown): unknown {
-  return value instanceof Error
-    ? { name: value.name, message: value.message, stack: value.stack }
-    : value;
+function serializeError(value: unknown, depth = 0): unknown {
+  if (!(value instanceof Error)) return value;
+  const cause = value.cause !== undefined && depth < 5 ? serializeError(value.cause, depth + 1) : undefined;
+  return { name: value.name, message: value.message, stack: value.stack, ...(cause === undefined ? {} : { cause }) };
 }
 
+/** Pure: JSON that never throws: bigint -> string, repeated objects -> "[Circular]". */
+export function safeStringify(value: unknown): string {
+  const seen = new WeakSet<object>();
+  try {
+    return JSON.stringify(value, (_key, item: unknown) => {
+      if (typeof item === 'bigint') return item.toString();
+      if (item !== null && typeof item === 'object') {
+        if (seen.has(item)) return '[Circular]';
+        seen.add(item);
+      }
+      return item;
+    });
+  } catch (error) {
+    return JSON.stringify({ unserializable: String(error) });
+  }
+}
+
+/** Errors flattened, then made JSON-safe so the ring buffer, SSE and the API can serialise entries. */
 function normalizeData(data?: LogData): LogData | undefined {
   if (!data) return undefined;
   const out: LogData = {};
-  for (const [key, value] of Object.entries(data))
-    out[key] = serializeError(value);
-  return out;
+  for (const [key, value] of Object.entries(data)) out[key] = serializeError(value);
+  return JSON.parse(safeStringify(out)) as LogData;
 }
 
 export function formatLogLine(entry: LogEntry): string {
-  const data = entry.data ? ` ${JSON.stringify(entry.data)}` : '';
+  const data = entry.data ? ` ${safeStringify(entry.data)}` : '';
   return `${entry.time}|${entry.level.toUpperCase()}|${entry.module}|${entry.message}${data}`;
 }
 
@@ -94,8 +104,7 @@ export class LogHub {
   }
 
   logger(module: string): Logger {
-    const write = (level: LogLevel) => (message: string, data?: LogData) =>
-      this.write(level, module, message, data);
+    const write = (level: LogLevel) => (message: string, data?: LogData) => this.write(level, module, message, data);
     return {
       trace: write('trace'),
       debug: write('debug'),
@@ -122,9 +131,7 @@ export class LogHub {
       (entry) =>
         LEVEL_RANK[entry.level] >= minRank &&
         (query.afterId === undefined || entry.id > query.afterId) &&
-        (query.module === undefined ||
-          entry.module === query.module ||
-          entry.module.startsWith(`${query.module}.`)),
+        (query.module === undefined || entry.module === query.module || entry.module.startsWith(`${query.module}.`)),
     );
     return matches.slice(-limit).reverse();
   }
@@ -157,11 +164,7 @@ export class LogHub {
     this.pending = [];
     const file = join(this.logDir, LOG_FILE);
     try {
-      if (
-        existsSync(file) &&
-        statSync(file).size + chunk.length > this.maxFileBytes
-      )
-        this.rotate();
+      if (existsSync(file) && statSync(file).size + chunk.length > this.maxFileBytes) this.rotate();
       appendFileSync(file, chunk);
     } catch (error) {
       if (this.toConsole) console.error('log file write failed', error);
@@ -184,12 +187,15 @@ export class LogHub {
     renameSync(join(dir, LOG_FILE), rotated(0));
   }
 
-  private write(
-    level: LogLevel,
-    module: string,
-    message: string,
-    data?: LogData,
-  ): void {
+  private write(level: LogLevel, module: string, message: string, data?: LogData): void {
+    try {
+      this.append(level, module, message, data);
+    } catch (error) {
+      if (this.toConsole) console.error('logging failed', error);
+    }
+  }
+
+  private append(level: LogLevel, module: string, message: string, data?: LogData): void {
     if (LEVEL_RANK[level] < LEVEL_RANK[this.level]) return;
     const entry: LogEntry = {
       id: this.nextId++,
@@ -206,10 +212,7 @@ export class LogHub {
 
     const line = formatLogLine(entry);
     if (this.logDir) this.pending.push(line);
-    if (this.toConsole)
-      (LEVEL_RANK[level] >= LEVEL_RANK.warn ? console.error : console.log)(
-        line,
-      );
+    if (this.toConsole) (LEVEL_RANK[level] >= LEVEL_RANK.warn ? console.error : console.log)(line);
     for (const listener of this.listeners) {
       try {
         listener(entry);

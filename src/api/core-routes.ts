@@ -2,10 +2,11 @@ import { basename } from 'node:path';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 import type { AppContext } from '../app/context.ts';
+import { isValidBindAddress, isValidUrlBase } from '../core/config.ts';
 import { AppError } from '../core/errors.ts';
 import type { GeneralConfigView } from '../shared/api-types.ts';
 import type { ServerEvent } from '../shared/events.ts';
-import type { GeneralConfig } from '../shared/settings.ts';
+import { AUTHENTICATION_MODES, type GeneralConfig } from '../shared/settings.ts';
 import { type ApiApp, parseBody, parseQuery, route } from './http.ts';
 
 const SSE_HEARTBEAT_MS = 25_000;
@@ -13,10 +14,11 @@ const SSE_HEARTBEAT_MS = 25_000;
 const generalUpdateSchema = z
   .object({
     port: z.number().int().min(1).max(65535),
-    bindAddress: z.string().min(1),
-    urlBase: z.string(),
+    bindAddress: z.string().refine(isValidBindAddress, 'expected "*" or an IP address'),
+    urlBase: z.string().refine(isValidUrlBase, 'expected "" or "/path" with letters, digits, ".", "_", "~", "-"'),
     logLevel: z.enum(['trace', 'debug', 'info', 'warn', 'error']),
-    instanceName: z.string().min(1).max(64),
+    instanceName: z.string().trim().min(1).max(64),
+    authentication: z.enum(AUTHENTICATION_MODES),
   })
   .partial();
 
@@ -30,11 +32,7 @@ const logQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(1000).optional(),
 });
 
-const RESTART_KEYS: (keyof GeneralConfig)[] = [
-  'port',
-  'bindAddress',
-  'urlBase',
-];
+const RESTART_KEYS: (keyof GeneralConfig)[] = ['port', 'bindAddress', 'urlBase'];
 
 export function registerCoreRoutes(app: ApiApp, ctx: AppContext): void {
   const bootConfig = ctx.config.get();
@@ -47,9 +45,8 @@ export function registerCoreRoutes(app: ApiApp, ctx: AppContext): void {
       apiKey: config.apiKey,
       logLevel: config.logLevel,
       instanceName: config.instanceName,
-      restartRequired: RESTART_KEYS.some(
-        (key) => config[key] !== bootConfig[key],
-      ),
+      authentication: config.authentication,
+      restartRequired: RESTART_KEYS.some((key) => config[key] !== bootConfig[key]),
     };
   };
 
@@ -59,9 +56,7 @@ export function registerCoreRoutes(app: ApiApp, ctx: AppContext): void {
   }));
 
   route(app, 'GET /api/v1/events', (c) => {
-    const filter = new Set(
-      (c.req.query('events') ?? '').split(',').filter(Boolean),
-    );
+    const filter = new Set((c.req.query('events') ?? '').split(',').filter(Boolean));
     const includeLogs = filter.has('log.entry');
     return streamSSE(c, async (stream) => {
       const queue: ServerEvent[] = [];
@@ -88,8 +83,7 @@ export function registerCoreRoutes(app: ApiApp, ctx: AppContext): void {
             wake = resolve;
           });
           wake = null;
-          if (queue.length === 0 && !stream.aborted)
-            await stream.write(': ping\n\n');
+          if (queue.length === 0 && !stream.aborted) await stream.write(': ping\n\n');
           continue;
         }
         const event = queue.shift() as ServerEvent;
@@ -104,25 +98,26 @@ export function registerCoreRoutes(app: ApiApp, ctx: AppContext): void {
   });
 
   route(app, 'GET /api/v1/settings', () => ctx.settings.get());
-  route(app, 'PUT /api/v1/settings', async (c) =>
-    ctx.settings.update(await parseBody(c, settingsUpdateSchema)),
-  );
+  route(app, 'PUT /api/v1/settings', async (c) => ctx.settings.update(await parseBody(c, settingsUpdateSchema)), {
+    body: settingsUpdateSchema,
+  });
 
   route(app, 'GET /api/v1/settings/general', () => generalView());
-  route(app, 'PUT /api/v1/settings/general', async (c) => {
-    const patch = await parseBody(c, generalUpdateSchema);
-    const locked = (Object.keys(patch) as (keyof GeneralConfig)[]).filter(
-      (key) => ctx.config.get().envOverrides.includes(key),
-    );
-    if (locked.length > 0)
-      throw new AppError(
-        'conflict',
-        `set by environment variables: ${locked.join(', ')}`,
+  route(
+    app,
+    'PUT /api/v1/settings/general',
+    async (c) => {
+      const patch = await parseBody(c, generalUpdateSchema);
+      const locked = (Object.keys(patch) as (keyof GeneralConfig)[]).filter((key) =>
+        ctx.config.get().envOverrides.includes(key),
       );
-    const next = ctx.config.update(patch);
-    ctx.logs.setLevel(next.logLevel);
-    return generalView();
-  });
+      if (locked.length > 0) throw new AppError('conflict', `set by environment variables: ${locked.join(', ')}`);
+      const next = ctx.config.update(patch);
+      ctx.logs.setLevel(next.logLevel);
+      return generalView();
+    },
+    { body: generalUpdateSchema },
+  );
   route(app, 'POST /api/v1/settings/general/apikey', () => {
     if (ctx.config.get().envOverrides.includes('apiKey')) {
       throw new AppError('conflict', 'API key is set by WOLOLO__API_KEY');
@@ -132,9 +127,9 @@ export function registerCoreRoutes(app: ApiApp, ctx: AppContext): void {
     return generalView();
   });
 
-  route(app, 'GET /api/v1/system/logs', (c) =>
-    ctx.logs.entries(parseQuery(c, logQuerySchema)),
-  );
+  route(app, 'GET /api/v1/system/logs', (c) => ctx.logs.entries(parseQuery(c, logQuerySchema)), {
+    query: logQuerySchema,
+  });
   route(app, 'GET /api/v1/system/logs/files', () =>
     ctx.logs.listFiles().map(({ name, sizeBytes, modifiedAt }) => ({
       name,

@@ -89,6 +89,4 @@ export const EVENT_NAMES = [
 ] as const satisfies readonly EventName[];
 
 type MissingEventNames = Exclude<EventName, (typeof EVENT_NAMES)[number]>;
-export const EVENT_NAMES_COMPLETE: MissingEventNames extends never
-  ? true
-  : MissingEventNames = true;
+export const EVENT_NAMES_COMPLETE: MissingEventNames extends never ? true : MissingEventNames = true;

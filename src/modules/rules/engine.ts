@@ -8,11 +8,8 @@ import { notImplemented } from '../../core/errors.ts';
 
 export const codecAllowed: CodecAllowed = () => notImplemented('codecAllowed');
 
-export const resolveEffectiveProfile: ResolveEffectiveProfile = () =>
-  notImplemented('resolveEffectiveProfile');
+export const resolveEffectiveProfile: ResolveEffectiveProfile = () => notImplemented('resolveEffectiveProfile');
 
-export const computeRulesKey: ComputeRulesKey = () =>
-  notImplemented('computeRulesKey');
+export const computeRulesKey: ComputeRulesKey = () => notImplemented('computeRulesKey');
 
-export const planConversion: PlanConversion = () =>
-  notImplemented('planConversion');
+export const planConversion: PlanConversion = () => notImplemented('planConversion');

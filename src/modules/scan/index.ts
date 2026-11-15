@@ -1,10 +1,5 @@
 import type { AppContext } from '../../app/context.ts';
-import type {
-  DryRunService,
-  LibraryService,
-  MediaService,
-  ScanService,
-} from '../../contracts/probe-scan.ts';
+import type { DryRunService, LibraryService, MediaService, ScanService } from '../../contracts/probe-scan.ts';
 import { notImplemented } from '../../core/errors.ts';
 
 export function createLibraryService(_ctx: AppContext): LibraryService {

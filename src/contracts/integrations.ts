@@ -5,6 +5,7 @@
  */
 import type {
   ArrInstanceInput,
+  ArrQualityProfile,
   ArrRootFolder,
   ArrTestRequest,
   ConnectionTestResult,
@@ -41,16 +42,32 @@ export interface ArrService {
   test(input: ArrTestRequest): Promise<ConnectionTestResult>;
   /** GET /api/v3/rootfolder, with local paths resolved through path mappings. */
   rootFolders(id: number): Promise<ArrRootFolder[]>;
-  /** Radarr GET /api/v3/movie/lookup?term=; score is computed locally (title + year similarity). */
-  lookupMovie(
+  /** GET /api/v3/qualityprofile. */
+  qualityProfiles(id: number): Promise<ArrQualityProfile[]>;
+  /**
+   * Radarr GET /api/v3/movie/lookup?term=; score is computed locally (title + year similarity).
+   * Also serves GET /api/v1/arr/:id/lookup (manual search in the movie_match decision); term "tmdb:<id>" resolves one id.
+   */
+  lookupMovie(instanceId: number, term: string, year?: number | null): Promise<MovieMatchCandidate[]>;
+  /**
+   * Radarr POST /api/v3/movie for a BDMV movie Radarr does not know yet (MovieMatchCandidate.radarrMovieId null):
+   * monitored true, addOptions.searchForMovie false, rootFolderPath translated to the remote path. Returns the movie id.
+   */
+  addMovie(
     instanceId: number,
-    term: string,
-    year?: number | null,
-  ): Promise<MovieMatchCandidate[]>;
-  /** Finds the movie/series owning a local path (via path mappings + GET /api/v3/movie or /series). */
-  findByPath(
-    localPath: string,
-  ): Promise<{ ref: ArrItemRef; originalLanguage: string | null } | null>;
+    movie: {
+      tmdbId: number;
+      title: string;
+      year: number | null;
+      rootFolderPath: string;
+      qualityProfileId: number | null;
+    },
+  ): Promise<number>;
+  /**
+   * Finds the movie/series owning a local path (via path mappings + GET /api/v3/movie or /series).
+   * originalLanguage is normalised with normalizeLanguage (Radarr/Sonarr send names such as "English").
+   */
+  findByPath(localPath: string): Promise<{ ref: ArrItemRef; originalLanguage: string | null } | null>;
   /** POST /api/v3/command {"name":"RescanMovie","movieId"} or {"name":"RescanSeries","seriesId"}. */
   rescan(ref: ArrItemRef): Promise<void>;
   /** Radarr POST /api/v3/command {"name":"DownloadedMoviesScan","path":<remote path>} so Radarr imports a BDMV output. */
@@ -59,10 +76,15 @@ export interface ArrService {
   defaultRadarr(): Promise<ArrInstance | null>;
 }
 
+/**
+ * instanceId comes from the webhook URL (?instance=<id>); null -> resolved as documented on WebhookQuery
+ * (only enabled instance of the kind, then payload.instanceName = ArrInstance.name, then applicationUrl = url).
+ * Test -> ack; Download (incl. isUpgrade) -> pathMappings.toLocal(kind, path, instanceId) -> media.checkPath with
+ * arr ref + normalizeLanguage(originalLanguage.name); other events ignored. Never throws for bad payloads.
+ */
 export interface WebhookService {
-  /** Test -> ack; Download (incl. isUpgrade) -> map path -> media.checkPath; other events ignored. Never throws for bad payloads. */
-  handleRadarr(payload: RadarrWebhookPayload): Promise<WebhookResponse>;
-  handleSonarr(payload: SonarrWebhookPayload): Promise<WebhookResponse>;
+  handleRadarr(payload: RadarrWebhookPayload, instanceId: number | null): Promise<WebhookResponse>;
+  handleSonarr(payload: SonarrWebhookPayload, instanceId: number | null): Promise<WebhookResponse>;
 }
 
 export interface PlexService {
@@ -93,7 +115,12 @@ export interface DownloadClientService {
   findTorrentByPath(localPath: string): Promise<TorrentInfo | null>;
   /** /api/v2/torrents/delete?hashes=&deleteFiles=true */
   deleteTorrent(hash: string, deleteFiles: boolean): Promise<void>;
-  /** Scheduled task: removes torrents whose goal is met and whose media was replaced (only when removeWhenGoalMet). */
+  /**
+   * Scheduled task (seeding_check). For every torrent whose goal is met:
+   * - its content was replaced by an audio job and removeWhenGoalMet -> deleteTorrent(hash, true);
+   * - its content is a converted disc (completed bdmv job) and settings.bdmv.deleteSourceWhenSeeded ->
+   *   bdmv.offerSourceDeletion(mediaFileId, torrent) (the user confirms in the UI; nothing is deleted here).
+   */
   checkSeedingGoals(): Promise<string>;
 }
 
@@ -103,24 +130,13 @@ export interface PathMappingService {
   update(id: number, input: PathMappingInput): Promise<PathMapping>;
   remove(id: number): Promise<void>;
   /** Remote app path -> local path (longest remotePath prefix wins); unchanged when no mapping matches. */
-  toLocal(
-    scope: PathMappingScope,
-    remotePath: string,
-    instanceId?: number | null,
-  ): Promise<string>;
+  toLocal(scope: PathMappingScope, remotePath: string, instanceId?: number | null): Promise<string>;
   /** Local path -> remote app path. */
-  toRemote(
-    scope: PathMappingScope,
-    localPath: string,
-    instanceId?: number | null,
-  ): Promise<string>;
+  toRemote(scope: PathMappingScope, localPath: string, instanceId?: number | null): Promise<string>;
 }
 
 /** Pure path translation used by PathMappingService, table-tested (trailing slashes, longest prefix, no partial segment match). */
-export type MapPath = (
-  path: string,
-  mappings: readonly { from: string; to: string }[],
-) => string;
+export type MapPath = (path: string, mappings: readonly { from: string; to: string }[]) => string;
 
 export interface FileChangedEvent {
   kind: 'replaced' | 'created';
@@ -131,6 +147,10 @@ export interface FileChangedEvent {
 }
 
 export interface NotifierService {
-  /** Arr rescan (or import for BDMV output) then Plex partial scan of the folder. Errors are logged, never thrown. */
+  /**
+   * replaced: arr.rescan(ref) (ref = event.arr, else arr.findByPath(localPath); still unresolved -> warning, no rescan),
+   * then plex.refreshPath(folder). created (BDMV output, already imported by bdmv): plex.refreshPath only.
+   * Honours settings.notifications. Errors are logged, never thrown.
+   */
   fileChanged(event: FileChangedEvent): Promise<void>;
 }

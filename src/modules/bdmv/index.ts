@@ -12,5 +12,7 @@ export function createBdmvService(_ctx: AppContext): BdmvService {
     getDecision: async () => notImplemented('bdmv.getDecision'),
     resolveDecision: async () => notImplemented('bdmv.resolveDecision'),
     dismissDecision: async () => notImplemented('bdmv.dismissDecision'),
+    offerSourceDeletion: async () => notImplemented('bdmv.offerSourceDeletion'),
+    deleteSource: async () => notImplemented('bdmv.deleteSource'),
   };
 }

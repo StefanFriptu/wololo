@@ -14,6 +14,7 @@ import type {
   DeviceProfile,
   DeviceProfileDefinition,
   DownloadClientConnection,
+  FillMissingLanguage,
   HistoryEntry,
   HistoryEventType,
   IsoDateTime,
@@ -27,6 +28,7 @@ import type {
   LogLevel,
   MediaFileKind,
   MediaFileStatus,
+  MovieMatchCandidate,
   PathMapping,
   PathMappingScope,
   PlanAction,
@@ -85,7 +87,8 @@ export interface HealthResponse {
 }
 
 export interface ToolInfo {
-  name: 'ffmpeg' | 'ffprobe' | 'mkvmerge' | 'nice' | 'ionice';
+  /** "7z" lists and extracts Blu-ray .iso images (UDF 2.50) for BDMV jobs. */
+  name: 'ffmpeg' | 'ffprobe' | 'mkvmerge' | '7z' | 'nice' | 'ionice';
   path: string | null;
   version: string | null;
   available: boolean;
@@ -168,6 +171,8 @@ export interface LibraryInput {
   keepLanguages?: string[];
   keepOriginalLanguage?: boolean;
   keepUndetermined?: boolean;
+  /** Default "off". */
+  fillMissingLanguage?: FillMissingLanguage;
   arrInstanceId?: number | null;
   bdmvEnabled?: boolean;
 }
@@ -190,12 +195,7 @@ export interface FilesystemListing {
   entries: FilesystemEntry[];
 }
 
-export type MediaSortKey =
-  | 'path'
-  | 'size'
-  | 'status'
-  | 'updatedAt'
-  | 'duration';
+export type MediaSortKey = 'path' | 'size' | 'status' | 'updatedAt' | 'duration';
 
 export interface MediaQuery extends PageQuery {
   sortKey?: MediaSortKey;
@@ -276,6 +276,22 @@ export interface ScanStatus {
 
 export interface DryRunQuery {
   libraryId?: number;
+  /** Restrict byProfile to one profile. */
+  profileId?: number;
+}
+
+/**
+ * Files evaluated against one assigned profile on its own (rules.plan re-run on the stored probe JSON, no ffprobe).
+ * groups/totals use the library's effective (strictest) profile, which is what jobs actually apply.
+ */
+export interface DryRunProfileRow {
+  profileId: number;
+  name: string;
+  files: number;
+  failing: number;
+  durationSec: number;
+  estimatedSeconds: number;
+  estimatedOutputBytes: number;
 }
 
 export interface DryRunGroup {
@@ -303,6 +319,7 @@ export interface DryRunReport {
     ignored: number;
   };
   groups: DryRunGroup[];
+  byProfile: DryRunProfileRow[];
   estimatedSeconds: number;
   /** Peak extra disk space: largest output + 5% margin per root, plus recycle-bin copies kept for the retention period. */
   estimatedExtraBytes: number;
@@ -352,11 +369,25 @@ export interface JobQuery extends PageQuery {
   mediaFileId?: number;
 }
 
+/**
+ * Exactly one of mediaFileIds or filter. A filter is expanded server-side through media.list in pages, so
+ * "Process all needs-work" after the dry run works on a whole library without sending ids.
+ */
 export interface EnqueueRequest {
-  mediaFileIds: number[];
+  mediaFileIds?: number[];
+  filter?: EnqueueFilter;
   priority?: number;
   /** Queue even when the file was evaluated as compatible (re-run rules). */
   force?: boolean;
+}
+
+export interface EnqueueFilter {
+  libraryId?: number;
+  /** Default "needs_work". */
+  status?: MediaFileStatus;
+  failingCodec?: string;
+  kind?: MediaFileKind;
+  profileId?: number;
 }
 
 export interface EnqueueResponse {
@@ -404,16 +435,29 @@ export interface ArrRootFolder {
   freeBytes: number | null;
 }
 
+export interface ArrQualityProfile {
+  id: number;
+  name: string;
+}
+
+/** Manual Radarr search from the BDMV movie_match decision (wraps GET /api/v3/movie/lookup). */
+export interface ArrLookupQuery {
+  term: string;
+  year?: number;
+}
+
+/**
+ * Webhook URL shown on Settings > Connect: /api/v1/webhook/radarr?instance=<arr instance id>&apikey=<key>.
+ * Without instance: the only enabled instance of that kind, else the one whose name equals payload.instanceName,
+ * else the one whose url equals payload.applicationUrl; still ambiguous -> action "error".
+ */
+export interface WebhookQuery {
+  instance?: number;
+}
+
 /** Subset of Radarr's webhook payload (Settings > Connect > Webhook). Unknown fields are ignored. */
 export interface RadarrWebhookPayload {
-  eventType:
-    | 'Test'
-    | 'Grab'
-    | 'Download'
-    | 'Rename'
-    | 'MovieDelete'
-    | 'MovieFileDelete'
-    | string;
+  eventType: 'Test' | 'Grab' | 'Download' | 'Rename' | 'MovieDelete' | 'MovieFileDelete' | string;
   instanceName?: string;
   applicationUrl?: string;
   isUpgrade?: boolean;
@@ -424,6 +468,7 @@ export interface RadarrWebhookPayload {
     folderPath?: string;
     tmdbId?: number;
     imdbId?: string;
+    /** Language name ("English"); convert with normalizeLanguage(name). */
     originalLanguage?: { id: number; name: string };
   };
   movieFile?: {
@@ -439,14 +484,7 @@ export interface RadarrWebhookPayload {
 
 /** Subset of Sonarr's webhook payload. */
 export interface SonarrWebhookPayload {
-  eventType:
-    | 'Test'
-    | 'Grab'
-    | 'Download'
-    | 'Rename'
-    | 'SeriesDelete'
-    | 'EpisodeFileDelete'
-    | string;
+  eventType: 'Test' | 'Grab' | 'Download' | 'Rename' | 'SeriesDelete' | 'EpisodeFileDelete' | string;
   instanceName?: string;
   applicationUrl?: string;
   isUpgrade?: boolean;
@@ -476,14 +514,7 @@ export interface SonarrWebhookPayload {
 
 export interface WebhookResponse {
   accepted: boolean;
-  action:
-    | 'test'
-    | 'ignored'
-    | 'compatible'
-    | 'queued'
-    | 'dry_run'
-    | 'unknown_path'
-    | 'error';
+  action: 'test' | 'ignored' | 'compatible' | 'queued' | 'dry_run' | 'unknown_path' | 'error';
   mediaFileIds: number[];
   message: string;
 }
@@ -706,11 +737,22 @@ export interface ApiRoutes {
     params: IdParams;
     response: ArrRootFolder[];
   };
+  'GET /api/v1/arr/:id/qualityprofiles': {
+    params: IdParams;
+    response: ArrQualityProfile[];
+  };
+  'GET /api/v1/arr/:id/lookup': {
+    params: IdParams;
+    query: ArrLookupQuery;
+    response: MovieMatchCandidate[];
+  };
   'POST /api/v1/webhook/radarr': {
+    query: WebhookQuery;
     body: RadarrWebhookPayload;
     response: WebhookResponse;
   };
   'POST /api/v1/webhook/sonarr': {
+    query: WebhookQuery;
     body: SonarrWebhookPayload;
     response: WebhookResponse;
   };

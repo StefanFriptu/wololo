@@ -17,11 +17,7 @@ import type {
   ScanService,
   SchedulerService,
 } from '../contracts/probe-scan.ts';
-import type {
-  FfmpegService,
-  ProfileService,
-  RulesService,
-} from '../contracts/rules-ffmpeg.ts';
+import type { FfmpegService, ProfileService, RulesService } from '../contracts/rules-ffmpeg.ts';
 import type { ConfigStore } from '../core/config.ts';
 import { EventBus } from '../core/events.ts';
 import type { Logger, LogHub } from '../core/logger.ts';
@@ -91,6 +87,8 @@ export interface AppContext {
   /** Aborted when shutdown starts; long-running loops should watch it. */
   shutdownSignal: AbortSignal;
   requestShutdown(): void;
+  /** Graceful stop, then process exit 0 so the container restart policy starts Wololo again (system.restart). */
+  requestRestart(): void;
 }
 
 export type ServiceFactory<T> = (ctx: AppContext) => T;
@@ -101,13 +99,13 @@ export interface CreateContextOptions {
   dbHandle: DbHandle;
   /** Replace individual services (tests). */
   overrides?: Partial<Services>;
+  /** Wired by bootstrap to stop + exit; tests pass a recorder. Default: logs a warning and does nothing. */
+  requestRestart?: () => void;
 }
 
 export function createAppContext(options: CreateContextOptions): AppContext {
   const log = options.logs.logger('app');
-  const events = new EventBus((error, name) =>
-    log.error('event listener failed', { event: name, error }),
-  );
+  const events = new EventBus((error, name) => log.error('event listener failed', { event: name, error }));
   options.logs.onEntry((entry) => {
     if (events.listenerCount() > 0) events.emit('log.entry', entry);
   });
@@ -125,6 +123,7 @@ export function createAppContext(options: CreateContextOptions): AppContext {
     startedAt: new Date(),
     shutdownSignal: shutdown.signal,
     requestShutdown: () => shutdown.abort(),
+    requestRestart: options.requestRestart ?? (() => log.warn('restart requested but no restart handler is wired')),
   };
 
   const services: Services = {

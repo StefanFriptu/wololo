@@ -1,26 +1,29 @@
 import { randomBytes } from 'node:crypto';
-import {
-  accessSync,
-  constants,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  writeFileSync,
-} from 'node:fs';
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { isIP } from 'node:net';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pkg from '../../package.json' with { type: 'json' };
 import type { LogLevel } from '../shared/domain.ts';
-import type { GeneralConfig } from '../shared/settings.ts';
+import { AUTHENTICATION_MODES, type AuthenticationMode, type GeneralConfig } from '../shared/settings.ts';
 
-export const APP_VERSION: string = pkg.version;
+type Env = Record<string, string | undefined>;
+
+/** WOLOLO_VERSION is baked into the Docker image from the git tag; local runs report package.json's version. */
+export function resolveAppVersion(env: Env, fallback: string = pkg.version): string {
+  const version = env.WOLOLO_VERSION?.trim();
+  return version && version !== 'dev' ? version : fallback;
+}
+
+export const APP_VERSION: string = resolveAppVersion(process.env);
 export const DEFAULT_PORT = 8585;
 
 export interface ToolPaths {
   ffmpeg: string;
   ffprobe: string;
   mkvmerge: string;
+  /** 7-Zip, reads Blu-ray .iso images (UDF) for BDMV jobs. */
+  sevenZip: string;
 }
 
 export interface AppConfig extends GeneralConfig {
@@ -34,19 +37,13 @@ export interface AppConfig extends GeneralConfig {
   webDir: string;
   tools: ToolPaths;
   isDocker: boolean;
-  /** Keys of GeneralConfig currently forced by WOLOLO__* env vars (read-only in the UI). */
+  /** Keys of GeneralConfig currently forced by valid WOLOLO__* env vars (read-only in the UI). */
   envOverrides: (keyof GeneralConfig)[];
+  /** Problems found while loading (invalid env values, repaired config.json); logged by bootstrap. */
+  warnings: string[];
 }
 
-type Env = Record<string, string | undefined>;
-
-const LOG_LEVELS: readonly LogLevel[] = [
-  'trace',
-  'debug',
-  'info',
-  'warn',
-  'error',
-];
+const LOG_LEVELS: readonly LogLevel[] = ['trace', 'debug', 'info', 'warn', 'error'];
 
 const ENV_KEYS: Record<keyof GeneralConfig, string> = {
   port: 'WOLOLO__PORT',
@@ -55,7 +52,11 @@ const ENV_KEYS: Record<keyof GeneralConfig, string> = {
   apiKey: 'WOLOLO__API_KEY',
   logLevel: 'WOLOLO__LOG_LEVEL',
   instanceName: 'WOLOLO__INSTANCE_NAME',
+  authentication: 'WOLOLO__AUTHENTICATION',
 };
+
+const URL_BASE_PATTERN = /^(\/[A-Za-z0-9._~-]+)*$/;
+const API_KEY_PATTERN = /^[A-Za-z0-9._~-]{16,128}$/;
 
 export function generateApiKey(): string {
   return randomBytes(16).toString('hex');
@@ -64,6 +65,23 @@ export function generateApiKey(): string {
 export function normalizeUrlBase(value: string): string {
   const trimmed = value.trim().replace(/^\/+|\/+$/g, '');
   return trimmed ? `/${trimmed}` : '';
+}
+
+/** "" or "/seg[/seg...]" with unreserved URL characters only (no ":" so Hono never treats it as a route parameter). */
+export function isValidUrlBase(value: string): boolean {
+  return URL_BASE_PATTERN.test(normalizeUrlBase(value));
+}
+
+/** "*" (all interfaces) or a literal IPv4/IPv6 address; host names would make startup depend on DNS. */
+export function isValidBindAddress(value: string): boolean {
+  return value === '*' || isIP(value) !== 0;
+}
+
+/** Address a local client (healthcheck) uses to reach the server. */
+export function loopbackHost(bindAddress: string): string {
+  if (bindAddress === '*' || bindAddress === '0.0.0.0') return '127.0.0.1';
+  if (bindAddress === '::') return '[::1]';
+  return isIP(bindAddress) === 6 ? `[${bindAddress}]` : bindAddress;
 }
 
 function isWritableDir(path: string): boolean {
@@ -89,65 +107,92 @@ function defaultGeneralConfig(): GeneralConfig {
     apiKey: generateApiKey(),
     logLevel: 'info',
     instanceName: 'Wololo',
+    authentication: 'disabled_for_local_addresses',
   };
 }
 
-function coerceGeneral(
-  raw: Partial<Record<keyof GeneralConfig, unknown>>,
-  base: GeneralConfig,
-): GeneralConfig {
-  const port = Number(raw.port);
-  const logLevel = String(raw.logLevel ?? '') as LogLevel;
-  return {
-    port: Number.isInteger(port) && port > 0 && port < 65536 ? port : base.port,
-    bindAddress:
-      typeof raw.bindAddress === 'string' && raw.bindAddress
-        ? raw.bindAddress
-        : base.bindAddress,
-    urlBase:
-      typeof raw.urlBase === 'string'
-        ? normalizeUrlBase(raw.urlBase)
-        : base.urlBase,
-    apiKey:
-      typeof raw.apiKey === 'string' && raw.apiKey.length >= 16
-        ? raw.apiKey
-        : base.apiKey,
-    logLevel: LOG_LEVELS.includes(logLevel) ? logLevel : base.logLevel,
-    instanceName:
-      typeof raw.instanceName === 'string' && raw.instanceName
-        ? raw.instanceName
-        : base.instanceName,
-  };
+type FieldParsers = { [K in keyof GeneralConfig]: (raw: unknown) => GeneralConfig[K] | undefined };
+
+const FIELD_PARSERS: FieldParsers = {
+  port: (raw) => {
+    const port = Number(raw);
+    return Number.isInteger(port) && port > 0 && port < 65536 ? port : undefined;
+  },
+  bindAddress: (raw) => (typeof raw === 'string' && isValidBindAddress(raw.trim()) ? raw.trim() : undefined),
+  urlBase: (raw) => (typeof raw === 'string' && isValidUrlBase(raw) ? normalizeUrlBase(raw) : undefined),
+  apiKey: (raw) => (typeof raw === 'string' && API_KEY_PATTERN.test(raw) ? raw : undefined),
+  logLevel: (raw) => LOG_LEVELS.find((level) => level === raw),
+  instanceName: (raw) => (typeof raw === 'string' && raw.trim() && raw.length <= 64 ? raw.trim() : undefined),
+  authentication: (raw) => AUTHENTICATION_MODES.find((mode): mode is AuthenticationMode => mode === raw),
+};
+
+const GENERAL_KEYS = Object.keys(FIELD_PARSERS) as (keyof GeneralConfig)[];
+
+interface MergeResult {
+  config: GeneralConfig;
+  invalid: (keyof GeneralConfig)[];
+  missing: (keyof GeneralConfig)[];
+}
+
+/** Pure: overlays raw values on base field by field; invalid values keep the base value and are reported. */
+export function mergeGeneral(raw: Partial<Record<keyof GeneralConfig, unknown>>, base: GeneralConfig): MergeResult {
+  const config = { ...base };
+  const invalid: (keyof GeneralConfig)[] = [];
+  const missing: (keyof GeneralConfig)[] = [];
+  for (const key of GENERAL_KEYS) {
+    if (raw[key] === undefined) {
+      missing.push(key);
+      continue;
+    }
+    const value = FIELD_PARSERS[key](raw[key]);
+    if (value === undefined) invalid.push(key);
+    else Object.assign(config, { [key]: value });
+  }
+  return { config, invalid, missing };
 }
 
 function envGeneral(env: Env): Partial<Record<keyof GeneralConfig, string>> {
   const out: Partial<Record<keyof GeneralConfig, string>> = {};
-  for (const [key, name] of Object.entries(ENV_KEYS) as [
-    keyof GeneralConfig,
-    string,
-  ][]) {
-    const value = env[name];
-    if (value !== undefined && value !== '') out[key] = value;
+  for (const key of GENERAL_KEYS) {
+    const value = env[ENV_KEYS[key]]?.trim();
+    if (value) out[key] = value;
   }
   return out;
 }
 
-function readJsonFile(path: string): Record<string, unknown> {
-  if (!existsSync(path)) return {};
+type ConfigFile =
+  | { status: 'missing'; data: Record<string, unknown> }
+  | { status: 'corrupt'; data: Record<string, unknown> }
+  | { status: 'ok'; data: Record<string, unknown> };
+
+function readConfigFile(path: string): ConfigFile {
+  if (!existsSync(path)) return { status: 'missing', data: {} };
   try {
     const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
-    return parsed && typeof parsed === 'object'
-      ? (parsed as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
-  }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+      return { status: 'ok', data: parsed as Record<string, unknown> };
+  } catch {}
+  return { status: 'corrupt', data: {} };
 }
 
 function writeJsonAtomic(path: string, value: unknown): void {
   const tmp = `${path}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   renameSync(tmp, path);
+}
+
+/**
+ * Read-only boot settings (no mkdir, no writes, no key generation): what the server listens on.
+ * Shared by ConfigStore and docker/healthcheck.ts so both agree on port, bind address and URL base.
+ */
+export function resolveBootSettings(
+  env: Env,
+  configDir: string = resolveConfigDir(env, process.cwd()),
+): Pick<GeneralConfig, 'port' | 'bindAddress' | 'urlBase'> {
+  const file = readConfigFile(join(configDir, 'config.json'));
+  const stored = mergeGeneral(file.data, defaultGeneralConfig()).config;
+  const { port, bindAddress, urlBase } = mergeGeneral(envGeneral(env), stored).config;
+  return { port, bindAddress, urlBase };
 }
 
 export interface LoadConfigOptions {
@@ -157,7 +202,8 @@ export interface LoadConfigOptions {
 
 /**
  * Bootstrap config: <configDir>/config.json overlaid by WOLOLO__* env vars.
- * Creates the config dir and file (with a fresh API key) on first start.
+ * Creates the config dir and file (with a fresh API key) on first start and repairs a partial, invalid or corrupt
+ * file (the corrupt original is kept as config.json.bad), so the API key never changes between boots.
  */
 export class ConfigStore {
   private current: AppConfig;
@@ -165,8 +211,7 @@ export class ConfigStore {
 
   constructor(options: LoadConfigOptions) {
     this.env = options.env;
-    const configDir =
-      options.configDir ?? resolveConfigDir(this.env, process.cwd());
+    const configDir = options.configDir ?? resolveConfigDir(this.env, process.cwd());
     this.current = this.load(configDir);
   }
 
@@ -176,56 +221,52 @@ export class ConfigStore {
 
   /** Persists the non-env-overridden fields and returns the new config. Port/bind/urlBase need a restart. */
   update(patch: Partial<Omit<GeneralConfig, 'apiKey'>>): AppConfig {
-    const stored = coerceGeneral(
-      readJsonFile(this.current.configFile),
-      this.storedGeneral(),
-    );
-    const next = coerceGeneral({ ...stored, ...patch }, stored);
-    writeJsonAtomic(this.current.configFile, next);
+    const stored = mergeGeneral(readConfigFile(this.current.configFile).data, this.storedGeneral()).config;
+    const next = mergeGeneral(patch, stored);
+    if (next.invalid.length > 0) throw new Error(`invalid general settings: ${next.invalid.join(', ')}`);
+    writeJsonAtomic(this.current.configFile, next.config);
     this.current = this.load(this.current.configDir);
     return this.current;
   }
 
   regenerateApiKey(): AppConfig {
-    const stored = coerceGeneral(
-      readJsonFile(this.current.configFile),
-      this.storedGeneral(),
-    );
-    writeJsonAtomic(this.current.configFile, {
-      ...stored,
-      apiKey: generateApiKey(),
-    });
+    const stored = mergeGeneral(readConfigFile(this.current.configFile).data, this.storedGeneral()).config;
+    writeJsonAtomic(this.current.configFile, { ...stored, apiKey: generateApiKey() });
     this.current = this.load(this.current.configDir);
     return this.current;
   }
 
   private storedGeneral(): GeneralConfig {
-    const { port, bindAddress, urlBase, apiKey, logLevel, instanceName } =
-      this.current;
-    return { port, bindAddress, urlBase, apiKey, logLevel, instanceName };
+    const general = {} as Record<keyof GeneralConfig, unknown>;
+    for (const key of GENERAL_KEYS) general[key] = this.current[key];
+    return general as GeneralConfig;
   }
 
   private load(configDir: string): AppConfig {
     mkdirSync(configDir, { recursive: true });
     const configFile = join(configDir, 'config.json');
-    const fileExisted = existsSync(configFile);
-    const stored = coerceGeneral(
-      readJsonFile(configFile),
-      defaultGeneralConfig(),
-    );
-    if (!fileExisted) writeJsonAtomic(configFile, stored);
+    const warnings: string[] = [];
+    const file = readConfigFile(configFile);
+    if (file.status === 'corrupt') {
+      renameSync(configFile, `${configFile}.bad`);
+      warnings.push('config.json was not valid JSON; kept it as config.json.bad and wrote a fresh one');
+    }
+    const stored = mergeGeneral(file.data, defaultGeneralConfig());
+    for (const key of stored.invalid) warnings.push(`config.json: invalid ${key}, using ${String(stored.config[key])}`);
+    if (file.status !== 'ok' || stored.invalid.length > 0 || stored.missing.length > 0)
+      writeJsonAtomic(configFile, stored.config);
 
-    const overrides = envGeneral(this.env);
-    const general = coerceGeneral({ ...stored, ...overrides }, stored);
+    const envValues = envGeneral(this.env);
+    const general = mergeGeneral(envValues, stored.config);
+    for (const key of general.invalid) warnings.push(`${ENV_KEYS[key]} is invalid and was ignored`);
     const logDir = join(configDir, 'logs');
     const jobLogDir = join(logDir, 'jobs');
     const backupDir = join(configDir, 'backups');
-    for (const dir of [logDir, jobLogDir, backupDir])
-      mkdirSync(dir, { recursive: true });
+    for (const dir of [logDir, jobLogDir, backupDir]) mkdirSync(dir, { recursive: true });
 
     return {
-      ...general,
-      version: APP_VERSION,
+      ...general.config,
+      version: resolveAppVersion(this.env),
       configDir,
       configFile,
       databasePath: join(configDir, 'wololo.db'),
@@ -239,9 +280,11 @@ export class ConfigStore {
         ffmpeg: this.env.WOLOLO__FFMPEG || 'ffmpeg',
         ffprobe: this.env.WOLOLO__FFPROBE || 'ffprobe',
         mkvmerge: this.env.WOLOLO__MKVMERGE || 'mkvmerge',
+        sevenZip: this.env.WOLOLO__7Z || '7z',
       },
       isDocker: existsSync('/.dockerenv') || this.env.WOLOLO_DOCKER === '1',
-      envOverrides: Object.keys(overrides) as (keyof GeneralConfig)[],
+      envOverrides: (Object.keys(envValues) as (keyof GeneralConfig)[]).filter((key) => !general.invalid.includes(key)),
+      warnings,
     };
   }
 }

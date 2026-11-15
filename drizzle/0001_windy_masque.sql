@@ -1,0 +1,1 @@
+ALTER TABLE `libraries` ADD `fill_missing_language` text DEFAULT 'off' NOT NULL;

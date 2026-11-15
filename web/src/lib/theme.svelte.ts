@@ -12,9 +12,7 @@ function readStored(): ThemeChoice {
 }
 
 class ThemeState {
-  choice = $state<ThemeChoice>(
-    typeof window === 'undefined' ? 'system' : readStored(),
-  );
+  choice = $state<ThemeChoice>(typeof window === 'undefined' ? 'system' : readStored());
 
   set(choice: ThemeChoice): void {
     this.choice = choice;
@@ -30,9 +28,7 @@ class ThemeState {
 
   cycle(): void {
     const order: ThemeChoice[] = ['system', 'light', 'dark'];
-    this.set(
-      order[(order.indexOf(this.choice) + 1) % order.length] ?? 'system',
-    );
+    this.set(order[(order.indexOf(this.choice) + 1) % order.length] ?? 'system');
   }
 }
 

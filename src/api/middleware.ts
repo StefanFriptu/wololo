@@ -17,8 +17,7 @@ function safeEqual(a: string, b: string): boolean {
 export function extractApiKey(headers: Headers, url: URL): string | null {
   const header = headers.get('x-api-key');
   if (header) return header;
-  const query =
-    url.searchParams.get('apikey') ?? url.searchParams.get('apiKey');
+  const query = url.searchParams.get('apikey') ?? url.searchParams.get('apiKey');
   if (query) return query;
   const auth = headers.get('authorization');
   if (auth?.toLowerCase().startsWith('bearer ')) return auth.slice(7).trim();
@@ -26,10 +25,7 @@ export function extractApiKey(headers: Headers, url: URL): string | null {
 }
 
 /** X-Api-Key header, ?apikey= query (Radarr/Sonarr webhooks, EventSource) or Bearer token. */
-export function apiKeyAuth(
-  getApiKey: () => string,
-  apiPrefix: string,
-): MiddlewareHandler<AppEnv> {
+export function apiKeyAuth(getApiKey: () => string, apiPrefix: string): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const url = new URL(c.req.url);
     const relative = url.pathname.slice(apiPrefix.length);
@@ -78,7 +74,7 @@ export function errorHandler(log: Logger): ErrorHandler<AppEnv> {
     });
     const body: ApiErrorBody = {
       error: 'internal',
-      message: error.message || 'internal error',
+      message: 'internal error',
     };
     return c.json(body, 500);
   };

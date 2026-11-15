@@ -5,12 +5,7 @@ export interface NavItem {
   children?: { label: string; href: string }[];
 }
 
-export type IconName =
-  | 'library'
-  | 'activity'
-  | 'profiles'
-  | 'settings'
-  | 'system';
+export type IconName = 'library' | 'activity' | 'profiles' | 'settings' | 'system';
 
 export const NAV: NavItem[] = [
   {

@@ -1,6 +1,7 @@
 services:
   wololo:
-    image: ghcr.io/OWNER/wololo:latest
+    # ":main" follows the main branch; switch to ":latest" (newest release) once a v* release exists.
+    image: ghcr.io/OWNER/wololo:main
     container_name: wololo
     environment:
       - PUID=1000
@@ -14,3 +15,5 @@ services:
     ports:
       - 8585:8585
     restart: unless-stopped
+    # Lets a running ffmpeg/mkvmerge job stop cleanly (Docker's default is 10 s).
+    stop_grace_period: 30s

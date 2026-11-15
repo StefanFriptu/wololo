@@ -1,20 +1,14 @@
 /**
  * Domain model shared by the backend and the web UI.
  * Must stay free of runtime imports (no bun, node, drizzle): the SvelteKit app type-checks this file.
- * Language codes are ISO 639-2/B three-letter codes as ffprobe and mkvmerge report them ("eng", "ger", "spa").
+ * Language codes are ISO 639-2/B three-letter codes ("eng", "ger", "spa"). Every language value from outside
+ * (ffprobe, MPLS, mkvmerge, Radarr/Sonarr names, user input) goes through normalizeLanguage (./language.ts) first.
  */
 
 export type Iso639_2 = string;
 export type IsoDateTime = string;
 
-export const MEDIA_FILE_STATUSES = [
-  'pending',
-  'compatible',
-  'needs_work',
-  'processing',
-  'failed',
-  'ignored',
-] as const;
+export const MEDIA_FILE_STATUSES = ['pending', 'compatible', 'needs_work', 'processing', 'failed', 'ignored'] as const;
 export type MediaFileStatus = (typeof MEDIA_FILE_STATUSES)[number];
 
 export const MEDIA_FILE_KINDS = ['file', 'bdmv', 'iso'] as const;
@@ -26,13 +20,7 @@ export type LibraryMode = (typeof LIBRARY_MODES)[number];
 export const LIBRARY_KINDS = ['movies', 'series', 'other'] as const;
 export type LibraryKind = (typeof LIBRARY_KINDS)[number];
 
-export const STREAM_KINDS = [
-  'video',
-  'audio',
-  'subtitle',
-  'attachment',
-  'data',
-] as const;
+export const STREAM_KINDS = ['video', 'audio', 'subtitle', 'attachment', 'data'] as const;
 export type StreamKind = (typeof STREAM_KINDS)[number];
 
 export type HdrFormat = 'sdr' | 'hdr10' | 'hdr10plus' | 'hlg' | 'dolby_vision';
@@ -49,6 +37,10 @@ export interface DolbyVisionInfo {
 interface StreamBase {
   /** Absolute stream index inside the container (ffprobe `index`). */
   index: number;
+  /** Container stream id (ffprobe `id`, hex "0x1100" parsed to 4352): the MPEG-TS PID for m2ts and bluray: probes, else null. */
+  streamId: number | null;
+  /** ffprobe `start_time` in seconds; audio/video offsets of a disc are derived from it. */
+  startTimeSec: number | null;
   /** ffprobe `codec_name`, lower case ("dts", "truehd", "eac3", "pcm_s24le", "hevc", "subrip"). */
   codec: string;
   codecLongName: string | null;
@@ -101,11 +93,7 @@ export interface OtherStream extends StreamBase {
   mimeType: string | null;
 }
 
-export type MediaStream =
-  | VideoStream
-  | AudioStream
-  | SubtitleStream
-  | OtherStream;
+export type MediaStream = VideoStream | AudioStream | SubtitleStream | OtherStream;
 
 export interface ProbeResult {
   path: string;
@@ -121,7 +109,13 @@ export interface ProbeResult {
 }
 
 export type TargetAudioCodec = 'ac3' | 'eac3' | 'aac';
-export type DolbyVisionMode = 'keep' | 'convert_8_1' | 'drop_hdr10';
+/**
+ * Handling of dual-layer Dolby Vision (UHD Blu-ray profile 7) in BDMV jobs. v1 ships only "drop_hdr10": keep the
+ * HDR10 base layer, drop the enhancement layer. "keep" and "convert_8_1" need dovi_tool and are v1.1.
+ * Files handled by audio jobs always copy video untouched, Dolby Vision included.
+ */
+export const DOLBY_VISION_MODES = ['drop_hdr10'] as const;
+export type DolbyVisionMode = (typeof DOLBY_VISION_MODES)[number];
 
 export interface AudioBitrates {
   /** kbps for 1 channel. Default 192. */
@@ -145,16 +139,12 @@ export interface DeviceProfileDefinition {
     maxChannels: number;
   };
   video: {
-    /** ffprobe codec names the device decodes. Video outside this list is flagged, never re-encoded unless reencode.enabled. */
+    /**
+     * ffprobe codec names the device decodes. Video outside this list makes the plan "blocked" (never re-encoded in v1;
+     * the opt-in VC-1/MPEG-2 -> H.264 re-encode rule is v1.1).
+     */
     allowedCodecs: string[];
     dolbyVision: DolbyVisionMode;
-    reencode: {
-      enabled: boolean;
-      fromCodecs: string[];
-      targetCodec: 'h264';
-      crf: number;
-      preset: string;
-    };
   };
   subtitles: {
     /** ffprobe codec names the device renders without burn-in. Informational in v1 (OCR is v1.1). */
@@ -190,7 +180,14 @@ export interface LibraryRuleSettings {
   keepOriginalLanguage: boolean;
   /** Keep tracks with no language tag when filtering. */
   keepUndetermined: boolean;
+  /**
+   * Tag untagged audio/subtitle tracks: "off", "original" (the item's original language, skipped when unknown) or a
+   * fixed ISO 639-2/B code. Applied before the keep-list filter; retagged streams carry PlannedStream.retagged.
+   */
+  fillMissingLanguage: FillMissingLanguage;
 }
+
+export type FillMissingLanguage = 'off' | 'original' | (string & {});
 
 export interface Library extends LibraryRuleSettings {
   id: number;
@@ -232,6 +229,8 @@ export interface PlannedStream {
   codec: string;
   encode: AudioEncodeSpec | null;
   language: Iso639_2 | null;
+  /** The language tag was filled in by LibraryRuleSettings.fillMissingLanguage (the source track was untagged). */
+  retagged: boolean;
   title: string | null;
   default: boolean;
   forced: boolean;
@@ -242,11 +241,7 @@ export interface DroppedStream {
   kind: StreamKind;
   codec: string;
   language: Iso639_2 | null;
-  reason:
-    | 'incompatible_replaced'
-    | 'compatible_duplicate'
-    | 'language_filter'
-    | 'unsupported';
+  reason: 'incompatible_replaced' | 'compatible_duplicate' | 'language_filter' | 'unsupported';
 }
 
 /**
@@ -277,13 +272,7 @@ export interface ConversionPlan {
 export const JOB_TYPES = ['audio', 'bdmv'] as const;
 export type JobType = (typeof JOB_TYPES)[number];
 
-export const JOB_STATES = [
-  'queued',
-  'running',
-  'completed',
-  'failed',
-  'cancelled',
-] as const;
+export const JOB_STATES = ['queued', 'running', 'completed', 'failed', 'cancelled'] as const;
 export type JobState = (typeof JOB_STATES)[number];
 
 export const JOB_STEPS = [
@@ -343,7 +332,10 @@ export interface VerificationCheck {
     | 'duration'
     | 'stream_count'
     | 'video_checksum'
+    | 'video_packets'
     | 'audio_decode'
+    | 'chapters'
+    | 'languages'
     | 'free_space'
     | 'output_exists';
   passed: boolean;
@@ -366,7 +358,22 @@ export type HistoryEventType =
   | 'recycled'
   | 'restored'
   | 'purged'
-  | 'imported';
+  | 'imported'
+  | 'source_deleted';
+
+/** Structured payload of a history row. Writers (jobs, bdmv, integrations) and the web UI share these keys. */
+export interface HistoryData {
+  lostFeatures?: string[];
+  bytesBefore?: number;
+  bytesAfter?: number;
+  outputPath?: string;
+  error?: string;
+  recycleBinEntryId?: number;
+  /** Streams whose language tag was filled in (PlannedStream.retagged), e.g. "audio 1 -> spa". */
+  retagged?: string[];
+  arrInstanceId?: number;
+  torrentHash?: string;
+}
 
 export interface HistoryEntry {
   id: number;
@@ -375,15 +382,11 @@ export interface HistoryEntry {
   event: HistoryEventType;
   path: string;
   message: string;
-  data: Record<string, unknown> | null;
+  data: HistoryData | null;
   createdAt: IsoDateTime;
 }
 
-export type QueuePauseReason =
-  | 'user'
-  | 'window'
-  | 'plex_streaming'
-  | 'shutdown';
+export type QueuePauseReason = 'user' | 'window' | 'plex_streaming' | 'shutdown';
 
 export interface QueueState {
   paused: boolean;
@@ -494,7 +497,12 @@ export interface TorrentInfo {
   goalMet: boolean;
 }
 
-export type BdmvDecisionKind = 'main_title' | 'movie_match';
+/**
+ * main_title: several playlists within ambiguityPercent of the longest.
+ * movie_match: Radarr lookup score below minMatchScore (or no result).
+ * delete_source: a converted disc's torrent met its seeding goal and settings.bdmv.deleteSourceWhenSeeded is on.
+ */
+export type BdmvDecisionKind = 'main_title' | 'movie_match' | 'delete_source';
 export type BdmvDecisionState = 'pending' | 'resolved' | 'dismissed';
 
 export interface BdmvTitleCandidate {
@@ -523,7 +531,9 @@ export type BdmvDecisionChoice =
       asEditions: boolean;
       editionNames: Record<string, string>;
     }
-  | { kind: 'movie_match'; tmdbId: number };
+  /** tmdbId from movieCandidates or from a manual search (GET /api/v1/arr/:id/lookup). */
+  | { kind: 'movie_match'; tmdbId: number }
+  | { kind: 'delete_source'; confirm: boolean };
 
 export interface BdmvDecision {
   id: number;
@@ -551,10 +561,20 @@ export interface BdmvJobPlan {
   sourcePath: string;
   sourceKind: 'bdmv' | 'iso';
   movie: MovieMatchCandidate;
+  /** Radarr instance that identifies and imports the movie (library's arrInstanceId, else arr.defaultRadarr()). */
+  radarrInstanceId: number;
+  /**
+   * Local path of the Radarr root folder the output is written to: settings.bdmv.rootFolderPath when set, else the
+   * Radarr root folder containing the library root of the disc, else the first accessible one.
+   */
+  rootFolderPath: string;
   titles: BdmvOutputTitle[];
+  /** Plan of the main title's audio, computed by rules.plan from a bluray: probe of its playlist. */
   audioPlan: ConversionPlan | null;
   dolbyVision: DolbyVisionMode;
   estimatedOutputBytes: number;
+  /** Bytes extracted from an .iso before muxing (playlist clips), 0 for folders. Free space needed: extract + output. */
+  extractBytes: number;
 }
 
 export type TaskName =

@@ -42,13 +42,10 @@ export class NotImplementedError extends AppError {
   }
 }
 
-export const notFound = (what: string) =>
-  new AppError('not_found', `${what} not found`);
+export const notFound = (what: string) => new AppError('not_found', `${what} not found`);
 
 export function notImplemented(what?: string): never {
-  throw new NotImplementedError(
-    what ? `${what}: not implemented` : 'not implemented',
-  );
+  throw new NotImplementedError(what ? `${what}: not implemented` : 'not implemented');
 }
 
 export function errorMessage(error: unknown): string {

@@ -12,7 +12,18 @@ export interface GeneralConfig {
   apiKey: string;
   logLevel: LogLevel;
   instanceName: string;
+  /** Who gets the API key injected into the web UI. The API itself always requires the key. */
+  authentication: AuthenticationMode;
 }
+
+/**
+ * disabled_for_local_addresses (default): the UI gets the key only for requests from loopback/private addresses
+ * (RFC 1918, CGNAT, link-local, IPv6 ULA) without X-Forwarded-For/Forwarded headers; everyone else is asked for it.
+ * required: the UI always asks for the key (stored in the browser).
+ * disabled: every client of the web port gets the key; only behind an authenticating reverse proxy.
+ */
+export const AUTHENTICATION_MODES = ['disabled_for_local_addresses', 'required', 'disabled'] as const;
+export type AuthenticationMode = (typeof AUTHENTICATION_MODES)[number];
 
 /** Runtime settings, stored in the settings KV table, one row per top-level section. */
 export interface Settings {
@@ -56,8 +67,12 @@ export interface Settings {
     /** Radarr lookup score below which a decision is required. 0..1, default 0.8. */
     minMatchScore: number;
     extras: { enabled: boolean; minMinutes: number };
-    /** Offer to delete the source once its torrent's seeding goal is met. */
+    /** Offer to delete the source (delete_source decision) once its torrent's seeding goal is met. */
     deleteSourceWhenSeeded: boolean;
+    /** Local path of the Radarr root folder for BDMV output; null = the one holding the disc's library, else the first. */
+    rootFolderPath: string | null;
+    /** Radarr quality profile for movies BDMV adds to Radarr; null = the instance's first profile. */
+    qualityProfileId: number | null;
   };
   notifications: {
     rescanArr: boolean;
@@ -86,22 +101,8 @@ export const DEFAULT_SETTINGS: Settings = {
     maxAttempts: 3,
   },
   media: {
-    extensions: [
-      '.mkv',
-      '.mp4',
-      '.m4v',
-      '.avi',
-      '.ts',
-      '.m2ts',
-      '.mov',
-      '.iso',
-    ],
-    ignorePatterns: [
-      '**/Sample/**',
-      '**/*.sample.*',
-      '**/.wololo-recycle/**',
-      '**/@eaDir/**',
-    ],
+    extensions: ['.mkv', '.mp4', '.m4v', '.avi', '.ts', '.m2ts', '.mov', '.iso'],
+    ignorePatterns: ['**/Sample/**', '**/*.sample.*', '**/.wololo-recycle/**', '**/@eaDir/**'],
     checkOnImport: true,
   },
   recycleBin: { enabled: true, retentionDays: 7, path: null },
@@ -112,6 +113,8 @@ export const DEFAULT_SETTINGS: Settings = {
     minMatchScore: 0.8,
     extras: { enabled: false, minMinutes: 2 },
     deleteSourceWhenSeeded: false,
+    rootFolderPath: null,
+    qualityProfileId: null,
   },
   notifications: { rescanArr: true, plexPartialScan: true },
 };

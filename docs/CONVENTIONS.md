@@ -123,5 +123,5 @@ Stack: TypeScript on Bun, Hono, SQLite with Drizzle, SvelteKit SPA, `bun test`, 
 
 ## Biome settings
 
-- Formatter: 2-space indent, single quotes, line width 80, semicolons, trailing commas.
+- Formatter: 2-space indent, single quotes, line width 120, semicolons, trailing commas.
 - Linter: recommended rules on, plus `noExplicitAny`, `noNonNullAssertion` and `useImportType` as errors. Why: the rules above are enforced by the tool, not only by review.

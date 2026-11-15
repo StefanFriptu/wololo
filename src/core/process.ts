@@ -51,18 +51,10 @@ export function findExecutable(name: string): string | null {
 }
 
 /** Prefixes argv with ionice and nice when the tools exist (ionice is Linux only). */
-export function withLowPriority(
-  argv: string[],
-  priority: LowPriority,
-  tools: PriorityTools,
-): string[] {
+export function withLowPriority(argv: string[], priority: LowPriority, tools: PriorityTools): string[] {
   const prefix: string[] = [];
   if (tools.ionice) {
-    prefix.push(
-      tools.ionice,
-      '-c',
-      priority.ioniceClass === 'idle' ? '3' : '2',
-    );
+    prefix.push(tools.ionice, '-c', priority.ioniceClass === 'idle' ? '3' : '2');
     if (priority.ioniceClass === 'best-effort') prefix.push('-n', '7');
   }
   if (tools.nice) prefix.push(tools.nice, '-n', String(priority.niceLevel));
@@ -81,8 +73,7 @@ async function pumpLines(
   for await (const chunk of stream) {
     const text = decoder.decode(chunk, { stream: true });
     if (keep === 'head') {
-      if (captured.length < maxBytes)
-        captured += text.slice(0, maxBytes - captured.length);
+      if (captured.length < maxBytes) captured += text.slice(0, maxBytes - captured.length);
     } else {
       captured = (captured + text).slice(-maxBytes);
     }
@@ -93,11 +84,7 @@ async function pumpLines(
     }
   }
   const rest = decoder.decode();
-  if (rest)
-    captured =
-      keep === 'head'
-        ? (captured + rest).slice(0, maxBytes)
-        : (captured + rest).slice(-maxBytes);
+  if (rest) captured = keep === 'head' ? (captured + rest).slice(0, maxBytes) : (captured + rest).slice(-maxBytes);
   if (onLine && (partial || rest)) onLine(partial + rest);
   return captured;
 }
@@ -105,9 +92,7 @@ async function pumpLines(
 /** Spawns a child process, streams its output line by line, and resolves when it exits (never rejects on exit code). */
 export async function runProcess(options: RunOptions): Promise<RunResult> {
   const base = [options.command, ...options.args];
-  const argv = options.lowPriority
-    ? withLowPriority(base, options.lowPriority, priorityTools())
-    : base;
+  const argv = options.lowPriority ? withLowPriority(base, options.lowPriority, priorityTools()) : base;
   const started = performance.now();
   let timedOut = false;
 
@@ -137,18 +122,8 @@ export async function runProcess(options: RunOptions): Promise<RunResult> {
 
   try {
     const [stdout, stderr] = await Promise.all([
-      pumpLines(
-        child.stdout,
-        options.maxStdoutBytes ?? 16 * 1024 * 1024,
-        'head',
-        options.onStdoutLine,
-      ),
-      pumpLines(
-        child.stderr,
-        options.maxStderrBytes ?? 64 * 1024,
-        'tail',
-        options.onStderrLine,
-      ),
+      pumpLines(child.stdout, options.maxStdoutBytes ?? 16 * 1024 * 1024, 'head', options.onStdoutLine),
+      pumpLines(child.stderr, options.maxStderrBytes ?? 64 * 1024, 'tail', options.onStderrLine),
     ]);
     await child.exited;
     return {

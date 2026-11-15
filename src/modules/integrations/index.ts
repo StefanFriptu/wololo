@@ -18,7 +18,9 @@ export function createArrService(_ctx: AppContext): ArrService {
     remove: async () => notImplemented('arr.remove'),
     test: async () => notImplemented('arr.test'),
     rootFolders: async () => notImplemented('arr.rootFolders'),
+    qualityProfiles: async () => notImplemented('arr.qualityProfiles'),
     lookupMovie: async () => notImplemented('arr.lookupMovie'),
+    addMovie: async () => notImplemented('arr.addMovie'),
     findByPath: async () => notImplemented('arr.findByPath'),
     rescan: async () => notImplemented('arr.rescan'),
     importMovieFolder: async () => notImplemented('arr.importMovieFolder'),
@@ -48,19 +50,15 @@ export function createPlexService(_ctx: AppContext): PlexService {
   };
 }
 
-export function createDownloadClientService(
-  _ctx: AppContext,
-): DownloadClientService {
+export function createDownloadClientService(_ctx: AppContext): DownloadClientService {
   return {
     get: async () => notImplemented('downloadClient.get'),
     save: async () => notImplemented('downloadClient.save'),
     remove: async () => notImplemented('downloadClient.remove'),
     test: async () => notImplemented('downloadClient.test'),
-    findTorrentByPath: async () =>
-      notImplemented('downloadClient.findTorrentByPath'),
+    findTorrentByPath: async () => notImplemented('downloadClient.findTorrentByPath'),
     deleteTorrent: async () => notImplemented('downloadClient.deleteTorrent'),
-    checkSeedingGoals: async () =>
-      notImplemented('downloadClient.checkSeedingGoals'),
+    checkSeedingGoals: async () => notImplemented('downloadClient.checkSeedingGoals'),
   };
 }
 

@@ -1,12 +1,7 @@
 import { z } from 'zod';
 import type { Db } from '../db/client.ts';
 import { settings as settingsTable } from '../db/schema.ts';
-import {
-  DEFAULT_SETTINGS,
-  type DeepPartial,
-  type Settings,
-  type SettingsSection,
-} from '../shared/settings.ts';
+import { DEFAULT_SETTINGS, type DeepPartial, type Settings, type SettingsSection } from '../shared/settings.ts';
 import { AppError } from './errors.ts';
 import type { EventBus } from './events.ts';
 
@@ -44,6 +39,8 @@ export const settingsSchema = z.object({
       minMinutes: z.number().min(0).max(600),
     }),
     deleteSourceWhenSeeded: z.boolean(),
+    rootFolderPath: z.string().min(1).nullable(),
+    qualityProfileId: z.number().int().positive().nullable(),
   }),
   notifications: z.object({
     rescanArr: z.boolean(),
@@ -58,15 +55,11 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 export function deepMerge<T>(base: T, patch: unknown): T {
-  if (!isPlainObject(base) || !isPlainObject(patch))
-    return (patch === undefined ? base : patch) as T;
+  if (!isPlainObject(base) || !isPlainObject(patch)) return (patch === undefined ? base : patch) as T;
   const out: Record<string, unknown> = { ...base };
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) continue;
-    out[key] =
-      key in base
-        ? deepMerge((base as Record<string, unknown>)[key], value)
-        : value;
+    out[key] = key in base ? deepMerge((base as Record<string, unknown>)[key], value) : value;
   }
   return out as T;
 }
@@ -93,16 +86,8 @@ export class SettingsStore {
   update(patch: DeepPartial<Settings>): Settings {
     const merged = deepMerge(this.cache, patch);
     const parsed = settingsSchema.safeParse(merged);
-    if (!parsed.success)
-      throw new AppError(
-        'validation',
-        'invalid settings',
-        z.treeifyError(parsed.error),
-      );
-    const changed = SECTIONS.filter(
-      (key) =>
-        JSON.stringify(parsed.data[key]) !== JSON.stringify(this.cache[key]),
-    );
+    if (!parsed.success) throw new AppError('validation', 'invalid settings', z.treeifyError(parsed.error));
+    const changed = SECTIONS.filter((key) => JSON.stringify(parsed.data[key]) !== JSON.stringify(this.cache[key]));
     if (changed.length === 0) return this.cache;
 
     const updatedAt = new Date().toISOString();

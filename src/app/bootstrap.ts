@@ -1,7 +1,7 @@
 import type { Server } from 'bun';
 import type { Hono } from 'hono';
 import type { AppEnv } from '../api/http.ts';
-import { ConfigStore } from '../core/config.ts';
+import { ConfigStore, resolveConfigDir } from '../core/config.ts';
 import { errorMessage } from '../core/errors.ts';
 import { LogHub } from '../core/logger.ts';
 import { openDatabase, runMigrations } from '../db/client.ts';
@@ -12,6 +12,8 @@ import { createHttpApp } from './server.ts';
 export interface RuntimeOptions {
   env: Record<string, string | undefined>;
   configDir?: string;
+  /** Overrides the configured port (0 = ephemeral, for integration tests); the returned Server reports the real port. */
+  port?: number;
   console?: boolean;
   overrides?: Partial<Services>;
 }
@@ -27,27 +29,30 @@ export interface Runtime {
 const SHUTDOWN_TIMEOUT_MS = 15_000;
 
 export function createRuntime(options: RuntimeOptions): Runtime {
-  const config = new ConfigStore({
-    env: options.env,
-    configDir: options.configDir,
-  });
+  const configDir = options.configDir ?? resolveConfigDir(options.env, process.cwd());
+  const restored = applyPendingRestore(configDir);
+  const config = new ConfigStore({ env: options.env, configDir });
   const logs = new LogHub({
     level: config.get().logLevel,
     logDir: config.get().logDir,
     console: options.console ?? true,
   });
   const log = logs.logger('bootstrap');
-
-  const restored = applyPendingRestore(config.get());
   if (restored) log.warn('applied a staged backup restore');
+  for (const warning of config.get().warnings) log.warn(warning);
 
   const dbHandle = openDatabase(config.get().databasePath);
-  runMigrations(dbHandle);
+  const migration = runMigrations(dbHandle, { backupDir: config.get().backupDir });
+  if (migration.backupPath) log.info('database backed up before migrating', { path: migration.backupPath });
+  let stopRuntime: (reason: string) => Promise<void> = async () => {};
   const ctx = createAppContext({
     config,
     logs,
     dbHandle,
     overrides: options.overrides,
+    requestRestart: () => {
+      void stopRuntime('restart').finally(() => process.exit(0));
+    },
   });
   const app = createHttpApp(ctx);
   let server: Server<undefined> | null = null;
@@ -57,21 +62,18 @@ export function createRuntime(options: RuntimeOptions): Runtime {
     const { services } = ctx;
     await services.profiles.ensureDefaults();
     const recovery = await services.jobs.recover();
-    if (recovery.requeued || recovery.tempFilesDeleted)
-      log.info('crash recovery', recovery);
+    if (recovery.requeued || recovery.completed || recovery.tempFilesDeleted) log.info('crash recovery', recovery);
     await services.jobs.start();
     await services.scheduler.start();
 
     const current = ctx.config.get();
     server = Bun.serve({
-      port: current.port,
+      port: options.port ?? current.port,
       hostname: current.bindAddress === '*' ? '0.0.0.0' : current.bindAddress,
-      fetch: app.fetch,
+      fetch: (request, bunServer) => app.fetch(request, { server: bunServer }),
       idleTimeout: 120,
     });
-    log.info(
-      `Wololo ${current.version} listening on http://${server.hostname}:${server.port}${current.urlBase}/`,
-    );
+    log.info(`Wololo ${current.version} listening on http://${server.hostname}:${server.port}${current.urlBase}/`);
     return server;
   };
 
@@ -79,9 +81,7 @@ export function createRuntime(options: RuntimeOptions): Runtime {
     stopping ??= (async () => {
       log.info('shutting down', { reason });
       ctx.requestShutdown();
-      const timeout = new Promise<void>((resolve) =>
-        setTimeout(resolve, SHUTDOWN_TIMEOUT_MS).unref?.(),
-      );
+      const timeout = new Promise<void>((resolve) => setTimeout(resolve, SHUTDOWN_TIMEOUT_MS).unref?.());
       const steps = (async () => {
         for (const [name, step] of [
           ['scheduler', () => ctx.services.scheduler.stop()],
@@ -104,5 +104,6 @@ export function createRuntime(options: RuntimeOptions): Runtime {
     return stopping;
   };
 
+  stopRuntime = stop;
   return { ctx, app, start, stop };
 }

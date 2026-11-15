@@ -33,6 +33,7 @@ export function createHttpApp(ctx: AppContext): Hono<AppEnv> {
           instanceName: current.instanceName,
         };
       },
+      authentication: () => ctx.config.get().authentication,
     }),
   );
 

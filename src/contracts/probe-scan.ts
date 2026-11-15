@@ -33,6 +33,11 @@ export interface ProbeOptions {
   signal?: AbortSignal;
   /** Also count chapters and read format tags (default true). */
   withChapters?: boolean;
+  /**
+   * Probe one playlist of a disc instead of a file: path is the disc folder or .iso and ffprobe runs
+   * `-playlist <n> bluray:<path>` (n = "00800.mpls" -> 800). Streams then carry their PID in streamId.
+   */
+  playlist?: string;
 }
 
 export interface ProbeService {
@@ -40,13 +45,11 @@ export interface ProbeService {
   probe(path: string, options?: ProbeOptions): Promise<ProbeResult>;
 }
 
-/** Pure: raw ffprobe JSON (already parsed) -> typed model. Table-tested against captured fixture output. */
-export type ParseFfprobeOutput = (
-  raw: unknown,
-  path: string,
-  sizeBytes: number,
-  probedAt: string,
-) => ProbeResult;
+/**
+ * Pure: raw ffprobe JSON (already parsed) -> typed model. Table-tested against captured fixture output.
+ * Languages go through normalizeLanguage; `id` ("0x1100") becomes streamId, `start_time` becomes startTimeSec.
+ */
+export type ParseFfprobeOutput = (raw: unknown, path: string, sizeBytes: number, probedAt: string) => ProbeResult;
 
 // ---------- libraries ----------
 
@@ -58,9 +61,7 @@ export interface LibraryService {
   /** Removes the library and its media_files rows; never touches files on disk. */
   remove(id: number): Promise<void>;
   /** Longest-prefix match of an absolute local path against all library roots. */
-  findRootForPath(
-    path: string,
-  ): Promise<{ library: Library; rootId: number; rootPath: string } | null>;
+  findRootForPath(path: string): Promise<{ library: Library; rootId: number; rootPath: string } | null>;
   browse(query: FilesystemQuery): Promise<FilesystemListing>;
 }
 
@@ -69,7 +70,7 @@ export interface LibraryService {
 export interface MediaRefs {
   trigger: JobTrigger;
   arr?: ArrItemRef | null;
-  /** ISO 639-2 original language from Radarr/Sonarr, when known. */
+  /** ISO 639-2/B original language from Radarr/Sonarr (already normalised), when known. */
   originalLanguage?: string | null;
 }
 
@@ -94,7 +95,10 @@ export interface JobResultUpdate {
   status: MediaFileStatus;
   reason: string | null;
   lastJobId: number;
-  /** New path when the job changed it (container change, BDMV output). */
+  /**
+   * New path when an audio job changed the container (e.g. .mp4 -> .mkv). Never set by BDMV jobs: the disc row keeps
+   * its path and records status "compatible" with reason "converted to <output>".
+   */
   path?: string;
   /** Fresh probe of the written file; recomputes the plan and rules key when given. */
   probe?: ProbeResult | null;
@@ -107,31 +111,35 @@ export interface MediaService {
   findByPath(path: string): Promise<MediaFileSummary | null>;
   /**
    * Single entry point used by webhooks and the scanner for one path:
-   * upsert row -> probe (or bdmv.analyze for discs) -> rules -> status -> enqueue when processing is enabled.
+   * libraries.findRootForPath (none -> "unknown_path") -> upsert row (kind file|bdmv|iso, size, mtime)
+   * -> resolve arr + originalLanguage: refs when given, else the values cached on the row, else arr.findByPath(path)
+   *    (cached in media_files.arr_* / original_language; failures logged, never fatal)
+   * -> kind bdmv|iso: bdmv.evaluate(row.id) and map BdmvEvaluation to status/plan/decision;
+   *    else probe -> rules.effectiveProfileForLibrary -> rules.plan
+   * -> status (ignored rows keep "ignored") -> processing.enabled && needs_work ? jobs.enqueue : "dry_run".
    * Never throws for per-file problems; reports them in CheckResult.
    */
   checkPath(path: string, refs: MediaRefs): Promise<CheckResult>;
-  /** Re-probe + re-evaluate an existing row (POST /media/:id/probe). */
+  /** Re-probe + re-evaluate an existing row (POST /media/:id/probe). Keeps status "ignored". */
   reprobe(id: number): Promise<MediaFileDetail>;
   /** Current plan with current profiles, without persisting (GET /media/:id/plan). */
   previewPlan(id: number): Promise<ConversionPlan>;
-  setIgnored(id: number, ignored: boolean): Promise<MediaFileSummary>;
+  /** reason is stored as statusReason (e.g. "restored from recycle bin"); un-ignoring re-evaluates the row. */
+  setIgnored(id: number, ignored: boolean, reason?: string | null): Promise<MediaFileSummary>;
   /** Used by the jobs module: mark processing / record the outcome of a job. */
-  setStatus(
-    id: number,
-    status: MediaFileStatus,
-    reason: string | null,
-  ): Promise<void>;
+  setStatus(id: number, status: MediaFileStatus, reason: string | null): Promise<void>;
   recordJobResult(id: number, update: JobResultUpdate): Promise<void>;
   /** Mark rows whose rulesKey no longer matches (after a profile or library edit) as pending re-check. */
-  invalidateRules(filter: {
-    libraryId?: number;
-    profileId?: number;
-  }): Promise<number>;
+  invalidateRules(filter: { libraryId?: number; profileId?: number }): Promise<number>;
 }
 
 // ---------- scanner ----------
 
+/**
+ * Scan of every enabled library root: new/changed entries (needsRecheck) go through media.checkPath; rows whose path no
+ * longer exists are deleted (media.removed). When processing is enabled, unchanged rows with status needs_work and no
+ * queued/running job are enqueued without a re-probe, so the backlog found in dry-run mode starts after opt-in.
+ */
 export interface ScanService {
   /** Starts a scan in the background (one at a time); returns the running scan if one is active. */
   start(request: ScanRequest): Promise<ScanStatus>;
@@ -146,7 +154,7 @@ export interface DiscoveredEntry {
   mtimeMs: number;
 }
 
-/** Pure: should this entry be (re)probed? Compares path+size+mtime+rulesKey against the stored row. */
+/** Pure: should this entry be (re)probed? Compares path+size+mtime+rulesKey against the stored row. Ignored rows: only when force. */
 export type NeedsRecheck = (
   entry: DiscoveredEntry,
   stored: {
@@ -160,17 +168,16 @@ export type NeedsRecheck = (
 ) => boolean;
 
 /** Pure: classifies a directory listing: a folder with BDMV/index.bdmv is a disc, *.iso is an image, else media files. */
-export type ClassifyEntry = (
-  path: string,
-  isDirectory: boolean,
-  childNames: string[],
-) => MediaFileKind | null;
+export type ClassifyEntry = (path: string, isDirectory: boolean, childNames: string[]) => MediaFileKind | null;
 
 // ---------- dry run ----------
 
 export interface DryRunService {
-  /** Aggregates probed media_files rows; reads only, writes nothing. */
-  report(options: { libraryId?: number }): Promise<DryRunReport>;
+  /**
+   * Aggregates probed media_files rows; reads only, writes nothing. byProfile re-runs rules.plan per assigned profile
+   * on the stored probe JSON (paged, no ffprobe).
+   */
+  report(options: { libraryId?: number; profileId?: number }): Promise<DryRunReport>;
 }
 
 // ---------- scheduler ----------
@@ -185,10 +192,7 @@ export interface TaskDefinition {
 export interface SchedulerService {
   list(): Promise<ScheduledTaskInfo[]>;
   runNow(name: TaskName): Promise<ScheduledTaskInfo>;
-  update(
-    name: TaskName,
-    patch: { intervalMinutes?: number; enabled?: boolean },
-  ): Promise<ScheduledTaskInfo>;
+  update(name: TaskName, patch: { intervalMinutes?: number; enabled?: boolean }): Promise<ScheduledTaskInfo>;
   start(): Promise<void>;
   stop(): Promise<void>;
 }

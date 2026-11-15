@@ -4,11 +4,7 @@
  * planConversion, resolveEffectiveProfile, buildAudioConversionArgs and createProgressParser are PURE
  * (no I/O, no clock, no randomness) and table-tested per codec and channel layout.
  */
-import type {
-  CodecCatalog,
-  ProfileInput,
-  ProfileWithUsage,
-} from '../shared/api-types.ts';
+import type { CodecCatalog, ProfileInput, ProfileWithUsage } from '../shared/api-types.ts';
 import type {
   ConversionPlan,
   DeviceProfile,
@@ -47,7 +43,7 @@ export interface RulesInput {
   probe: ProbeResult;
   profile: EffectiveProfile;
   library: LibraryRuleSettings;
-  /** From Radarr/Sonarr; when null the engine falls back to the first default audio track's language. */
+  /** ISO 639-2/B from Radarr/Sonarr (normalised); when null the engine falls back to the first default audio track's language. */
   originalLanguage: string | null;
 }
 
@@ -55,29 +51,24 @@ export interface RulesInput {
  * Pure. Decides per stream: copy, encode (target codec/bitrate/channels) or drop. Implements:
  * - skip conversion when a compatible track in the same language with >= channels exists (drop/demote the incompatible one),
  * - Replace (only converted track) vs KeepBoth (converted first + default, original kept after),
- * - language keep-list + original language, never removes the last audio track,
+ * - fillMissingLanguage first (untagged audio/subtitle -> original or fixed language, PlannedStream.retagged = true),
+ * - language keep-list + original language, never removes the last audio track; every language comparison goes
+ *   through sameLanguage/normalizeLanguage (src/shared/language.ts), so "ger", "deu" and "de" match,
  * - default flag on the original-language track, titles and language tags kept,
+ * - video codec outside profile.video.allowedCodecs -> action "blocked" (video is never re-encoded in v1),
  * - lost-feature notes ("Atmos height channels dropped", "7.1 downmixed to 5.1"),
  * - no resample, no normalisation.
  */
 export type PlanConversion = (input: RulesInput) => ConversionPlan;
 
 /** Pure. Strictest combination: intersection of allowed codecs, min maxChannels, first profile's target codec when it is allowed by all. */
-export type ResolveEffectiveProfile = (
-  profiles: DeviceProfile[],
-) => EffectiveProfile;
+export type ResolveEffectiveProfile = (profiles: DeviceProfile[]) => EffectiveProfile;
 
-/** Pure. Stable key of effective profile versions + library rule settings, stored as media_files.rules_key. */
-export type ComputeRulesKey = (
-  profile: EffectiveProfile,
-  library: LibraryRuleSettings,
-) => string;
+/** Pure. Stable key of effective profile versions + every LibraryRuleSettings field, stored as media_files.rules_key. */
+export type ComputeRulesKey = (profile: EffectiveProfile, library: LibraryRuleSettings) => string;
 
 /** Pure. Does a codec name match an allowed list entry (supports "pcm_*" prefix wildcards)? */
-export type CodecAllowed = (
-  codec: string,
-  allowed: readonly string[],
-) => boolean;
+export type CodecAllowed = (codec: string, allowed: readonly string[]) => boolean;
 
 export interface RulesService {
   plan(input: RulesInput): ConversionPlan;
@@ -91,9 +82,12 @@ export interface RulesService {
 
 export interface AudioConversionInput {
   inputPath: string;
-  /** Temp output in the same folder as the input ("<name>.wololo-tmp.mkv"). */
+  /** Options placed before -i, e.g. ["-playlist", "800"] when inputPath is "bluray:<disc>" (BDMV side files). */
+  inputOptions?: string[];
+  /** Temp output in the same folder as the input ("<name>.wololo-tmp.mkv"), or a BDMV side file (".mka"). */
   outputPath: string;
   probe: ProbeResult;
+  /** Streams to write, in output order. BDMV passes a plan reduced to the one audio stream of a side file. */
   plan: ConversionPlan;
 }
 
@@ -104,15 +98,10 @@ export interface AudioConversionInput {
  *  "-progress", "pipe:1", "-nostats", "-f", "matroska", out]
  * Never adds -ar, loudnorm, or dynaudnorm. Lossless sources are decoded from the full stream (ffmpeg decodes DTS-HD MA fully).
  */
-export type BuildAudioConversionArgs = (
-  input: AudioConversionInput,
-) => string[];
+export type BuildAudioConversionArgs = (input: AudioConversionInput) => string[];
 
 /** Bitrate (kbps) for a target layout from the profile's bitrate table. */
-export type SelectBitrate = (
-  channels: number,
-  bitrates: DeviceProfileDefinition['audio']['bitrates'],
-) => number;
+export type SelectBitrate = (channels: number, bitrates: DeviceProfileDefinition['audio']['bitrates']) => number;
 
 export interface FfmpegProgress {
   outTimeSec: number;

@@ -5,18 +5,10 @@ export type AnyEventListener = (event: ServerEvent) => void;
 
 /** Synchronous, typed, in-process pub/sub. Listener errors are reported via onError and never reach the emitter. */
 export class EventBus {
-  private readonly listeners = new Map<
-    EventName,
-    Set<EventListener<EventName>>
-  >();
+  private readonly listeners = new Map<EventName, Set<EventListener<EventName>>>();
   private readonly anyListeners = new Set<AnyEventListener>();
 
-  constructor(
-    private readonly onError: (
-      error: unknown,
-      event: EventName,
-    ) => void = () => {},
-  ) {}
+  constructor(private readonly onError: (error: unknown, event: EventName) => void = () => {}) {}
 
   on<K extends EventName>(name: K, listener: EventListener<K>): () => void {
     let set = this.listeners.get(name);
@@ -34,11 +26,9 @@ export class EventBus {
   }
 
   emit<K extends EventName>(name: K, payload: EventMap[K]): void {
-    for (const listener of this.listeners.get(name) ?? [])
-      this.call(() => listener(payload), name);
+    for (const listener of this.listeners.get(name) ?? []) this.call(() => listener(payload), name);
     const event = { name, payload } as ServerEvent;
-    for (const listener of this.anyListeners)
-      this.call(() => listener(event), name);
+    for (const listener of this.anyListeners) this.call(() => listener(event), name);
   }
 
   listenerCount(): number {

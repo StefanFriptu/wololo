@@ -1,13 +1,5 @@
 import { sql } from 'drizzle-orm';
-import {
-  index,
-  integer,
-  primaryKey,
-  real,
-  sqliteTable,
-  text,
-  uniqueIndex,
-} from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import type {
   ArrKind,
   BdmvDecisionChoice,
@@ -17,6 +9,8 @@ import type {
   BdmvTitleCandidate,
   ConversionPlan,
   DeviceProfileDefinition,
+  FillMissingLanguage,
+  HistoryData,
   HistoryEventType,
   JobState,
   JobStep,
@@ -78,6 +72,7 @@ export const libraries = sqliteTable('libraries', {
   keepLanguages: json<string[]>('keep_languages').notNull().default([]),
   keepOriginalLanguage: bool('keep_original_language').notNull().default(true),
   keepUndetermined: bool('keep_undetermined').notNull().default(true),
+  fillMissingLanguage: text('fill_missing_language').$type<FillMissingLanguage>().notNull().default('off'),
   arrInstanceId: integer('arr_instance_id').references(() => arrInstances.id, {
     onDelete: 'set null',
   }),
@@ -122,10 +117,7 @@ export const mediaFiles = sqliteTable(
     kind: text('kind').$type<MediaFileKind>().notNull().default('file'),
     sizeBytes: integer('size_bytes').notNull(),
     mtimeMs: integer('mtime_ms').notNull(),
-    status: text('status')
-      .$type<MediaFileStatus>()
-      .notNull()
-      .default('pending'),
+    status: text('status').$type<MediaFileStatus>().notNull().default('pending'),
     statusReason: text('status_reason'),
     /** Effective profile version key + library rule settings hash the current status was computed with. */
     rulesKey: text('rules_key'),
@@ -136,15 +128,10 @@ export const mediaFiles = sqliteTable(
     formatName: text('format_name'),
     videoCodec: text('video_codec'),
     audioCodecs: json<string[]>('audio_codecs').notNull().default([]),
-    subtitleLanguages: json<string[]>('subtitle_languages')
-      .notNull()
-      .default([]),
+    subtitleLanguages: json<string[]>('subtitle_languages').notNull().default([]),
     failingCodecs: json<string[]>('failing_codecs').notNull().default([]),
     originalLanguage: text('original_language'),
-    arrInstanceId: integer('arr_instance_id').references(
-      () => arrInstances.id,
-      { onDelete: 'set null' },
-    ),
+    arrInstanceId: integer('arr_instance_id').references(() => arrInstances.id, { onDelete: 'set null' }),
     arrKind: text('arr_kind').$type<ArrKind>(),
     arrItemId: integer('arr_item_id'),
     arrFileId: integer('arr_file_id'),
@@ -179,6 +166,7 @@ export const jobs = sqliteTable(
     title: text('title').notNull(),
     sourcePath: text('source_path').notNull(),
     outputPath: text('output_path'),
+    /** Temp file (audio) or temp directory (bdmv) of a running job; set before writing, cleared after the final rename. */
     tempPath: text('temp_path'),
     rulesKey: text('rules_key'),
     plan: json<ConversionPlan>('plan'),
@@ -201,10 +189,7 @@ export const jobs = sqliteTable(
     finishedAt: text('finished_at'),
     updatedAt: updatedAt(),
   },
-  (t) => [
-    index('jobs_state_idx').on(t.state, t.priority, t.id),
-    index('jobs_media_file_idx').on(t.mediaFileId),
-  ],
+  (t) => [index('jobs_state_idx').on(t.state, t.priority, t.id), index('jobs_media_file_idx').on(t.mediaFileId)],
 );
 
 export const jobHistory = sqliteTable(
@@ -220,7 +205,7 @@ export const jobHistory = sqliteTable(
     event: text('event').$type<HistoryEventType>().notNull(),
     path: text('path').notNull(),
     message: text('message').notNull(),
-    data: json<Record<string, unknown>>('data'),
+    data: json<HistoryData>('data'),
     createdAt: createdAt(),
   },
   (t) => [
@@ -303,25 +288,15 @@ export const bdmvDecisions = sqliteTable(
       .notNull()
       .references(() => mediaFiles.id, { onDelete: 'cascade' }),
     kind: text('kind').$type<BdmvDecisionKind>().notNull(),
-    state: text('state')
-      .$type<BdmvDecisionState>()
-      .notNull()
-      .default('pending'),
+    state: text('state').$type<BdmvDecisionState>().notNull().default('pending'),
     message: text('message').notNull(),
-    titleCandidates: json<BdmvTitleCandidate[]>('title_candidates')
-      .notNull()
-      .default([]),
-    movieCandidates: json<MovieMatchCandidate[]>('movie_candidates')
-      .notNull()
-      .default([]),
+    titleCandidates: json<BdmvTitleCandidate[]>('title_candidates').notNull().default([]),
+    movieCandidates: json<MovieMatchCandidate[]>('movie_candidates').notNull().default([]),
     choice: json<BdmvDecisionChoice>('choice'),
     createdAt: createdAt(),
     resolvedAt: text('resolved_at'),
   },
-  (t) => [
-    index('bdmv_decisions_state_idx').on(t.state),
-    index('bdmv_decisions_media_idx').on(t.mediaFileId),
-  ],
+  (t) => [index('bdmv_decisions_state_idx').on(t.state), index('bdmv_decisions_media_idx').on(t.mediaFileId)],
 );
 
 export const scheduledTasks = sqliteTable('scheduled_tasks', {
