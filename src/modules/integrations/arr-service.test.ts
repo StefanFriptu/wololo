@@ -121,6 +121,41 @@ test('arr.update - the mask keeps the stored key', async () => {
   expect(radarr.requests.at(-1)?.headers.get('x-api-key')).toBe(API_KEY);
 });
 
+test('arr.update - the mask with a new URL is refused and keeps the stored instance', async () => {
+  const created = await addRadarr();
+  const evil = startFakeUpstream();
+  try {
+    const update = t.ctx.services.arr.update(created.id, {
+      kind: 'radarr',
+      name: 'Radarr',
+      url: evil.url,
+      apiKey: SECRET_MASK,
+    });
+    await expect(update).rejects.toMatchObject({ code: 'unprocessable', message: expect.stringContaining('API key') });
+    expect((await t.ctx.services.arr.get(created.id)).url).toBe(radarr.url);
+  } finally {
+    evil.stop();
+  }
+});
+
+test('arr.update - a new URL with a new key is accepted', async () => {
+  const created = await addRadarr();
+  const updated = await t.ctx.services.arr.update(created.id, {
+    kind: 'radarr',
+    name: 'Radarr',
+    url: `${radarr.url}/`,
+    apiKey: SECRET_MASK,
+  });
+  expect(updated.url).toBe(radarr.url);
+  const moved = await t.ctx.services.arr.update(created.id, {
+    kind: 'radarr',
+    name: 'Radarr',
+    url: sonarr.url,
+    apiKey: 'other-key',
+  });
+  expect(moved.url).toBe(sonarr.url);
+});
+
 test('arr.update - kind cannot change', async () => {
   const created = await addRadarr();
   await expect(
@@ -158,6 +193,64 @@ test('arr.test - masked key resolves through the stored instance', async () => {
   });
   expect(result.ok).toBe(true);
   expect(radarr.requests.at(-1)?.headers.get('x-api-key')).toBe(API_KEY);
+});
+
+test('arr.test - the mask is never sent to a different URL', async () => {
+  const created = await addRadarr();
+  const evil = startFakeUpstream({ 'GET /api/v3/system/status': () => ({ appName: 'Radarr', version: '1' }) });
+  try {
+    const result = await t.ctx.services.arr.test({
+      id: created.id,
+      kind: 'radarr',
+      name: 'Radarr',
+      url: evil.url,
+      apiKey: SECRET_MASK,
+    });
+    expect(result).toEqual({ ok: false, message: 'the URL changed, so enter the API key again', version: null });
+    expect(evil.requests).toHaveLength(0);
+  } finally {
+    evil.stop();
+  }
+});
+
+test('arr.test - a redirect is refused and the key is not forwarded', async () => {
+  const target = startFakeUpstream({ 'GET /api/v3/system/status': () => ({ appName: 'Radarr', version: '1' }) });
+  radarr.on(
+    'GET /api/v3/system/status',
+    () => new Response(null, { status: 302, headers: { Location: `${target.url}/api/v3/system/status` } }),
+  );
+  try {
+    const result = await t.ctx.services.arr.test({ kind: 'radarr', name: 'x', url: radarr.url, apiKey: API_KEY });
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain(`redirected to ${new URL(target.url).host}`);
+    expect(target.requests).toHaveLength(0);
+  } finally {
+    target.stop();
+  }
+});
+
+test('arr.rootFolders - a body that stalls after the headers is an upstream timeout', async () => {
+  const stalled = Bun.serve({
+    port: 0,
+    hostname: '127.0.0.1',
+    fetch: () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('[{"id":1,'));
+          },
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      ),
+  });
+  try {
+    const service = createArrService(t.ctx, { timeoutMs: 200 });
+    const created = await addRadarr({ url: `http://127.0.0.1:${stalled.port}` });
+    const failure = service.rootFolders(created.id);
+    await expect(failure).rejects.toMatchObject({ code: 'upstream', message: expect.stringContaining('timed out') });
+  } finally {
+    stalled.stop(true);
+  }
 });
 
 test('arr.test - wrong application is not ok', async () => {
@@ -319,6 +412,27 @@ test('arr.findByPath - caches the library index between calls', async () => {
   await t.ctx.services.arr.findByPath('/data/movies/Heat (1995)/Heat.mkv');
   await t.ctx.services.arr.findByPath('/data/movies/Jamon Jamon (1992)/a.mkv');
   expect(radarr.requestsTo('GET /api/v3/movie')).toHaveLength(1);
+});
+
+test('arr.findByPath - concurrent lookups share one library download', async () => {
+  await addRadarr();
+  await mapRadarr();
+  const found = await Promise.all([
+    t.ctx.services.arr.findByPath('/data/movies/Heat (1995)/Heat.mkv'),
+    t.ctx.services.arr.findByPath('/data/movies/Jamon Jamon (1992)/a.mkv'),
+    t.ctx.services.arr.findByPath('/data/movies/Heat (1995)/Heat.mkv'),
+  ]);
+  expect(found.map((result) => result?.ref.itemId)).toEqual([11, 12, 11]);
+  expect(radarr.requestsTo('GET /api/v3/movie')).toHaveLength(1);
+});
+
+test('arr.findByPath - a failed build is not cached', async () => {
+  await addRadarr();
+  await mapRadarr();
+  radarr.on('GET /api/v3/movie', () => new Response('down', { status: 503 }));
+  expect(await t.ctx.services.arr.findByPath('/data/movies/Heat (1995)/Heat.mkv')).toBeNull();
+  radarr.on('GET /api/v3/movie', () => [{ id: 11, title: 'Heat', path: '/vault/movies/Heat (1995)' }]);
+  expect((await t.ctx.services.arr.findByPath('/data/movies/Heat (1995)/Heat.mkv'))?.ref.itemId).toBe(11);
 });
 
 test('arr.findByPath - a miss refreshes a stale index once', async () => {

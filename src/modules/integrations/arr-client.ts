@@ -37,12 +37,39 @@ const seriesSchema = z.object({
   originalLanguage: languageSchema,
 });
 const episodeFileSchema = z.object({ id: z.number().int(), path: z.string().nullish() });
+const historySchema = z.object({
+  records: z.array(
+    z.object({
+      eventType: z.string(),
+      downloadId: z.string().nullish(),
+      data: z.record(z.string(), z.string().nullish()).nullish(),
+    }),
+  ),
+});
 const commandSchema = z.object({ id: z.number().int() }).loose();
 const addedMovieSchema = z.object({ id: z.number().int() }).loose();
 
 export type ArrLookupMovie = z.infer<typeof lookupMovieSchema>;
 export type ArrMovie = z.infer<typeof movieSchema>;
 export type ArrSeries = z.infer<typeof seriesSchema>;
+
+/** History eventType 3 is downloadFolderImported in both Radarr and Sonarr. */
+const DOWNLOAD_FOLDER_IMPORTED = '3';
+const HISTORY_PAGE_SIZE = '250';
+
+export interface ArrImportRecord {
+  /** Path of the file in the download folder (Radarr/Sonarr's view). */
+  droppedPath: string;
+  /** Path of the imported library file (Radarr/Sonarr's view) at import time. */
+  importedPath: string;
+}
+
+function dataValue(data: Record<string, string | null | undefined> | null | undefined, key: string): string | null {
+  if (!data) return null;
+  const wanted = key.toLowerCase();
+  const entry = Object.entries(data).find(([name]) => name.toLowerCase() === wanted);
+  return entry?.[1] || null;
+}
 
 export type ArrCommand =
   | { name: 'RescanMovie'; movieId: number }
@@ -106,6 +133,22 @@ export function createArrClient(options: ArrClientOptions) {
     series: () => call('series', z.array(seriesSchema)),
     episodeFiles: (seriesId: number) =>
       call('episodefile', z.array(episodeFileSchema), { query: { seriesId: String(seriesId) } }),
+    /** GET /api/v3/history?downloadId= (import events only); downloadId is the client's hash, Radarr/Sonarr store it upper case. */
+    imports: async (downloadId: string): Promise<ArrImportRecord[]> => {
+      const history = await call('history', historySchema, {
+        query: {
+          downloadId: downloadId.toUpperCase(),
+          eventType: DOWNLOAD_FOLDER_IMPORTED,
+          pageSize: HISTORY_PAGE_SIZE,
+        },
+      });
+      return history.records.flatMap((record) => {
+        if (record.eventType !== 'downloadFolderImported') return [];
+        const droppedPath = dataValue(record.data, 'droppedPath');
+        const importedPath = dataValue(record.data, 'importedPath');
+        return droppedPath && importedPath ? [{ droppedPath, importedPath }] : [];
+      });
+    },
     command: (command: ArrCommand) => call('command', commandSchema, { method: 'POST', body: command }),
     addMovie: async (movie: NewRadarrMovie) => {
       const added = await call('movie', addedMovieSchema, {

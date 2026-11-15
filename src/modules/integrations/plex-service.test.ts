@@ -186,16 +186,57 @@ test('plex.update - enabling without a server is a precondition failure', async 
   await expect(plex.update({ enabled: true })).rejects.toMatchObject({ code: 'precondition_failed' });
 });
 
-test('plex.update - a manual URL keeps the account token', async () => {
+test('plex.update - a manual URL never receives the account token', async () => {
   await signIn();
   await plex.update({ serverUrl: server.url, partialScan: false, pauseWhileStreaming: true });
   expect(await plex.connection()).toMatchObject({
     serverUrl: server.url,
+    serverMachineId: null,
     partialScan: false,
     pauseWhileStreaming: true,
   });
   await plex.sections();
-  expect(server.requests.at(-1)?.headers.get('x-plex-token')).toBe(ACCOUNT_TOKEN);
+  expect(server.requests.at(-1)?.headers.get('x-plex-token')).toBeNull();
+});
+
+test('plex.update - switching the selected server to an unlisted URL drops its token', async () => {
+  await connectServer();
+  const evil = startFakeUpstream({ 'GET /': () => ({ MediaContainer: { friendlyName: 'Evil' } }) });
+  try {
+    expect(await plex.update({ serverUrl: evil.url })).toMatchObject({
+      serverUrl: evil.url,
+      serverMachineId: null,
+      serverName: null,
+    });
+    await plex.test();
+    expect(evil.requests).toHaveLength(1);
+    expect(evil.requests[0]?.headers.get('x-plex-token')).toBeNull();
+  } finally {
+    evil.stop();
+  }
+});
+
+test('plex.update - a URL whose address plex.tv lists for the selected server keeps its token', async () => {
+  await connectServer();
+  tv.on('GET /api/v2/resources', () => [
+    {
+      name: 'Pi',
+      provides: 'server',
+      clientIdentifier: 'm1',
+      accessToken: SERVER_TOKEN,
+      connections: [{ uri: 'https://pi.plex.direct:1', address: '127.0.0.1', port: Number(new URL(server.url).port) }],
+    },
+  ]);
+  expect(await plex.update({ serverUrl: server.url })).toMatchObject({ serverUrl: server.url, serverMachineId: 'm1' });
+  await plex.sections();
+  expect(server.requests.at(-1)?.headers.get('x-plex-token')).toBe(SERVER_TOKEN);
+});
+
+test('plex.update - a server with an unlisted URL is refused', async () => {
+  await signIn();
+  const update = plex.update({ serverMachineId: 'm1', serverUrl: 'http://collector.example:32400' });
+  await expect(update).rejects.toMatchObject({ code: 'unprocessable' });
+  expect((await plex.connection()).serverUrl).toBeNull();
 });
 
 test('plex.sections - keeps known types and stringifies keys', async () => {
@@ -241,6 +282,10 @@ test('plex.refreshPath - no-op while disabled or without partial scan', async ()
   await plex.update({ partialScan: false });
   await plex.refreshPath('/plex/movies/Heat');
   expect(server.requests.filter((request) => request.path.startsWith('/library'))).toHaveLength(0);
+  const skipped = t.ctx.logs
+    .entries({ module: 'plex' })
+    .filter((entry) => entry.level === 'info' && entry.message.startsWith('Plex partial scan skipped'));
+  expect(skipped).toHaveLength(1);
 });
 
 test('plex.refreshPath - server errors throw upstream', async () => {

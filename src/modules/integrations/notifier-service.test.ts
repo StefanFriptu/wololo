@@ -105,6 +105,11 @@ test('notifier.fileChanged - honours notification settings', async () => {
   await t.ctx.services.notifier.fileChanged(event());
   expect(rescans).toEqual([]);
   expect(refreshes).toEqual([]);
+  const skipped = t.ctx.logs
+    .entries({ module: 'notifier' })
+    .filter((entry) => entry.level === 'info')
+    .map((entry) => entry.message);
+  expect(skipped).toEqual(['Plex partial scan skipped: turned off in Settings > notifications']);
 });
 
 test('notifier.fileChanged - errors are logged, never thrown, and do not stop Plex', async () => {

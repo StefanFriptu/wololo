@@ -6,7 +6,7 @@ import type { PlexConnectionRow } from '../../db/schema.ts';
 import type { PlexConnection, PlexSection, PlexServer } from '../../shared/domain.ts';
 import type { IntegrationDeps } from './arr-service.ts';
 import { createPlexServerClient, createPlexTvClient, PLEX_PRODUCT, type PlexResource } from './plex-client.ts';
-import { findSectionForPath, pickConnection, toSession } from './plex-select.ts';
+import { findSectionForPath, isPublishedConnection, pickConnection, toSession } from './plex-select.ts';
 import { ensurePlexRow, type PlexRowPatch, updatePlexRow } from './store.ts';
 import { upstreamStatus } from './upstream.ts';
 
@@ -80,7 +80,7 @@ export function createPlexService(ctx: AppContext, deps: PlexDeps = {}): PlexSer
     if (!current.serverUrl) return null;
     return createPlexServerClient({
       url: current.serverUrl,
-      token: current.serverToken ?? current.accountToken,
+      token: current.serverToken,
       clientIdentifier: current.clientIdentifier,
       fetch: deps.fetch,
       timeoutMs: deps.timeoutMs,
@@ -114,10 +114,20 @@ export function createPlexService(ctx: AppContext, deps: PlexDeps = {}): PlexSer
     );
   };
 
-  const selectServer = async (current: PlexConnectionRow, machineId: string, serverUrl: string | undefined) => {
+  const findServer = async (current: PlexConnectionRow, machineId: string): Promise<PlexResource | null> => {
     const resources = await tv(current).resources(requireAccountToken(current));
-    const server = resources.find((resource) => resource.clientIdentifier === machineId && providesServer(resource));
+    return resources.find((resource) => resource.clientIdentifier === machineId && providesServer(resource)) ?? null;
+  };
+
+  const selectServer = async (current: PlexConnectionRow, machineId: string, serverUrl: string | undefined) => {
+    const server = await findServer(current, machineId);
     if (!server) throw notFound(`Plex server ${machineId}`);
+    if (serverUrl && !isPublishedConnection(serverUrl, server.connections ?? [])) {
+      throw new AppError(
+        'unprocessable',
+        `${serverUrl} is not one of the addresses plex.tv lists for ${server.name}; pick one of them`,
+      );
+    }
     const url = serverUrl ?? pickConnection(toPlexServer(server).connections)?.uri;
     if (!url) throw new AppError('unprocessable', `Plex server ${server.name} offers no connection`);
     return {
@@ -128,6 +138,23 @@ export function createPlexService(ctx: AppContext, deps: PlexDeps = {}): PlexSer
     } satisfies PlexRowPatch;
   };
 
+  /**
+   * A URL without serverMachineId keeps the selected server's token only when plex.tv lists that URL's host for it.
+   * Any other URL gets no token (it works when Plex allows this network without auth), so the stored tokens never
+   * reach a server the caller picked.
+   */
+  const manualServer = async (current: PlexConnectionRow, serverUrl: string): Promise<PlexRowPatch> => {
+    if (current.serverMachineId && current.accountToken) {
+      const server = await findServer(current, current.serverMachineId).catch((error: unknown) => {
+        log.warn('could not verify the Plex URL with plex.tv', { error: errorMessage(error) });
+        return null;
+      });
+      if (server && isPublishedConnection(serverUrl, server.connections ?? [])) return { serverUrl };
+    }
+    log.info('Plex URL is not listed by plex.tv for the selected server; it is used without a token', { serverUrl });
+    return { serverUrl, serverToken: null, serverMachineId: null, serverName: null };
+  };
+
   return {
     connection: async () => toConnection(row()),
     update: async (patch) => {
@@ -136,8 +163,7 @@ export function createPlexService(ctx: AppContext, deps: PlexDeps = {}): PlexSer
       if (patch.serverMachineId) {
         Object.assign(changes, await selectServer(current, patch.serverMachineId, patch.serverUrl));
       } else if (patch.serverUrl !== undefined) {
-        changes.serverUrl = patch.serverUrl;
-        changes.serverToken = current.serverToken ?? current.accountToken;
+        Object.assign(changes, await manualServer(current, patch.serverUrl));
       }
       if (patch.enabled !== undefined) changes.enabled = patch.enabled;
       if (patch.partialScan !== undefined) changes.partialScan = patch.partialScan;
@@ -222,8 +248,12 @@ export function createPlexService(ctx: AppContext, deps: PlexDeps = {}): PlexSer
     refreshPath: async (localPath) => {
       const current = row();
       const server = serverOf(current);
-      if (!current.enabled || !current.partialScan || !server) {
-        log.debug('Plex partial scan skipped (disabled)', { path: localPath });
+      if (!current.enabled || !server) {
+        log.debug('Plex partial scan skipped (Plex not connected)', { path: localPath });
+        return;
+      }
+      if (!current.partialScan) {
+        log.info('Plex partial scan skipped: partial scan is off on the Plex page', { path: localPath });
         return;
       }
       const plexPath = await ctx.services.pathMappings.toRemote('plex', localPath);

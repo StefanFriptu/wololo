@@ -3,14 +3,36 @@ import { createTestContext, type TestContext } from '../../../test/helpers/conte
 import { routesOf, splitRouteKey } from '../../shared/api-routes.ts';
 import type { ArrInstance } from '../../shared/domain.ts';
 import { type FakeUpstream, startFakeUpstream } from './fake-upstream.ts';
+import { createPlexService } from './plex-service.ts';
 
 const API_KEY = 'arr-secret-key';
 
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
+const realFetch = globalThis.fetch;
+
 let t: TestContext;
 let radarr: FakeUpstream;
+let plexTv: FakeUpstream;
+let external: string[];
+
+function requestUrl(input: string | URL | Request): URL {
+  return new URL(input instanceof Request ? input.url : input);
+}
 
 beforeEach(() => {
+  external = [];
+  globalThis.fetch = Object.assign((input: string | URL | Request, init?: RequestInit) => {
+    const url = requestUrl(input);
+    if (LOOPBACK.has(url.hostname)) return realFetch(input, init);
+    external.push(url.href);
+    return Promise.reject(new Error(`network call outside the test: ${url.href}`));
+  }, realFetch);
   t = createTestContext();
+  plexTv = startFakeUpstream({
+    'POST /api/v2/pins': () => ({ id: 1, code: 'ABCD', authToken: null, expiresAt: '2999-01-01T00:00:00Z' }),
+    'GET /api/v2/pins/1': () => ({ id: 1, code: 'ABCD', authToken: null, expiresAt: '2999-01-01T00:00:00Z' }),
+  });
+  t.ctx.services.plex = createPlexService(t.ctx, { plexTvUrl: plexTv.url });
   radarr = startFakeUpstream({
     'GET /api/v3/system/status': () => ({ appName: 'Radarr', version: '5.20.0' }),
     'GET /api/v3/rootfolder': () => [{ id: 1, path: '/movies', freeSpace: 5 }],
@@ -21,21 +43,27 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  globalThis.fetch = realFetch;
   radarr.stop();
+  plexTv.stop();
   t.cleanup();
 });
 
-test('integrations routes - none answers 501 any more', async () => {
+test('integrations routes - every route answers without a server error or a network call', async () => {
   const keys = routesOf('integrations');
   expect(keys.length).toBeGreaterThan(0);
+  const statuses: Record<string, number> = {};
   for (const key of keys) {
     const { method, path } = splitRouteKey(key);
     const response = await t.request(path.replace(':id', '1'), {
       method,
       body: method === 'GET' ? undefined : '{}',
     });
-    expect({ key, status: response.status }).not.toEqual({ key, status: 501 });
+    statuses[key] = response.status;
   }
+  expect(Object.entries(statuses).filter(([, status]) => status >= 500)).toEqual([]);
+  expect(external).toEqual([]);
+  expect(plexTv.requestsTo('POST /api/v2/pins')).toHaveLength(1);
 });
 
 test('arr routes - CRUD, test, root folders, profiles and lookup without leaking the key', async () => {

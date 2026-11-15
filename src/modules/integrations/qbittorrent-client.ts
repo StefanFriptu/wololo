@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { AppError } from '../../core/errors.ts';
-import { type FetchLike, type UpstreamRequest, upstreamFetch, upstreamStatus } from './upstream.ts';
+import { type FetchLike, type UpstreamRequest, type UpstreamText, upstreamStatus, upstreamText } from './upstream.ts';
 
 const SERVICE = 'qBittorrent';
 
@@ -20,6 +20,8 @@ const torrentSchema = z.object({
   category: z.string().nullish(),
 });
 
+const torrentFileSchema = z.object({ name: z.string() });
+
 export type RawTorrent = z.infer<typeof torrentSchema>;
 
 export interface QbittorrentOptions {
@@ -31,6 +33,14 @@ export interface QbittorrentOptions {
 }
 
 export type QbittorrentClient = ReturnType<typeof createQbittorrentClient>;
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
 
 function sessionCookie(response: Response): string | null {
   const cookies = response.headers.getSetCookie();
@@ -54,28 +64,36 @@ export function createQbittorrentClient(options: QbittorrentOptions) {
   });
 
   const login = async () => {
-    const response = await upstreamFetch(
+    const { response, text } = await upstreamText(
       request('auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ username: options.username, password: options.password }).toString(),
       }),
     );
-    const text = (await response.text()).trim();
-    if (text !== 'Ok.') throw new AppError('upstream', `${SERVICE} rejected the username or password`, { status: 401 });
+    if (text.trim() !== 'Ok.')
+      throw new AppError('upstream', `${SERVICE} rejected the username or password`, { status: 401 });
     cookie = sessionCookie(response) ?? cookie;
     loggedIn = true;
   };
 
-  const authed = async (path: string, init: Partial<UpstreamRequest> = {}): Promise<Response> => {
+  const authed = async (path: string, init: Partial<UpstreamRequest> = {}): Promise<string> => {
     if (!loggedIn) await login();
+    let answer: UpstreamText;
     try {
-      return await upstreamFetch(request(path, init));
+      answer = await upstreamText(request(path, init));
     } catch (error) {
       if (upstreamStatus(error) !== 403) throw error;
       await login();
-      return upstreamFetch(request(path, init));
+      answer = await upstreamText(request(path, init));
     }
+    return answer.text;
+  };
+
+  const authedJson = async <T extends z.ZodType>(path: string, schema: T): Promise<z.infer<T>> => {
+    const parsed = schema.safeParse(parseJson(await authed(path)));
+    if (!parsed.success) throw new AppError('upstream', `${SERVICE} ${path.split('?')[0]}: unexpected response`);
+    return parsed.data;
   };
 
   const form = (values: Record<string, string>): Partial<UpstreamRequest> => ({
@@ -85,17 +103,21 @@ export function createQbittorrentClient(options: QbittorrentOptions) {
   });
 
   return {
-    version: async () => (await (await authed('app/version')).text()).trim(),
+    version: async () => (await authed('app/version')).trim(),
     torrents: async (category: string | null) => {
       const query = category ? `?${new URLSearchParams({ category }).toString()}` : '';
-      const body: unknown = await (await authed(`torrents/info${query}`)).json().catch(() => null);
-      const parsed = z.array(torrentSchema).safeParse(body);
-      if (!parsed.success) throw new AppError('upstream', `${SERVICE} torrents/info: unexpected response`);
-      return parsed.data;
+      return authedJson(`torrents/info${query}`, z.array(torrentSchema));
+    },
+    /** File paths of one torrent, relative to its save path ("/" separated, root folder included when it has one). */
+    files: async (hash: string) => {
+      const files = await authedJson(
+        `torrents/files?${new URLSearchParams({ hash }).toString()}`,
+        z.array(torrentFileSchema),
+      );
+      return files.map((file) => file.name);
     },
     deleteTorrent: async (hash: string, deleteFiles: boolean) => {
-      const response = await authed('torrents/delete', form({ hashes: hash, deleteFiles: String(deleteFiles) }));
-      await response.body?.cancel().catch(() => undefined);
+      await authed('torrents/delete', form({ hashes: hash, deleteFiles: String(deleteFiles) }));
     },
   };
 }

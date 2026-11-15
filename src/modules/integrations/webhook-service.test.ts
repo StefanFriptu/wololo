@@ -248,6 +248,80 @@ test('webhook sonarr - Test event', async () => {
   expect(await post('sonarr', { eventType: 'Test' })).toMatchObject({ action: 'test' });
 });
 
+const SONARR_SERIES = { id: 4, title: 'Show', path: '/tv/Show' };
+
+test.each(['Grab', 'Rename', 'Health', 'SeriesAdd', 'EpisodeFileDelete', 'SomethingNew'])(
+  'webhook sonarr - %s event is a 200 no-op',
+  async (eventType) => {
+    setup();
+    insertArrInstance(t.ctx.db, { kind: 'sonarr', name: 'Sonarr' });
+    const result = await post('sonarr', { eventType, series: SONARR_SERIES });
+    expect(result).toMatchObject({ accepted: true, action: 'ignored' });
+    expect(calls).toHaveLength(0);
+  },
+);
+
+test.each([
+  ['radarr', 'Test', 'test'],
+  ['radarr', 'Grab', 'ignored'],
+  ['sonarr', 'Test', 'test'],
+  ['sonarr', 'Grab', 'ignored'],
+] as const)('webhook %s - %s with mistyped known fields is still %s', async (kind, eventType, action) => {
+  setup();
+  const result = await post(kind, {
+    eventType,
+    movie: { id: 'seven' },
+    series: { id: 'four' },
+    episodes: [{ episodeNumber: 'one' }],
+  });
+  expect(result).toMatchObject({ accepted: true, action });
+  expect(calls).toHaveLength(0);
+});
+
+test('webhook sonarr - Download with only episodeFiles checks each file', async () => {
+  setup();
+  insertArrInstance(t.ctx.db, { kind: 'sonarr', name: 'Sonarr' });
+  const result = await post('sonarr', {
+    eventType: 'Download',
+    series: SONARR_SERIES,
+    episodes: [
+      { id: 1, episodeNumber: 1, seasonNumber: 1 },
+      { id: 2, episodeNumber: 2, seasonNumber: 1 },
+    ],
+    episodeFiles: [
+      { id: 20, relativePath: 'Season 01/e1.mkv' },
+      { id: 21, path: '/tv/Show/Season 01/e2.mkv' },
+    ],
+  });
+  expect(result).toMatchObject({ accepted: true, action: 'queued', mediaFileIds: [1, 2] });
+  expect(calls.map((call) => [call.path, call.refs.arr?.fileId])).toEqual([
+    ['/tv/Show/Season 01/e1.mkv', 20],
+    ['/tv/Show/Season 01/e2.mkv', 21],
+  ]);
+});
+
+test('webhook radarr - a path with ".." segments is rejected without checking', async () => {
+  setup();
+  insertArrInstance(t.ctx.db, { name: 'Radarr' });
+  const result = await post('radarr', {
+    ...RADARR_DOWNLOAD,
+    movieFile: { id: 3, relativePath: 'x.mkv', path: '/vault/movies/../../etc/x.mkv' },
+  });
+  expect(result).toMatchObject({ accepted: false, action: 'error' });
+  expect(result.message).toContain('".."');
+  expect(calls).toHaveLength(0);
+});
+
+test('webhook radarr - the mapped local path is normalised', async () => {
+  setup();
+  insertArrInstance(t.ctx.db, { name: 'Radarr' });
+  await post('radarr', {
+    ...RADARR_DOWNLOAD,
+    movieFile: { id: 3, relativePath: 'x.mkv', path: '/vault/movies//Heat (1995)/./Heat.mkv' },
+  });
+  expect(calls.map((call) => call.path)).toEqual(['/vault/movies/Heat (1995)/Heat.mkv']);
+});
+
 test('webhook route - ?apikey= authenticates the arr apps', async () => {
   setup();
   const response = await t.app.request(`/api/v1/webhook/radarr?apikey=${TEST_API_KEY}`, {

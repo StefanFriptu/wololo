@@ -1,40 +1,35 @@
-import { readdir, stat } from 'node:fs/promises';
-import { extname, join } from 'node:path';
+import { stat } from 'node:fs/promises';
+import { extname, posix } from 'node:path';
 import type { AppContext } from '../../app/context.ts';
 import type { DownloadClientService } from '../../contracts/integrations.ts';
 import { AppError, errorMessage } from '../../core/errors.ts';
 import type { DownloadClientInput } from '../../shared/api-types.ts';
 import type { DownloadClientConnection, TorrentInfo } from '../../shared/domain.ts';
+import { createArrClient } from './arr-client.ts';
 import type { IntegrationDeps } from './arr-service.ts';
+import { isSameOrInside, joinRemotePath } from './path-map.ts';
 import { createQbittorrentClient, type QbittorrentClient } from './qbittorrent-client.ts';
 import { maskSecret, resolveSecret } from './secrets.ts';
-import { mediaFilesWithCompletedJob, mediaFilesWithin, replacedOriginalPaths } from './seeding-query.ts';
-import { deleteDownloadClient, getDownloadClient, saveDownloadClient } from './store.ts';
-import { matchTorrent, toTorrentInfo } from './torrent.ts';
+import {
+  mediaFilesWithCompletedJob,
+  mediaFilesWithin,
+  pathsReplacedByAudioJob,
+  replacedOriginalPaths,
+} from './seeding-query.ts';
+import { deleteDownloadClient, getDownloadClient, listArrInstances, saveDownloadClient } from './store.ts';
+import { matchTorrent, type TorrentMediaFile, torrentContentReplaced, toTorrentInfo } from './torrent.ts';
 
 function masked(connection: DownloadClientConnection): DownloadClientConnection {
   return { ...connection, password: maskSecret(connection.password) };
 }
 
-async function inodeKey(path: string): Promise<string | null> {
+async function fileInfo(path: string): Promise<{ key: string; isFile: boolean } | null> {
   try {
     const info = await stat(path, { bigint: true });
-    return `${info.dev}:${info.ino}`;
+    return { key: `${info.dev}:${info.ino}`, isFile: info.isFile() };
   } catch {
     return null;
   }
-}
-
-/** Media files of a torrent's local content (the path itself when it is a file). */
-async function contentFiles(path: string, extensions: readonly string[]): Promise<string[]> {
-  const info = await stat(path).catch(() => null);
-  if (!info) return [];
-  if (info.isFile()) return [path];
-  if (!info.isDirectory()) return [];
-  const entries = await readdir(path, { recursive: true, withFileTypes: true });
-  return entries
-    .filter((entry) => entry.isFile() && extensions.includes(extname(entry.name).toLowerCase()))
-    .map((entry) => join(entry.parentPath, entry.name));
 }
 
 export function createDownloadClientService(ctx: AppContext, deps: IntegrationDeps = {}): DownloadClientService {
@@ -64,23 +59,62 @@ export function createDownloadClientService(ctx: AppContext, deps: IntegrationDe
     (await clientFor(connection).torrents(connection.category)).map(toTorrentInfo);
 
   const resolveInput = (input: DownloadClientInput): DownloadClientConnection => {
-    const password = resolveSecret(input.password, getDownloadClient(ctx.db)?.password) ?? '';
-    return { ...input, url: input.url.trim().replace(/\/+$/, ''), password };
+    const stored = getDownloadClient(ctx.db);
+    const password = resolveSecret({
+      provided: input.password,
+      stored: stored && { secret: stored.password, url: stored.url },
+      url: input.url,
+      label: 'password',
+    });
+    return { ...input, url: input.url.trim().replace(/\/+$/, ''), password: password ?? '' };
   };
 
   const replacedInodes = async (): Promise<Set<string>> => {
-    const keys = await Promise.all(replacedOriginalPaths(ctx.db).map(inodeKey));
-    return new Set(keys.filter((key): key is string => key != null));
+    const infos = await Promise.all(replacedOriginalPaths(ctx.db).map(fileInfo));
+    return new Set(infos.flatMap((info) => (info ? [info.key] : [])));
   };
 
-  /** True when the torrent still holds an original that an audio job replaced (its files share an inode with a bin entry). */
-  const holdsReplacedOriginal = async (localContent: string, inodes: ReadonlySet<string>): Promise<boolean> => {
-    if (inodes.size === 0) return false;
-    for (const file of await contentFiles(localContent, ctx.settings.section('media').extensions)) {
-      const key = await inodeKey(file);
-      if (key && inodes.has(key)) return true;
+  /** The torrent's own files (qBittorrent's file list), as local paths; never its neighbours in a shared folder. */
+  const localFilesOf = async (connection: DownloadClientConnection, remote: TorrentInfo): Promise<string[]> => {
+    const names = await clientFor(connection).files(remote.hash);
+    return Promise.all(
+      names.map(async (name) =>
+        posix.normalize(await ctx.services.pathMappings.toLocal('qbittorrent', joinRemotePath(remote.savePath, name))),
+      ),
+    );
+  };
+
+  /** Radarr/Sonarr import history of a download: local dropped path -> local imported library path. */
+  const importsOf = async (hash: string): Promise<Map<string, string>> => {
+    const imports = new Map<string, string>();
+    for (const instance of listArrInstances(ctx.db).filter((candidate) => candidate.enabled)) {
+      try {
+        const client = createArrClient({ ...instance, fetch: deps.fetch, timeoutMs: deps.timeoutMs });
+        for (const record of await client.imports(hash)) {
+          const dropped = await ctx.services.pathMappings.toLocal(instance.kind, record.droppedPath, instance.id);
+          const imported = await ctx.services.pathMappings.toLocal(instance.kind, record.importedPath, instance.id);
+          imports.set(posix.normalize(dropped), posix.normalize(imported));
+        }
+      } catch (error) {
+        log.warn('import history unavailable; relying on the recycle bin', { instance: instance.name, hash, error });
+      }
     }
-    return false;
+    return imports;
+  };
+
+  /** True when every media file of the torrent has a library copy and at least one was replaced by an audio job. */
+  const contentReplaced = async (files: readonly string[], hash: string, bin: ReadonlySet<string>) => {
+    const extensions = ctx.settings.section('media').extensions;
+    const imports = await importsOf(hash);
+    const media: TorrentMediaFile[] = [];
+    for (const path of files) {
+      if (!extensions.includes(extname(path).toLowerCase())) continue;
+      const info = await fileInfo(path);
+      if (!info?.isFile) continue;
+      media.push({ path, inRecycleBin: bin.has(info.key), importedTo: imports.get(path) ?? null });
+    }
+    const importedTo = media.flatMap((file) => (file.importedTo ? [file.importedTo] : []));
+    return torrentContentReplaced(media, pathsReplacedByAudioJob(ctx.db, importedTo));
   };
 
   const deleteTorrent = async (hash: string, deleteFiles: boolean) => {
@@ -106,8 +140,8 @@ export function createDownloadClientService(ctx: AppContext, deps: IntegrationDe
       cached = null;
     },
     test: async (input) => {
-      const connection = resolveInput(input);
       try {
+        const connection = resolveInput(input);
         const version = await createQbittorrentClient({
           ...connection,
           fetch: deps.fetch,
@@ -132,13 +166,18 @@ export function createDownloadClientService(ctx: AppContext, deps: IntegrationDe
       const met = (await torrentsOf(connection)).filter((torrent) => torrent.goalMet);
       if (met.length === 0) return 'no torrent has met its seeding goal';
       const offerDiscs = ctx.settings.section('bdmv').deleteSourceWhenSeeded;
-      const inodes = connection.removeWhenGoalMet ? await replacedInodes() : new Set<string>();
+      const summary = (removed: number, offered: number) =>
+        `${met.length} torrent(s) met their seeding goal: ${removed} removed, ${offered} source deletion(s) offered`;
+      if (!offerDiscs && !connection.removeWhenGoalMet) return summary(0, 0);
+      const bin = connection.removeWhenGoalMet ? await replacedInodes() : new Set<string>();
       let removed = 0;
       let offered = 0;
       for (const remote of met) {
         const torrent = await withLocalPaths(remote);
         try {
-          const rows = mediaFilesWithin(ctx.db, torrent.contentPath);
+          const files = await localFilesOf(connection, remote);
+          const owns = (rowPath: string) => files.some((file) => isSameOrInside(file, rowPath));
+          const rows = mediaFilesWithin(ctx.db, torrent.contentPath).filter((row) => owns(row.path));
           const discs = rows.filter((row) => row.kind !== 'file');
           const converted = mediaFilesWithCompletedJob(ctx.db, { ids: discs.map((row) => row.id), type: 'bdmv' });
           if (offerDiscs) {
@@ -147,14 +186,14 @@ export function createDownloadClientService(ctx: AppContext, deps: IntegrationDe
             }
           }
           if (rows.length > 0 || !connection.removeWhenGoalMet) continue;
-          if (!(await holdsReplacedOriginal(torrent.contentPath, inodes))) continue;
+          if (!(await contentReplaced(files, remote.hash, bin))) continue;
           await deleteTorrent(torrent.hash, true);
           removed += 1;
         } catch (error) {
           log.error('seeding check failed for a torrent', { hash: torrent.hash, name: torrent.name, error });
         }
       }
-      return `${met.length} torrent(s) met their seeding goal: ${removed} removed, ${offered} source deletion(s) offered`;
+      return summary(removed, offered);
     },
   };
 }

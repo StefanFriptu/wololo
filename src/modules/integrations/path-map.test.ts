@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { isSameOrInside, joinRemotePath, mapPath, trimTrailingSeparators } from './path-map.ts';
+import { hasParentSegment, isSameOrInside, joinRemotePath, mapPath, trimTrailingSeparators } from './path-map.ts';
 
 const MEDIA = [{ from: '/vault/media', to: '/data/media' }];
 
@@ -54,6 +54,18 @@ test.each([
   ],
   ['mapPath - UNC share', '\\\\nas\\media\\a.mkv', [{ from: '\\\\nas\\media', to: '/data' }], '/data/a.mkv'],
   ['mapPath - POSIX prefixes are case-sensitive', '/Vault/media/a.mkv', MEDIA, '/Vault/media/a.mkv'],
+  [
+    'mapPath - a backslash in a POSIX name is not a separator',
+    '/vault/media/AC\\DC/x.mkv',
+    MEDIA,
+    '/data/media/AC\\DC/x.mkv',
+  ],
+  [
+    'mapPath - a backslash in a POSIX name stays when mapping to Windows',
+    '/vault/media/AC\\DC.mkv',
+    [{ from: '/vault/media', to: 'D:\\Media' }],
+    'D:\\Media\\AC\\DC.mkv',
+  ],
 ] as const)('%s', (_name, path, mappings, expected) => {
   expect(mapPath(path, mappings)).toBe(expected);
 });
@@ -81,6 +93,21 @@ test.each([
 test.each([
   ['joinRemotePath - POSIX folder', '/movies/A/', 'a.mkv', '/movies/A/a.mkv'],
   ['joinRemotePath - Windows folder keeps backslashes', 'D:\\Movies\\A', 'sub/a.mkv', 'D:\\Movies\\A\\sub\\a.mkv'],
+  [
+    'joinRemotePath - POSIX folder keeps a backslash in a name',
+    '/music/AC\\DC',
+    'Live\\1991.mkv',
+    '/music/AC\\DC/Live\\1991.mkv',
+  ],
 ])('%s', (_name, folder, relative, expected) => {
   expect(joinRemotePath(folder, relative)).toBe(expected);
+});
+
+test.each([
+  ['hasParentSegment - POSIX parent segment', '/data/media/../../etc/x.mkv', true],
+  ['hasParentSegment - Windows parent segment', 'D:\\Media\\..\\x.mkv', true],
+  ['hasParentSegment - dots inside a name are fine', '/data/media/A..B/x...mkv', false],
+  ['hasParentSegment - plain path', '/data/media/x.mkv', false],
+])('%s', (_name, path, expected) => {
+  expect(hasParentSegment(path)).toBe(expected);
 });

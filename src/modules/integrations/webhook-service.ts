@@ -1,10 +1,12 @@
-import type { z } from 'zod';
+import { posix } from 'node:path';
+import { z } from 'zod';
 import type { AppContext } from '../../app/context.ts';
 import type { WebhookService } from '../../contracts/integrations.ts';
 import { errorMessage } from '../../core/errors.ts';
 import type { WebhookResponse } from '../../shared/api-types.ts';
 import type { ArrKind } from '../../shared/domain.ts';
 import { normalizeLanguage } from '../../shared/language.ts';
+import { hasParentSegment } from './path-map.ts';
 import { listArrInstances } from './store.ts';
 import {
   combineWebhookActions,
@@ -16,6 +18,8 @@ import {
   type WebhookImport,
   webhookActionFor,
 } from './webhook-payload.ts';
+
+const envelopeSchema = z.object({ eventType: z.string() });
 
 interface ParsedWebhook {
   eventType: string;
@@ -63,8 +67,14 @@ export function createWebhookService(ctx: AppContext): WebhookService {
     const messages: string[] = [];
     for (const file of imported.files) {
       let localPath = file.remotePath;
+      if (hasParentSegment(file.remotePath)) {
+        log.warn('import path with a ".." segment rejected', { instance: instance.name, path: file.remotePath });
+        actions.push('error');
+        messages.push(`${file.remotePath}: paths with ".." segments are not accepted`);
+        continue;
+      }
       try {
-        localPath = await ctx.services.pathMappings.toLocal(kind, file.remotePath, instance.id);
+        localPath = posix.normalize(await ctx.services.pathMappings.toLocal(kind, file.remotePath, instance.id));
         const result = await ctx.services.media.checkPath(localPath, {
           trigger: 'webhook',
           arr: { instanceId: instance.id, kind, itemId: imported.itemId, fileId: file.fileId },
@@ -95,14 +105,20 @@ export function createWebhookService(ctx: AppContext): WebhookService {
     instanceId: number | null,
     extract: (payload: T) => WebhookImport | null,
   ): Promise<WebhookResponse> => {
+    const envelope = envelopeSchema.safeParse(raw);
+    if (!envelope.success) {
+      log.warn('webhook payload without an eventType', { kind });
+      return reply('error', 'invalid webhook payload');
+    }
+    const { eventType } = envelope.data;
+    if (eventType === 'Test') return reply('test', `${kind} test received`);
+    if (eventType !== 'Download') return reply('ignored', `event ${eventType} is not handled`);
     const parsed = schema.safeParse(raw);
     if (!parsed.success) {
       log.warn('invalid webhook payload', { kind, issues: parsed.error.issues.slice(0, 5) });
       return reply('error', 'invalid webhook payload');
     }
     const payload = parsed.data;
-    if (payload.eventType === 'Test') return reply('test', `${kind} test received`);
-    if (payload.eventType !== 'Download') return reply('ignored', `event ${payload.eventType} is not handled`);
     return handleImport(kind, payload, instanceId, () => extract(payload));
   };
 

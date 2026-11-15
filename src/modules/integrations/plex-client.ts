@@ -18,7 +18,15 @@ const resourceSchema = z.object({
   owned: z.boolean().nullish(),
   accessToken: z.string().nullish(),
   connections: z
-    .array(z.object({ uri: z.string(), local: z.boolean().nullish(), relay: z.boolean().nullish() }))
+    .array(
+      z.object({
+        uri: z.string(),
+        address: z.string().nullish(),
+        port: z.number().int().nullish(),
+        local: z.boolean().nullish(),
+        relay: z.boolean().nullish(),
+      }),
+    )
     .nullish(),
 });
 const identitySchema = z.object({
@@ -119,8 +127,7 @@ export function createPlexServerClient(options: ClientBase & { url: string; toke
     refresh: async (sectionKey: string, path: string) => {
       const url = new URL(`${base}/library/sections/${encodeURIComponent(sectionKey)}/refresh`);
       url.searchParams.set('path', path);
-      const response = await upstreamFetch({ ...request, url, headers });
-      await response.body?.cancel().catch(() => undefined);
+      await upstreamFetch({ ...request, url, headers });
     },
   };
 }

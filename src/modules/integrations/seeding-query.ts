@@ -28,6 +28,18 @@ export function mediaFilesWithCompletedJob(db: Db, { ids, type }: { ids: number[
   return new Set(rows.flatMap((row) => (row.mediaFileId == null ? [] : [row.mediaFileId])));
 }
 
+/** Those of `paths` that are media_files rows with a completed audio job (their original was replaced). */
+export function pathsReplacedByAudioJob(db: Db, paths: readonly string[]): Set<string> {
+  if (paths.length === 0) return new Set();
+  const rows = db
+    .selectDistinct({ path: mediaFiles.path })
+    .from(mediaFiles)
+    .innerJoin(jobs, eq(jobs.mediaFileId, mediaFiles.id))
+    .where(and(inArray(mediaFiles.path, [...paths]), eq(jobs.type, 'audio'), eq(jobs.state, 'completed')))
+    .all();
+  return new Set(rows.map((row) => row.path));
+}
+
 /** Recycle-bin copies (hard links) of originals replaced by a completed audio job and not restored or purged. */
 export function replacedOriginalPaths(db: Db): string[] {
   return db

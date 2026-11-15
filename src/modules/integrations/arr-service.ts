@@ -62,6 +62,7 @@ export function createArrService(ctx: AppContext, deps: IntegrationDeps = {}): A
   const log = ctx.logs.logger('arr');
   const now = deps.now ?? Date.now;
   const indexes = new Map<number, InstanceIndex>();
+  const building = new Map<number, Promise<InstanceIndex>>();
 
   const clientFor = (instance: Pick<ArrInstance, 'kind' | 'url' | 'apiKey'>): ArrClient =>
     createArrClient({ ...instance, fetch: deps.fetch, timeoutMs: deps.timeoutMs });
@@ -78,7 +79,7 @@ export function createArrService(ctx: AppContext, deps: IntegrationDeps = {}): A
   const toLocal = (instance: ArrInstance, path: string) =>
     ctx.services.pathMappings.toLocal(instance.kind, path, instance.id);
 
-  const buildIndex = async (instance: ArrInstance): Promise<InstanceIndex> => {
+  const fetchIndex = async (instance: ArrInstance): Promise<InstanceIndex> => {
     const client = clientFor(instance);
     const entries: IndexEntry[] = [];
     if (instance.kind === 'radarr') {
@@ -106,10 +107,29 @@ export function createArrService(ctx: AppContext, deps: IntegrationDeps = {}): A
         });
       }
     }
-    const index = { builtAt: now(), entries };
-    indexes.set(instance.id, index);
     log.debug('arr library index refreshed', { instance: instance.name, items: entries.length });
-    return index;
+    return { builtAt: now(), entries };
+  };
+
+  /** Concurrent callers share one in-flight build, so a large library is downloaded and parsed once at a time. */
+  const buildIndex = (instance: ArrInstance): Promise<InstanceIndex> => {
+    const pending = building.get(instance.id);
+    if (pending) return pending;
+    const build = fetchIndex(instance)
+      .then((index) => {
+        if (building.get(instance.id) === build) indexes.set(instance.id, index);
+        return index;
+      })
+      .finally(() => {
+        if (building.get(instance.id) === build) building.delete(instance.id);
+      });
+    building.set(instance.id, build);
+    return build;
+  };
+
+  const forgetIndex = (id: number) => {
+    indexes.delete(id);
+    building.delete(id);
   };
 
   const indexFor = async (instance: ArrInstance): Promise<InstanceIndex> => {
@@ -144,7 +164,12 @@ export function createArrService(ctx: AppContext, deps: IntegrationDeps = {}): A
     if (existing && existing.kind !== input.kind) {
       throw new AppError('unprocessable', 'the kind of an existing instance cannot change');
     }
-    const apiKey = resolveSecret(input.apiKey, existing?.apiKey);
+    const apiKey = resolveSecret({
+      provided: input.apiKey,
+      stored: existing && { secret: existing.apiKey, url: existing.url },
+      url: input.url,
+      label: 'API key',
+    });
     if (!apiKey) throw new AppError('validation', 'apiKey is required');
     return {
       kind: input.kind,
@@ -175,20 +200,25 @@ export function createArrService(ctx: AppContext, deps: IntegrationDeps = {}): A
     update: async (id, input) => {
       const existing = requireInstance(id);
       const updated = updateArrInstance(ctx.db, { id, values: validateInput(input, existing) });
-      indexes.delete(id);
+      forgetIndex(id);
       return masked(updated);
     },
     remove: async (id) => {
       if (!deleteArrInstance(ctx.db, id)) throw notFound(`arr instance ${id}`);
-      indexes.delete(id);
+      forgetIndex(id);
       log.info('arr instance removed', { id });
     },
     test: async (input) => {
       const stored = input.id == null ? null : requireInstance(input.id);
-      const apiKey = resolveSecret(input.apiKey, stored?.apiKey);
-      if (!apiKey) return { ok: false, message: 'API key is required', version: null };
-      const client = clientFor({ kind: input.kind, url: input.url, apiKey });
       try {
+        const apiKey = resolveSecret({
+          provided: input.apiKey,
+          stored: stored && { secret: stored.apiKey, url: stored.url },
+          url: input.url,
+          label: 'API key',
+        });
+        if (!apiKey) return { ok: false, message: 'API key is required', version: null };
+        const client = clientFor({ kind: input.kind, url: input.url, apiKey });
         const status = await client.systemStatus();
         const appName = status.appName ?? client.service;
         if (appName.toLowerCase() !== input.kind) {
@@ -251,7 +281,7 @@ export function createArrService(ctx: AppContext, deps: IntegrationDeps = {}): A
         qualityProfileId,
         rootFolderPath,
       });
-      indexes.delete(instanceId);
+      forgetIndex(instanceId);
       log.info('movie added to Radarr', { instance: instance.name, movieId: id, tmdbId: movie.tmdbId });
       return id;
     },

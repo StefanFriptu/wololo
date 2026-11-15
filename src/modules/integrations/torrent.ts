@@ -48,3 +48,29 @@ export function matchTorrent(torrents: readonly TorrentInfo[], path: string): To
   if (containing) return containing;
   return torrents.find((torrent) => isSameOrInside(torrent.contentPath, path)) ?? null;
 }
+
+export interface TorrentMediaFile {
+  /** Local path of the torrent's file. */
+  path: string;
+  /** Shares its inode with an active recycle-bin entry of a completed audio job (it is the replaced original). */
+  inRecycleBin: boolean;
+  /** Local library path Radarr/Sonarr imported this file to (their history), null when not imported. */
+  importedTo: string | null;
+}
+
+/**
+ * A torrent may go (with its files) only when every media file has a library copy (imported, or the original an audio
+ * job replaced) and at least one of them was replaced by an audio job. Anything unaccounted for keeps the torrent.
+ */
+export function torrentContentReplaced(
+  files: readonly TorrentMediaFile[],
+  replacedLibraryPaths: ReadonlySet<string>,
+): boolean {
+  if (files.length === 0) return false;
+  let replaced = false;
+  for (const file of files) {
+    if (!file.inRecycleBin && file.importedTo == null) return false;
+    if (file.inRecycleBin || (file.importedTo != null && replacedLibraryPaths.has(file.importedTo))) replaced = true;
+  }
+  return replaced;
+}

@@ -23,6 +23,38 @@ export function pickConnection(connections: PlexServer['connections']): PlexServ
   return [...connections].sort((a, b) => rank(a) - rank(b))[0] ?? null;
 }
 
+export interface PublishedConnection {
+  uri: string;
+  address?: string | null;
+  port?: number | null;
+}
+
+function hostKey(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
+    return `${parsed.hostname.toLowerCase()}:${port}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when `url` points at a host:port plex.tv published for the server (its uri, or its raw address + port).
+ * Only such URLs may receive the server's token; any other URL could be a server that collects it.
+ */
+export function isPublishedConnection(url: string, connections: readonly PublishedConnection[]): boolean {
+  const wanted = hostKey(url);
+  if (!wanted) return false;
+  return connections.some(
+    (connection) =>
+      hostKey(connection.uri) === wanted ||
+      (connection.address != null &&
+        connection.port != null &&
+        `${connection.address.toLowerCase()}:${connection.port}` === wanted),
+  );
+}
+
 export function toSession(raw: {
   title?: string | null;
   grandparentTitle?: string | null;

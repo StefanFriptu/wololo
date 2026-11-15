@@ -21,6 +21,16 @@ export interface UpstreamFailure {
   status: number | null;
 }
 
+export interface UpstreamText {
+  response: Response;
+  text: string;
+}
+
+interface Sent {
+  response: Response;
+  fail: (error: unknown, phase: 'request' | 'body') => AppError;
+}
+
 function describe(request: UpstreamRequest): string {
   const url = new URL(request.url);
   return `${request.service} ${request.method ?? 'GET'} ${url.pathname}`;
@@ -31,12 +41,34 @@ function statusMessage(status: number): string {
   return `answered HTTP ${status}`;
 }
 
-/** fetch with a timeout; network errors, timeouts and non-2xx answers become AppError('upstream'). */
-export async function upstreamFetch(request: UpstreamRequest): Promise<Response> {
+function redirectTarget(response: Response, request: UpstreamRequest): string {
+  const location = response.headers.get('location');
+  if (!location) return 'another address';
+  try {
+    return new URL(location, request.url).host;
+  } catch {
+    return 'another address';
+  }
+}
+
+async function discard(response: Response): Promise<void> {
+  await response.body?.cancel().catch(() => undefined);
+}
+
+/**
+ * Redirects are refused, not followed: fetch would forward X-Api-Key, X-Plex-Token and the qBittorrent cookie to the
+ * redirect target, and none of these APIs needs one.
+ */
+async function send(request: UpstreamRequest): Promise<Sent> {
   const timeoutMs = request.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const timeout = AbortSignal.timeout(timeoutMs);
   const signal = request.signal ? AbortSignal.any([request.signal, timeout]) : timeout;
   const fetchImpl = request.fetch ?? fetch;
+  const fail = (error: unknown, phase: 'request' | 'body') => {
+    const lost = phase === 'request' ? 'unreachable' : 'response interrupted';
+    const reason = timeout.aborted ? `timed out after ${timeoutMs / 1000} s` : `${lost} (${errorMessage(error)})`;
+    return new AppError('upstream', `${describe(request)}: ${reason}`, { status: null } satisfies UpstreamFailure);
+  };
   let response: Response;
   try {
     response = await fetchImpl(request.url, {
@@ -44,28 +76,50 @@ export async function upstreamFetch(request: UpstreamRequest): Promise<Response>
       headers: request.headers,
       body: request.body,
       signal,
-      redirect: 'follow',
+      redirect: 'manual',
     });
   } catch (error) {
-    const reason = timeout.aborted ? `timed out after ${timeoutMs / 1000} s` : `unreachable (${errorMessage(error)})`;
-    throw new AppError('upstream', `${describe(request)}: ${reason}`, { status: null } satisfies UpstreamFailure);
+    throw fail(error, 'request');
+  }
+  if (response.status >= 300 && response.status < 400) {
+    const target = redirectTarget(response, request);
+    await discard(response);
+    throw new AppError('upstream', `${describe(request)}: redirected to ${target}; enter the final URL instead`, {
+      status: response.status,
+    } satisfies UpstreamFailure);
   }
   if (!response.ok) {
-    await response.body?.cancel().catch(() => undefined);
+    await discard(response);
     throw new AppError('upstream', `${describe(request)}: ${statusMessage(response.status)}`, {
       status: response.status,
     } satisfies UpstreamFailure);
   }
+  return { response, fail };
+}
+
+/** fetch with a timeout; network errors, timeouts, redirects and non-2xx answers become AppError('upstream'). */
+export async function upstreamFetch(request: UpstreamRequest): Promise<Response> {
+  const { response } = await send(request);
+  await discard(response);
   return response;
 }
 
-/** upstreamFetch + JSON body validated against `schema` (raw upstream shapes never leave the client). */
+/** upstreamFetch + the whole body as text, read under the same timeout (a stalled body is AppError('upstream')). */
+export async function upstreamText(request: UpstreamRequest): Promise<UpstreamText> {
+  const { response, fail } = await send(request);
+  try {
+    return { response, text: await response.text() };
+  } catch (error) {
+    throw fail(error, 'body');
+  }
+}
+
+/** upstreamText + JSON body validated against `schema` (raw upstream shapes never leave the client). */
 export async function upstreamJson<T extends z.ZodType>(request: UpstreamRequest, schema: T): Promise<z.infer<T>> {
-  const response = await upstreamFetch({
+  const { response, text } = await upstreamText({
     ...request,
     headers: { Accept: 'application/json', ...request.headers },
   });
-  const text = await response.text();
   let body: unknown;
   try {
     body = text ? JSON.parse(text) : null;

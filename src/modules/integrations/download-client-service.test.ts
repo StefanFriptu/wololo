@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { linkSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
-import { insertJob, insertLibrary, insertMediaFile } from '../../../test/helpers/seed.ts';
+import { insertArrInstance, insertJob, insertLibrary, insertMediaFile } from '../../../test/helpers/seed.ts';
 import { stubService } from '../../../test/helpers/stubs.ts';
 import type { BdmvService } from '../../contracts/bdmv.ts';
 import { recycleBin } from '../../db/schema.ts';
@@ -16,6 +16,7 @@ const SID = 'SID=session-1';
 let t: TestContext;
 let qbit: FakeUpstream;
 let torrents: Record<string, unknown>[];
+let torrentFiles: Map<string, string[]>;
 let offers: { mediaFileId: number; torrent: TorrentInfo }[];
 let logins: number;
 
@@ -41,6 +42,7 @@ function decision(mediaFileId: number): BdmvDecision {
 
 beforeEach(() => {
   torrents = [];
+  torrentFiles = new Map();
   offers = [];
   logins = 0;
   t = createTestContext({
@@ -63,6 +65,10 @@ beforeEach(() => {
     'GET /api/v2/app/version': (request) =>
       authorised(request) ? new Response('v5.0.4') : new Response('', { status: 403 }),
     'GET /api/v2/torrents/info': (request) => (authorised(request) ? torrents : new Response('', { status: 403 })),
+    'GET /api/v2/torrents/files': (request) =>
+      authorised(request)
+        ? (torrentFiles.get(request.query.get('hash') ?? '') ?? []).map((name, index) => ({ index, name }))
+        : new Response('', { status: 403 }),
     'POST /api/v2/torrents/delete': (request) =>
       authorised(request) ? new Response('') : new Response('', { status: 403 }),
   });
@@ -86,7 +92,14 @@ function input(overrides: Partial<DownloadClientInput> = {}): DownloadClientInpu
   };
 }
 
-function torrent(hash: string, contentPath: string, overrides: Record<string, unknown> = {}) {
+/** A goal-met torrent; its qBittorrent file list defaults to one movie.mkv inside contentPath. */
+function torrent(
+  hash: string,
+  contentPath: string,
+  overrides: Record<string, unknown> = {},
+  files = [`${relative('/downloads', contentPath)}/movie.mkv`],
+) {
+  torrentFiles.set(hash, files);
   return {
     hash,
     name: hash,
@@ -116,6 +129,21 @@ test('downloadClient.save - the mask keeps the stored password', async () => {
   await t.ctx.services.downloadClient.save(input({ password: SECRET_MASK, category: 'radarr' }));
   const result = await t.ctx.services.downloadClient.test(input({ password: SECRET_MASK }));
   expect(result).toEqual({ ok: true, message: 'Connected to qBittorrent v5.0.4', version: 'v5.0.4' });
+});
+
+test('downloadClient - the stored password is never sent to a different URL', async () => {
+  await t.ctx.services.downloadClient.save(input());
+  const evil = startFakeUpstream();
+  try {
+    const result = await t.ctx.services.downloadClient.test(input({ url: evil.url, password: SECRET_MASK }));
+    expect(result).toEqual({ ok: false, message: 'the URL changed, so enter the password again', version: null });
+    const save = t.ctx.services.downloadClient.save(input({ url: evil.url, password: SECRET_MASK }));
+    await expect(save).rejects.toMatchObject({ code: 'unprocessable' });
+    expect(evil.requests).toHaveLength(0);
+    expect((await t.ctx.services.downloadClient.get())?.url).toBe(qbit.url);
+  } finally {
+    evil.stop();
+  }
 });
 
 test('downloadClient.remove - deletes the connection', async () => {
@@ -250,6 +278,118 @@ test('downloadClient.checkSeedingGoals - a restored or unfinished replacement ke
   expect(qbit.requestsTo('POST /api/v2/torrents/delete')).toHaveLength(0);
 });
 
+function deletedHashes(): (string | null)[] {
+  return qbit
+    .requestsTo('POST /api/v2/torrents/delete')
+    .map((request) => new URLSearchParams(request.body).get('hashes'));
+}
+
+test('downloadClient.checkSeedingGoals - a rootless torrent is judged by its own files, not its neighbours', async () => {
+  const { downloads, library } = seedingFixture();
+  writeFileSync(join(downloads, 'loose-unimported.mkv'), 'never imported');
+  await t.ctx.services.downloadClient.save(input());
+  await t.ctx.services.pathMappings.create({ scope: 'qbittorrent', remotePath: '/downloads', localPath: downloads });
+  const binCopy = join(library, '.wololo-recycle', 'movie.mkv');
+  linkSync(join(downloads, 'Replaced', 'movie.mkv'), binCopy);
+  recycle(join(library, 'Movie (2020)', 'Movie.mkv'), binCopy);
+  torrents = [torrent('rootless', '/downloads', {}, ['loose-unimported.mkv'])];
+
+  expect(await t.ctx.services.downloadClient.checkSeedingGoals()).toContain('0 removed');
+  expect(deletedHashes()).toEqual([]);
+  expect(qbit.requestsTo('GET /api/v2/torrents/files')[0]?.query.get('hash')).toBe('rootless');
+});
+
+interface HistoryFixture {
+  downloads: string;
+  library: string;
+  radarr: FakeUpstream;
+  libraryFile: string;
+}
+
+/** Radarr imported /downloads/Replaced/movie.mkv to /movies/Movie (2020)/Movie.mkv; no recycle-bin entry exists. */
+async function historyFixture(audioJobState: 'completed' | 'failed' | null): Promise<HistoryFixture> {
+  const { downloads, library } = seedingFixture();
+  const radarr = startFakeUpstream({
+    'GET /api/v3/history': (request) => ({
+      page: 1,
+      pageSize: 250,
+      totalRecords: 1,
+      records:
+        request.query.get('downloadId') === 'REPLACED'
+          ? [
+              {
+                eventType: 'downloadFolderImported',
+                downloadId: 'REPLACED',
+                data: { droppedPath: '/downloads/Replaced/movie.mkv', importedPath: '/movies/Movie (2020)/Movie.mkv' },
+              },
+            ]
+          : [],
+    }),
+  });
+  insertArrInstance(t.ctx.db, { name: 'Radarr', url: radarr.url });
+  await t.ctx.services.downloadClient.save(input());
+  await t.ctx.services.pathMappings.create({ scope: 'qbittorrent', remotePath: '/downloads', localPath: downloads });
+  await t.ctx.services.pathMappings.create({ scope: 'radarr', remotePath: '/downloads', localPath: downloads });
+  await t.ctx.services.pathMappings.create({ scope: 'radarr', remotePath: '/movies', localPath: library });
+  const libraryFile = join(library, 'Movie (2020)', 'Movie.mkv');
+  const lib = insertLibrary(t.ctx.db, { roots: [library] });
+  const row = insertMediaFile(t.ctx.db, lib, { path: libraryFile });
+  if (audioJobState) {
+    insertJob(t.ctx.db, { sourcePath: libraryFile, type: 'audio', state: audioJobState, mediaFileId: row.id });
+  }
+  return { downloads, library, radarr, libraryFile };
+}
+
+test('downloadClient.checkSeedingGoals - without a recycle-bin entry the import history finds the replacement', async () => {
+  const { radarr } = await historyFixture('completed');
+  try {
+    torrents = [torrent('replaced', '/downloads/Replaced'), torrent('untouched', '/downloads/Untouched')];
+    expect(await t.ctx.services.downloadClient.checkSeedingGoals()).toContain('1 removed');
+    expect(deletedHashes()).toEqual(['replaced']);
+    const asked = radarr.requestsTo('GET /api/v3/history').map((request) => request.query.get('downloadId'));
+    expect(asked).toEqual(['REPLACED', 'UNTOUCHED']);
+  } finally {
+    radarr.stop();
+  }
+});
+
+test('downloadClient.checkSeedingGoals - imported but not converted keeps the torrent', async () => {
+  const { radarr } = await historyFixture('failed');
+  try {
+    torrents = [torrent('replaced', '/downloads/Replaced')];
+    expect(await t.ctx.services.downloadClient.checkSeedingGoals()).toContain('0 removed');
+    expect(deletedHashes()).toEqual([]);
+  } finally {
+    radarr.stop();
+  }
+});
+
+test('downloadClient.checkSeedingGoals - a media file without a library copy keeps the torrent', async () => {
+  const { downloads, radarr } = await historyFixture('completed');
+  writeFileSync(join(downloads, 'Replaced', 'extra.mkv'), 'not imported');
+  try {
+    torrents = [torrent('replaced', '/downloads/Replaced', {}, ['Replaced/movie.mkv', 'Replaced/extra.mkv'])];
+    expect(await t.ctx.services.downloadClient.checkSeedingGoals()).toContain('0 removed');
+    expect(deletedHashes()).toEqual([]);
+  } finally {
+    radarr.stop();
+  }
+});
+
+test('downloadClient.checkSeedingGoals - an unreachable Radarr falls back to the recycle bin', async () => {
+  const { downloads, library, radarr } = await historyFixture(null);
+  radarr.on('GET /api/v3/history', () => new Response('down', { status: 503 }));
+  const binCopy = join(library, '.wololo-recycle', 'movie.mkv');
+  linkSync(join(downloads, 'Replaced', 'movie.mkv'), binCopy);
+  recycle(join(library, 'Movie (2020)', 'Movie.mkv'), binCopy);
+  try {
+    torrents = [torrent('replaced', '/downloads/Replaced')];
+    expect(await t.ctx.services.downloadClient.checkSeedingGoals()).toContain('1 removed');
+  } finally {
+    radarr.stop();
+  }
+});
+
 test('downloadClient.checkSeedingGoals - removeWhenGoalMet off never deletes', async () => {
   const { downloads, library } = seedingFixture();
   await t.ctx.services.downloadClient.save(input({ removeWhenGoalMet: false }));
@@ -272,7 +412,10 @@ test('downloadClient.checkSeedingGoals - offers deletion of converted discs when
   const pending = insertMediaFile(t.ctx.db, lib, { path: join(downloads, 'Disc2'), kind: 'bdmv' });
   insertJob(t.ctx.db, { sourcePath: disc.path, type: 'bdmv', state: 'completed', mediaFileId: disc.id });
   insertJob(t.ctx.db, { sourcePath: pending.path, type: 'bdmv', state: 'failed', mediaFileId: pending.id });
-  torrents = [torrent('disc', '/downloads/Disc'), torrent('disc2', '/downloads/Disc2')];
+  torrents = [
+    torrent('disc', '/downloads/Disc', {}, ['Disc/BDMV/index.bdmv', 'Disc/BDMV/STREAM/00001.m2ts']),
+    torrent('disc2', '/downloads/Disc2'),
+  ];
 
   const summary = await t.ctx.services.downloadClient.checkSeedingGoals();
 

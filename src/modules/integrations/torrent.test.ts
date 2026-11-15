@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { TorrentInfo } from '../../shared/domain.ts';
 import type { RawTorrent } from './qbittorrent-client.ts';
-import { matchTorrent, toTorrentInfo } from './torrent.ts';
+import { matchTorrent, torrentContentReplaced, toTorrentInfo } from './torrent.ts';
 
 function raw(overrides: Partial<RawTorrent> = {}): RawTorrent {
   return {
@@ -80,4 +80,43 @@ test.each([
   ['matchTorrent - partial name is no match', '/downloads/Heat2/a.mkv', null],
 ] as const)('%s', (_name, path, expected) => {
   expect(matchTorrent(TORRENTS, path)?.hash ?? null).toBe(expected);
+});
+
+const REPLACED = new Set(['/lib/A/a.mkv']);
+
+test.each([
+  ['torrentContentReplaced - no media files keeps the torrent', [], false],
+  [
+    'torrentContentReplaced - original held by the recycle bin',
+    [{ path: '/dl/a.mkv', inRecycleBin: true, importedTo: null }],
+    true,
+  ],
+  [
+    'torrentContentReplaced - imported and converted (bin purged or off)',
+    [{ path: '/dl/a.mkv', inRecycleBin: false, importedTo: '/lib/A/a.mkv' }],
+    true,
+  ],
+  [
+    'torrentContentReplaced - imported but not converted keeps the torrent',
+    [{ path: '/dl/b.mkv', inRecycleBin: false, importedTo: '/lib/B/b.mkv' }],
+    false,
+  ],
+  [
+    'torrentContentReplaced - one file without a library copy keeps the torrent',
+    [
+      { path: '/dl/a.mkv', inRecycleBin: false, importedTo: '/lib/A/a.mkv' },
+      { path: '/dl/extra.mkv', inRecycleBin: false, importedTo: null },
+    ],
+    false,
+  ],
+  [
+    'torrentContentReplaced - season pack with one converted episode',
+    [
+      { path: '/dl/e1.mkv', inRecycleBin: false, importedTo: '/lib/A/a.mkv' },
+      { path: '/dl/e2.mkv', inRecycleBin: false, importedTo: '/lib/B/b.mkv' },
+    ],
+    true,
+  ],
+] as const)('%s', (_name, files, expected) => {
+  expect(torrentContentReplaced(files, REPLACED)).toBe(expected);
 });
