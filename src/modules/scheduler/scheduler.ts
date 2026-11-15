@@ -26,6 +26,7 @@ export function createScheduler(ctx: AppContext, options: SchedulerOptions): Sch
   const definitions = new Map(options.tasks.map((task) => [task.name, task]));
   const running = new Map<TaskName, RunningTask>();
   let timer: ReturnType<typeof setInterval> | null = null;
+  let stopping = false;
 
   const definition = (name: TaskName): TaskDefinition => {
     const task = definitions.get(name);
@@ -82,7 +83,14 @@ export function createScheduler(ctx: AppContext, options: SchedulerOptions): Sch
     nextRunAt: task.nextRunAt,
   });
 
-  const record = (name: TaskName, startedAt: Date, result: 'success' | 'failure', message: string | null) => {
+  /** A run cut short by shutdown keeps its nextRunAt, so the task is due again right after the restart. */
+  const record = (
+    name: TaskName,
+    startedAt: Date,
+    result: 'success' | 'failure',
+    message: string | null,
+    reschedule: boolean,
+  ) => {
     const current = row(name);
     const finishedAt = now();
     ctx.db
@@ -92,12 +100,14 @@ export function createScheduler(ctx: AppContext, options: SchedulerOptions): Sch
         lastDurationMs: Math.max(0, finishedAt.getTime() - startedAt.getTime()),
         lastResult: result,
         lastMessage: message,
-        nextRunAt: nextRunAt({
-          lastRunAt: finishedAt.toISOString(),
-          intervalMinutes: current.intervalMinutes,
-          enabled: current.enabled,
-          now: finishedAt,
-        }),
+        nextRunAt: reschedule
+          ? nextRunAt({
+              lastRunAt: finishedAt.toISOString(),
+              intervalMinutes: current.intervalMinutes,
+              enabled: current.enabled,
+              now: finishedAt,
+            })
+          : current.nextRunAt,
       })
       .where(eq(scheduledTasks.name, name))
       .run();
@@ -124,7 +134,8 @@ export function createScheduler(ctx: AppContext, options: SchedulerOptions): Sch
         log.error('task failed', { task: name, error: message });
       }
       try {
-        record(name, startedAt, result, message);
+        const interrupted = result === 'failure' && (stopping || ctx.shutdownSignal.aborted);
+        record(name, startedAt, result, message, !interrupted);
       } catch (error) {
         log.error('could not record task result', { task: name, error: errorMessage(error) });
       }
@@ -176,6 +187,7 @@ export function createScheduler(ctx: AppContext, options: SchedulerOptions): Sch
 
     start: async () => {
       if (timer) return;
+      stopping = false;
       ensureRows();
       timer = setInterval(tick, options.tickMs ?? 30_000);
       timer.unref?.();
@@ -183,6 +195,7 @@ export function createScheduler(ctx: AppContext, options: SchedulerOptions): Sch
     },
 
     stop: async () => {
+      stopping = true;
       if (timer) clearInterval(timer);
       timer = null;
       const pending = [...running.values()];

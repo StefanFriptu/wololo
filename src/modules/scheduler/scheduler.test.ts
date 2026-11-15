@@ -141,11 +141,29 @@ test('scheduler - unknown task names are not_found', async () => {
   expect((error as AppError).code).toBe('not_found');
 });
 
-test('scheduler.stop - aborts running tasks and records them', async () => {
+test('scheduler.stop - aborts running tasks and records them without moving their next run', async () => {
   behaviour.library_scan = (signal) =>
     new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('aborted'))));
+  const before = (await scheduler.list()).find((task) => task.name === 'library_scan');
   const done = finished('library_scan');
   await scheduler.runNow('library_scan');
+  clock = new Date(clock.getTime() + 60_000);
   await scheduler.stop();
-  expect((await done).task).toMatchObject({ lastResult: 'failure', lastMessage: 'aborted' });
+  expect((await done).task).toMatchObject({
+    lastResult: 'failure',
+    lastMessage: 'aborted',
+    nextRunAt: before?.nextRunAt ?? 'missing',
+  });
+});
+
+test('scheduler - a failed run outside shutdown is rescheduled one interval after it finished', async () => {
+  behaviour.library_scan = async () => {
+    throw new Error('boom');
+  };
+  const done = finished('library_scan');
+  await scheduler.runNow('library_scan');
+  expect((await done).task).toMatchObject({
+    lastResult: 'failure',
+    nextRunAt: new Date(clock.getTime() + 360 * 60_000).toISOString(),
+  });
 });
