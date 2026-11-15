@@ -113,18 +113,37 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Image name
         run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/wololo" >> "${GITHUB_ENV}"
+      - name: Build version (X.Y.Z on v* tags, <branch>-<sha> or pr-<n>-<sha> otherwise)
+        id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ "${REF_TYPE}" = tag ]; then
+            version="${REF_NAME#v}"
+          elif [ -n "${PR_NUMBER}" ]; then
+            version="pr-${PR_NUMBER}-${SHA::7}"
+          else
+            version="${REF_NAME//\//-}-${SHA::7}"
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
       - uses: docker/setup-buildx-action@v3
       - name: Image metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE }}
+          labels: org.opencontainers.image.version=${{ steps.version.outputs.version }}
       - name: Build for the smoke test (native ${{ matrix.arch }}, no emulation)
         uses: docker/build-push-action@v6
         with:
@@ -134,7 +153,7 @@ jobs:
           provenance: false
           tags: wololo:smoke
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: VERSION=${{ steps.meta.outputs.version }}
+          build-args: VERSION=${{ steps.version.outputs.version }}
           cache-from: type=gha,scope=image-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=image-${{ matrix.arch }}
       - name: Smoke test
@@ -154,7 +173,7 @@ jobs:
           context: .
           platforms: linux/${{ matrix.arch }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: VERSION=${{ steps.meta.outputs.version }}
+          build-args: VERSION=${{ steps.version.outputs.version }}
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=image-${{ matrix.arch }}
       - name: Export digest
@@ -199,6 +218,8 @@ jobs:
           DOCKER_METADATA_ANNOTATIONS_LEVELS: index
         with:
           images: ${{ env.IMAGE }}
+          labels: org.opencontainers.image.version=${{ needs.image.outputs.version }}
+          annotations: org.opencontainers.image.version=${{ needs.image.outputs.version }}
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
@@ -221,5 +242,5 @@ jobs:
           docker buildx imagetools create "${args[@]}" "${sources[@]}"
       - name: Inspect
         env:
-          VERSION: ${{ steps.meta.outputs.version }}
-        run: docker buildx imagetools inspect "${IMAGE}:${VERSION}"
+          TAG: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
+        run: docker buildx imagetools inspect "${TAG}"

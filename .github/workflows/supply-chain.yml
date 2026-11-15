@@ -1,0 +1,66 @@
+name: Supply chain
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supply-chain-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUN_VERSION: 1.4.4
+  REVIEW_LABEL: dependencies-reviewed
+
+jobs:
+  dependencies:
+    name: dependency audit
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install-script allowlist grows only with the review label
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          REVIEWED: ${{ contains(github.event.pull_request.labels.*.name, env.REVIEW_LABEL) }}
+        run: |
+          grown=0
+          for manifest in package.json web/package.json; do
+            before="$(git show "${BASE_SHA}:${manifest}" 2>/dev/null | jq -c '.trustedDependencies // [] | sort' || echo '[]')"
+            after="$(jq -c '.trustedDependencies // [] | sort' "${manifest}")"
+            added="$(jq -rn --argjson after "${after}" --argjson before "${before}" '$after - $before | .[]')"
+            if [ -n "${added}" ]; then
+              echo "${manifest} trusts new install scripts: ${added//$'\n'/, }"
+              grown=1
+            fi
+          done
+          if [ "${grown}" = 1 ] && [ "${REVIEWED}" != true ]; then
+            echo "::error::trustedDependencies grew. Review the install scripts, then add the ${REVIEW_LABEL} label."
+            exit 1
+          fi
+      - uses: ./.github/actions/setup
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Registry signatures and provenance attestations
+        run: |
+          npm audit signatures
+          cd web
+          npm audit signatures
+      - name: Known vulnerabilities (high and critical)
+        run: |
+          bun audit --audit-level=high
+          cd web
+          bun audit --audit-level=high
