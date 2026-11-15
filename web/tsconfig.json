@@ -1,7 +1,7 @@
 {
   "extends": "$app/tsconfig",
   "include": ["src", "test", "*"],
-  "exclude": ["src/service-worker", "src/**/*.test.ts"],
+  "exclude": ["src/service-worker", "src/**/*.test.ts", "src/lib/testing/compileRunes.ts"],
   "compilerOptions": {
     "strict": true,
     "noUncheckedIndexedAccess": true,

@@ -1,11 +1,11 @@
-export interface NavItem {
+import type { IconName } from '#lib/components/IconName.ts';
+
+interface NavItem {
   label: string;
   href: string;
   icon: IconName;
   children?: { label: string; href: string }[];
 }
-
-export type IconName = 'library' | 'activity' | 'profiles' | 'settings' | 'system';
 
 export const NAV: NavItem[] = [
   {
@@ -25,6 +25,7 @@ export const NAV: NavItem[] = [
     children: [
       { label: 'Queue', href: '/activity/queue' },
       { label: 'History', href: '/activity/history' },
+      { label: 'Recycle bin', href: '/activity/recyclebin' },
     ],
   },
   { label: 'Profiles', href: '/profiles', icon: 'profiles' },
@@ -52,7 +53,3 @@ export const NAV: NavItem[] = [
     ],
   },
 ];
-
-export function sectionOf(pathname: string): string {
-  return `/${pathname.split('/')[1] ?? ''}`;
-}

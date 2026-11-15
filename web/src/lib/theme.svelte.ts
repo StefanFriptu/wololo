@@ -1,4 +1,4 @@
-export type ThemeChoice = 'system' | 'light' | 'dark';
+import type { ThemeChoice } from '#lib/ThemeChoice.ts';
 
 const STORAGE_KEY = 'wololo-theme';
 
