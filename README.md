@@ -48,6 +48,9 @@ services:
 
 Replace `OWNER` with the GitHub account that publishes the image. Then run `docker compose up -d wololo`.
 
+- **Image tags:** `latest` and `X.Y.Z` are releases. `main` follows the main branch. Until the first release is tagged, only `main` exists, so use `ghcr.io/OWNER/wololo:main`.
+- **Keep `restart: unless-stopped`** (or `always`). The **Restart** button stops the process and relies on Docker to start it again. You need it to apply a restore or a port or URL base change. Without a restart policy, the container stays down.
+
 **The one rule that matters: mount media exactly like Radarr and Sonarr do.** Use the same host folder at the same container path (`/data` in the [TRaSH guides](https://trash-guides.info/File-and-Folder-Structure/) layout). Wololo writes the new file next to the original and renames it into place. That rename is atomic only within one filesystem and one mount.
 
 | Setting        | What it does                                                                                          |
@@ -66,7 +69,7 @@ Optional environment variables (they lock the matching setting in the UI):
 | `WOLOLO__PORT`                                                        | `8585`                         | Listen port                                                                                                                           |
 | `WOLOLO__BIND_ADDRESS`                                                | `*`                            | `*` or one IP address                                                                                                                 |
 | `WOLOLO__URL_BASE`                                                    | empty                          | e.g. `/wololo` behind a reverse proxy                                                                                                 |
-| `WOLOLO__API_KEY`                                                     | generated                      | Fix the API key (16-128 characters)                                                                                                   |
+| `WOLOLO__API_KEY`                                                     | generated                      | Fix the API key: 16-128 characters from `A-Z a-z 0-9 . _ ~ -`; any other value is ignored and a key is generated                      |
 | `WOLOLO__LOG_LEVEL`                                                   | `info`                         | `trace`, `debug`, `info`, `warn`, `error`                                                                                             |
 | `WOLOLO__INSTANCE_NAME`                                               | `Wololo`                       | Name shown in the UI                                                                                                                  |
 | `WOLOLO__AUTHENTICATION`                                              | `disabled_for_local_addresses` | Who gets the API key in the web UI: local addresses only, `required` (always ask) or `disabled` (only behind an authenticating proxy) |
@@ -142,7 +145,7 @@ A webhook for a path outside every library root is logged as `unknown_path`. Tha
 3. Pick your server from the list. Wololo matches each library section by its folder paths, so add a `plex` path mapping if Plex sees the media elsewhere.
 4. Press **Test**.
 
-From then on, every changed file triggers a partial scan of its folder only. Two optional settings live under **Settings > Media**: **Pause while Plex is streaming** and a processing window (e.g. 01:00-08:00).
+From then on, every changed file triggers a partial scan of its folder only. Optional: **auto-pause while Plex is streaming** (under **Settings > Plex**) and a processing window, e.g. 01:00-08:00 (under **Settings > Media**).
 
 ## First run: dry run, then process
 
@@ -152,9 +155,9 @@ Wololo starts with **processing off**. In this dry-run mode it checks files and 
 2. Open the **dry-run report**. It lists files per failing codec, with estimated time and disk space for the conversion.
 3. Check the device profile under **Profiles**. "Samsung Tizen" is the default; clone and edit it if your TVs decode more.
 4. Try one file first. Open it in **Library**, check the planned changes, and queue it. Watch **Activity > Queue**, then play the result on the TV.
-5. Turn processing on in **Settings**. Then press **Process all needs-work**, or wait for the next scan.
+5. Turn processing on in **Settings > Media**. Then press **Process all needs-work** on the **Library > Dry run** page, or wait for the next scan.
 
-The target on a Raspberry Pi 4 is under 20 minutes per 2-hour movie, so a big backlog takes days. One job at a time, at low CPU and disk priority, is the default. **Replaced originals stay in the recycle bin for 7 days** (`<root>/.wololo-recycle`). Restore one from **Activity > Recycle bin** if a rule was wrong.
+The target on a Raspberry Pi 4 is under 20 minutes per 2-hour movie, so a big backlog takes days. One job at a time, at low CPU and disk priority, is the default. **Replaced originals stay in the recycle bin for 7 days** (`<root>/.wololo-recycle`). Restore one from the recycle bin under **Settings > Media** if a rule was wrong.
 
 ## Backup and restore
 
@@ -168,13 +171,18 @@ To restore:
 
 1. In **System > Backup**, press **Restore** on a backup, or upload a `.zip`.
 2. Wololo checks the archive and saves a `pre_restore` backup of the current state. Then it stages the restore.
-3. Press **Restart** (or run `docker restart wololo`). The restore is applied before the database opens.
+3. Press **Restart** (needs the container restart policy, see [Install](#install-with-docker-compose)), or run `docker restart wololo`. The restore is applied before the database opens.
 
 Backups from a newer Wololo version are refused; update first. The API key and port come back with the backup, so update Radarr/Sonarr webhooks if they changed.
 
 Manual backup without the UI: stop the container and copy the whole `/config` folder. To move Wololo to a new host, copy `/config`, keep the same `/data` layout, and start the container.
 
-Before a database upgrade, Wololo also writes `pre-migration-<time>.db` to `/config/backups`.
+Before a database upgrade, Wololo also writes `pre-migration-<time>.db` to `/config/backups`. It is a plain database file, not a backup zip, so it is not in the backup list. To roll back a failed upgrade with it:
+
+1. Stop the container: `docker compose stop wololo`.
+2. In the config folder on the host, delete `wololo.db-wal` and `wololo.db-shm` if they exist.
+3. Copy `backups/pre-migration-<time>.db` over `wololo.db`, owned by `PUID:PGID`.
+4. Pin the previous image tag in the compose file (an older version cannot open the upgraded database), then `docker compose up -d wololo`.
 
 ## Updating
 
@@ -194,20 +202,20 @@ Migrations run automatically on start, with a backup first. Running jobs stop cl
 
 Start with **System > Status** (health warnings) and **System > Logs**. Log files are in `/config/logs`, and every job has its own log in `/config/logs/jobs/<id>.txt`.
 
-| Symptom                                                                  | Cause and fix                                                                                                                                                                         |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Permission denied` writing media, or files end up owned by another user | `PUID`/`PGID` differ from the owner of your media. Use the same IDs as Radarr/Sonarr (`id <user>` on the host). Check `UMASK`.                                                        |
-| Log says `could not chown /config`                                       | The config folder is on NFS/CIFS with root squash. Create it on the host with the right owner (`chown 1000:1000 ./wololo/config`).                                                    |
-| Webhook test fails with 401                                              | The `apikey=` in the webhook URL is wrong, or the key was regenerated. Copy the URL again from **Settings > Connect**.                                                                |
-| Webhook test fails to connect                                            | Radarr cannot reach `wololo:8585`. Put both on one Docker network, or use the host IP.                                                                                                |
-| Imports show up as `unknown_path`                                        | No library covers the path, or a path mapping is missing. See [Path mappings](#path-mappings).                                                                                        |
-| Job fails with `EXDEV` / cross-device                                    | Media is mounted as several separate volumes (e.g. `/movies` and `/downloads`), so the temp file and the original are on different mounts. Mount one parent folder (`/data`) instead. |
-| Plex does not show the new audio                                         | Plex path mapping missing (partial scan looked in the wrong folder), or Plex sign-in expired. Run **Test** in **Settings > Plex**.                                                    |
-| "ffmpeg was built without libbluray" / missing `mkvmerge` or `7z`        | Only when running outside the image with your own tools. Install them, or point `WOLOLO__FFMPEG` etc. at a suitable build.                                                            |
-| Health: library root "not reachable"                                     | The `/data` volume is not mounted, or the path in the library does not exist inside the container.                                                                                    |
-| Uploading a backup fails for a very large database                       | Copy the `.zip` into `/config/backups` on the host instead, then restore it from the list.                                                                                            |
-| Nothing happens after import                                             | Processing is still off (dry run). See [First run](#first-run-dry-run-then-process). Also check the processing window and "pause while Plex is streaming".                            |
-| UI asks for an API key                                                   | You are not on a local address, or you are behind a reverse proxy. Enter the key from `/config/config.json` once; the browser remembers it.                                           |
+| Symptom                                                                  | Cause and fix                                                                                                                                                                                                                            |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Permission denied` writing media, or files end up owned by another user | `PUID`/`PGID` differ from the owner of your media. Use the same IDs as Radarr/Sonarr (`id <user>` on the host). Check `UMASK`.                                                                                                           |
+| Log says `could not chown /config`                                       | The config folder is on NFS/CIFS with root squash. Create it on the host with the right owner (`chown 1000:1000 ./wololo/config`).                                                                                                       |
+| Webhook test fails with 401                                              | The `apikey=` in the webhook URL is wrong, or the key was regenerated. Copy the URL again from **Settings > Connect**.                                                                                                                   |
+| Webhook test fails to connect                                            | Radarr cannot reach `wololo:8585`. Put both on one Docker network, or use the host IP.                                                                                                                                                   |
+| Imports show up as `unknown_path`                                        | No library covers the path, or a path mapping is missing. See [Path mappings](#path-mappings).                                                                                                                                           |
+| Job fails with `EXDEV` / cross-device                                    | Media is mounted as several separate volumes (e.g. `/movies` and `/downloads`), so the temp file and the original are on different mounts. Mount one parent folder (`/data`) instead.                                                    |
+| Plex does not show the new audio                                         | Plex path mapping missing (partial scan looked in the wrong folder), or Plex sign-in expired. Run **Test** in **Settings > Plex**.                                                                                                       |
+| "ffmpeg was built without libbluray" / missing `mkvmerge` or `7z`        | Only when running outside the image with your own tools. Install them, or point `WOLOLO__FFMPEG` etc. at a suitable build.                                                                                                               |
+| Health: library root "not reachable"                                     | The `/data` volume is not mounted, or the path in the library does not exist inside the container.                                                                                                                                       |
+| Uploading a backup fails for a very large database (zip over 128 MB)     | Copy the `.zip` into `/config/backups` on the host instead, then restore it from the list. Keep the original `wololo_backup_<kind>_<date>.zip` name (a renamed copy such as `... (1).zip` is not listed) and make it readable by `PUID`. |
+| Nothing happens after import                                             | Processing is still off (dry run). See [First run](#first-run-dry-run-then-process). Also check the processing window and "pause while Plex is streaming".                                                                               |
+| UI asks for an API key                                                   | You are not on a local address, or you are behind a reverse proxy. Enter the key from `/config/config.json` once; the browser remembers it.                                                                                              |
 
 To report a bug, attach the status page, the relevant log lines and the job log, with API keys removed.
 

@@ -2,6 +2,7 @@
 # Radarr, Sonarr (and Plex), or start it on its own with: docker compose -f docker-compose.example.yml up -d
 #
 # Replace OWNER with the GitHub user or organisation that publishes the image, and the host paths with yours.
+# Use the :main tag until the first release (vX.Y.Z) is tagged; :latest exists only from then on.
 # The one rule that matters: mount media at the SAME container path Radarr and Sonarr use (here /data), from the
 # same host folder, so Wololo's temp file and the original live on one filesystem and the final rename is atomic.
 services:
@@ -18,6 +19,7 @@ services:
       - /srv/data:/data # identical to the Radarr/Sonarr "/data" mount
     ports:
       - 8585:8585
+    # Required: the Restart button (also used to apply a restore) stops the process and relies on this to start it.
     restart: unless-stopped
     # Lets a running ffmpeg/mkvmerge job stop cleanly before Docker kills it (default is 10 s).
     stop_grace_period: 30s
