@@ -23,15 +23,23 @@ Entry format:
   `DryRunReport.totals.blocked` and `CheckAction 'blocked'` already exist; only the stored status is missing.
 - Workaround in place: yes, `statusFromPlan` in src/modules/scan/evaluation.ts; dry-run totals count `failed` + `blocked` rows as blocked.
 
-### Disc rows do not persist their BdmvJobPlan
+### Backlog and enqueueMany carry no BdmvJobPlan for disc rows
 
-- File: src/db/schema.ts (media_files), src/contracts/jobs.ts (enqueueMany doc)
-- Change: add `bdmvPlan: json<BdmvJobPlan>('bdmv_plan')` to `media_files` (written by probe-scan from `bdmv.evaluate`), or reword
-  `JobsService.enqueueMany` to "disc rows are enqueued without a plan; bdmv.execute re-analyzes the disc in preparing".
-- Why: `media_files.plan` is typed `ConversionPlan`; probe-scan stores the disc's `audioPlan` there. The `BdmvJobPlan` from
-  `bdmv.evaluate` is only passed to `jobs.enqueue` when checkPath queues directly. Backlog enqueues from the scan (and
-  `enqueueMany` filters) have no stored BdmvJobPlan to hand over.
-- Workaround in place: yes, scan backlog enqueues disc rows with `type: 'bdmv'` and no plan (bdmv.execute re-analyzes anyway).
+- File: src/contracts/jobs.ts (`JobsService.enqueueMany` doc)
+- Change (doc only): replace "disc rows (kind bdmv|iso) are enqueued with their evaluated plan" with "disc rows (kind
+  bdmv|iso) are enqueued without a BdmvJobPlan; bdmv.execute re-analyzes the disc in preparing". No schema change.
+- Why: `media.checkPath` passes the `BdmvJobPlan` from `bdmv.evaluate` as `NewJob.bdmvPlan` when it queues a disc
+  directly, but `media_files.plan` only holds the disc's audio plan (with `estimatedOutputBytes` taken from the
+  BdmvJobPlan), so the scan backlog and `enqueueMany` have no full plan to hand over. bdmv.execute re-analyzes anyway.
+- Workaround in place: yes, the scan backlog enqueues disc rows with `type: 'bdmv'` and no plan.
+
+### Recycle-bin path should be validated as absolute
+
+- File: src/shared/settings.ts (settings schema, `recycleBin.path`)
+- Change: `z.string().min(1).refine(isAbsolute, 'must be an absolute path').nullable()`.
+- Why: a relative path has no defined base. The scanner skips the recycle bin by path, so it has to resolve it.
+- Workaround in place: yes, `skipPathsFor` in src/modules/scan/eligibility.ts resolves and normalises the path
+  (trailing slash, `..`) before the walker and `media.checkPath` compare against it.
 
 ### Clarify ClassifyEntry childNames and NeedsRecheck for processing rows
 
