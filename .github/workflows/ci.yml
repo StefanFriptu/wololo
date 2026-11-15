@@ -5,135 +5,242 @@ on:
     branches: [main]
     tags: ["v*"]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 env:
   BUN_VERSION: 1.4.4
+  TSMUXER_URL: https://github.com/justdan96/tsMuxer/releases/download/2.7.0/tsMuxer-2.7.0-linux.zip
+  TSMUXER_SHA256: ceaaa181ab70e201685b1e45260d337d1cbdb0aba1408d4fbc47e232a7e4c987
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+  commits:
+    name: commit hygiene
+    if: github.event_name == 'pull_request' && !github.event.pull_request.draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Refuse fixup, squash and amend commits
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          pending="$(git log --format=%s "${BASE_SHA}..${HEAD_SHA}" | grep -E '^(fixup|squash|amend)!' || true)"
+          if [ -n "${pending}" ]; then
+            echo "::error::Fold these commits with an autosquash rebase before merging:"
+            echo "${pending}"
+            exit 1
+          fi
+
+  check:
+    name: lint, typecheck, tests
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
         with:
           bun-version: ${{ env.BUN_VERSION }}
-      - name: Install media tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg mkvtoolnix 7zip
-      - run: bun install --frozen-lockfile
       - run: bun run lint
       - run: bun run typecheck
+      - name: Install media tools (ffmpeg, MKVToolNix, 7-Zip, tsMuxeR)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg mkvtoolnix 7zip unzip
+          curl -fsSL --retry 3 -o "${RUNNER_TEMP}/tsmuxer.zip" "${TSMUXER_URL}"
+          echo "${TSMUXER_SHA256}  ${RUNNER_TEMP}/tsmuxer.zip" | sha256sum -c -
+          sudo unzip -o -j "${RUNNER_TEMP}/tsmuxer.zip" tsMuxeR -d /usr/local/bin
+          sudo chmod 0755 /usr/local/bin/tsMuxeR
+          ffmpeg -hide_banner -version
+          mkvmerge --version
+          7z i > /dev/null
+          command -v tsMuxeR
+      - name: Cache media fixtures
+        uses: actions/cache@v4
+        with:
+          path: test/.cache/fixtures
+          key: fixtures-${{ runner.os }}-${{ hashFiles('test/helpers/fixtures.ts', 'test/helpers/generate-fixtures.ts') }}
       - name: Generate fixtures
         run: bun run fixtures
       - run: bun test
-      - name: Web install, check and build
+
+  web:
+    name: web check and build
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: svelte-check
         working-directory: web
-        run: |
-          bun install --frozen-lockfile
-          bun run check
-          bun run build
+        run: bun run check
+      - name: Build
+        working-directory: web
+        run: bun run build
 
   image:
-    needs: check
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
+    name: image (${{ matrix.arch }})
+    needs: [check, web]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
     permissions:
       contents: read
       packages: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/wololo" >> "${GITHUB_ENV}"
+      - name: Build version (X.Y.Z on v* tags, <branch>-<sha> or pr-<n>-<sha> otherwise)
+        id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ "${REF_TYPE}" = tag ]; then
+            version="${REF_NAME#v}"
+          elif [ -n "${PR_NUMBER}" ]; then
+            version="pr-${PR_NUMBER}-${SHA::7}"
+          else
+            version="${REF_NAME//\//-}-${SHA::7}"
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
       - uses: docker/setup-buildx-action@v3
       - name: Image metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/wololo
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha
-      - name: Build amd64 image for smoke test
+          images: ${{ env.IMAGE }}
+          labels: org.opencontainers.image.version=${{ steps.version.outputs.version }}
+      - name: Build for the smoke test (native ${{ matrix.arch }}, no emulation)
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64
+          platforms: linux/${{ matrix.arch }}
           load: true
+          provenance: false
           tags: wololo:smoke
-          build-args: VERSION=${{ steps.meta.outputs.version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: VERSION=${{ steps.version.outputs.version }}
+          cache-from: type=gha,scope=image-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=image-${{ matrix.arch }}
       - name: Smoke test
-        run: |
-          docker run -d --name wololo-smoke -p 8585:8585 -e PUID=1001 -e PGID=1001 wololo:smoke
-          for i in $(seq 1 30); do
-            if curl -fsS http://localhost:8585/health; then break; fi
-            sleep 1
-          done
-          curl -fsS http://localhost:8585/health
-          curl -fsS http://localhost:8585/ | grep -q '__WOLOLO__'
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8585/api/v1/settings)" = 401
-          test "$(docker exec wololo-smoke awk '/^Uid:/{print $2}' /proc/1/status)" = 1001
-          test "$(docker exec wololo-smoke awk '/^Gid:/{print $2}' /proc/1/status)" = 1001
-          docker exec wololo-smoke ffmpeg -hide_banner -protocols | grep -q bluray
-          docker exec wololo-smoke mkvmerge --version
-          docker exec wololo-smoke 7z i > /dev/null
-          for i in $(seq 1 24); do
-            status="$(docker inspect -f '{{.State.Health.Status}}' wololo-smoke)"
-            [ "$status" = healthy ] && break
-            sleep 5
-          done
-          test "$(docker inspect -f '{{.State.Health.Status}}' wololo-smoke)" = healthy
-      - name: Smoke test logs
-        if: always()
-        run: docker logs wololo-smoke || true
-      - name: Remove smoke container
-        if: always()
-        run: docker rm -f wololo-smoke || true
-      - name: Build arm64 image for smoke test (QEMU)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/arm64
-          load: true
-          tags: wololo:smoke-arm64
-          build-args: VERSION=${{ steps.meta.outputs.version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      - name: Smoke test arm64 (Raspberry Pi target)
-        run: |
-          docker run --rm --platform linux/arm64 --entrypoint sh wololo:smoke-arm64 -c '
-            bun --version &&
-            ffmpeg -hide_banner -protocols | grep -q bluray &&
-            mkvmerge --version &&
-            7z i > /dev/null &&
-            setpriv --version'
+        run: docker/smoke-test.sh wololo:smoke
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push multi-arch image
+      - name: Push by digest
+        if: github.event_name == 'push'
+        id: push
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          platforms: linux/${{ matrix.arch }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: VERSION=${{ steps.meta.outputs.version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          build-args: VERSION=${{ steps.version.outputs.version }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=image-${{ matrix.arch }}
+      - name: Export digest
+        if: github.event_name == 'push'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/digests"
+          touch "${RUNNER_TEMP}/digests/${DIGEST#sha256:}"
+      - name: Upload digest
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  manifest:
+    name: publish multi-arch image
+    needs: image
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+      - name: Image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/wololo" >> "${GITHUB_ENV}"
+      - uses: docker/setup-buildx-action@v3
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: index
+        with:
+          images: ${{ env.IMAGE }}
+          labels: org.opencontainers.image.version=${{ needs.image.outputs.version }}
+          annotations: org.opencontainers.image.version=${{ needs.image.outputs.version }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create and push the manifest list
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          args=()
+          while IFS= read -r tag; do args+=(--tag "${tag}"); done < <(jq -r '.tags[]' <<< "${DOCKER_METADATA_OUTPUT_JSON}")
+          while IFS= read -r annotation; do args+=(--annotation "${annotation}"); done < <(jq -r '.annotations[]' <<< "${DOCKER_METADATA_OUTPUT_JSON}")
+          sources=()
+          for digest in *; do sources+=("${IMAGE}@sha256:${digest}"); done
+          docker buildx imagetools create "${args[@]}" "${sources[@]}"
+      - name: Inspect
+        env:
+          TAG: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
+        run: docker buildx imagetools inspect "${TAG}"
