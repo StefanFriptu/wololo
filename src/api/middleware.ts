@@ -45,7 +45,7 @@ export function apiKeyAuth(getApiKey: () => string, apiPrefix: string): Middlewa
 export function errorHandler(log: Logger): ErrorHandler<AppEnv> {
   return (error, c) => {
     if (error instanceof AppError) {
-      if (error.status >= 500 && error.code !== 'not_implemented') {
+      if (error.status >= 500) {
         log.error(error.message, {
           path: c.req.path,
           code: error.code,

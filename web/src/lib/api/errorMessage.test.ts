@@ -6,10 +6,6 @@ test('errorMessage - API errors show the server message', () => {
   expect(errorMessage(new ApiError(409, 'conflict', 'profile is in use'))).toBe('profile is in use');
 });
 
-test('errorMessage - 501 explains the feature is not available yet', () => {
-  expect(errorMessage(new ApiError(501, 'not_implemented', 'jobs.queue'))).toContain('Not available yet');
-});
-
 test('errorMessage - API error without message falls back to the status', () => {
   expect(errorMessage(new ApiError(500, 'internal', ''))).toBe('Request failed (500)');
 });

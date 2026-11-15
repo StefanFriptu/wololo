@@ -48,7 +48,7 @@ async function eventually(check: () => boolean, timeoutMs = 2000): Promise<void>
   }
 }
 
-test('platform routes - none answers 501 any more', async () => {
+test('platform routes - every parameterless GET answers 200', async () => {
   const safe = routesOf('platform').filter((key) => splitRouteKey(key).method === 'GET' && !key.includes(':'));
   expect(safe.length).toBeGreaterThan(3);
   for (const key of safe) {

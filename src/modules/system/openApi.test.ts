@@ -183,9 +183,7 @@ test('openapi.json - describes responses by response type', () => {
 test('openapi.json - lists every error code with its HTTP status', () => {
   const codes = (served.components.schemas.ApiErrorBody as { properties: { error: { enum: ErrorCode[] } } }).properties
     .error.enum;
-  expect(codes.map((code) => new AppError(code, code).status).sort()).toEqual([
-    400, 401, 404, 409, 412, 422, 500, 501, 502,
-  ]);
+  expect(codes.map((code) => new AppError(code, code).status).sort()).toEqual([400, 401, 404, 409, 412, 422, 500, 502]);
 });
 
 const META: RouteMeta = { module: 'platform', auth: 'apikey', responseType: 'json', summary: 'Test route' };

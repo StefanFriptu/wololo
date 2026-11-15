@@ -2,7 +2,7 @@ import type { Server } from 'bun';
 import type { Context, Hono } from 'hono';
 import { z } from 'zod';
 import { AppError } from '../core/errors.ts';
-import { API_ROUTE_META, splitRouteKey } from '../shared/api-routes.ts';
+import { splitRouteKey } from '../shared/api-routes.ts';
 import type { RouteKey, RouteResponse } from '../shared/api-types.ts';
 
 /** server is passed by Bun.serve (`fetch: (req, server) => app.fetch(req, { server })`); absent in app.request() tests. */
@@ -53,22 +53,6 @@ export function route<K extends RouteKey>(app: ApiApp, key: K, handler: RouteHan
     if (result === undefined) return c.body(null, 204);
     return c.json(result as never);
   });
-}
-
-/** Registers a 501 handler for each key not implemented yet. Register real handlers first: the first match wins. */
-export function registerNotImplemented(app: ApiApp, keys: readonly RouteKey[]): void {
-  for (const key of keys) {
-    const { method, path } = splitRouteKey(key);
-    app.on(method, path, (c) =>
-      c.json(
-        {
-          error: 'not_implemented',
-          message: `${key} is not implemented yet (${API_ROUTE_META[key].module})`,
-        },
-        501,
-      ),
-    );
-  }
 }
 
 function parseWith<T extends z.ZodType>(schema: T, value: unknown, where: string): z.infer<T> {

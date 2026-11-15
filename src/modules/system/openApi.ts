@@ -88,7 +88,6 @@ const ERROR_CODES: Readonly<Record<ErrorCode, true>> = {
   unauthorized: true,
   precondition_failed: true,
   upstream: true,
-  not_implemented: true,
   internal: true,
 };
 

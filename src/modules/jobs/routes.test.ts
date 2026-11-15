@@ -5,7 +5,6 @@ import { createTestContext, type TestContext } from '../../../test/helpers/conte
 import { insertJob, insertLibrary, insertMediaFile } from '../../../test/helpers/seed.ts';
 import { stubService } from '../../../test/helpers/stubs.ts';
 import type { LibraryService } from '../../contracts/probe-scan.ts';
-import { routesOf, splitRouteKey } from '../../shared/api-routes.ts';
 import type { EnqueueResponse } from '../../shared/api-types.ts';
 import { getJobRow, updateJobRow } from './jobQueries.ts';
 import { mediaDetail, recordingMediaService } from './test-support.ts';
@@ -36,18 +35,6 @@ const json = (body: unknown): RequestInit => ({
   method: 'POST',
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify(body),
-});
-
-test('routes - no jobs or recycle-bin route answers 501 any more', async () => {
-  const { t } = setup();
-  for (const key of routesOf('jobs')) {
-    const { method, path } = splitRouteKey(key);
-    const response = await t.request(path.replace(':id', '999'), {
-      method,
-      ...(method === 'POST' ? { headers: { 'content-type': 'application/json' }, body: '{}' } : {}),
-    });
-    expect({ key, status: response.status }).not.toEqual({ key, status: 501 });
-  }
 });
 
 test('GET /api/v1/queue and pause/resume - report the queue state', async () => {

@@ -47,6 +47,42 @@ describe('route table', () => {
     expect(t.app.routes.some((entry) => entry.method === method && entry.path === path)).toBe(true);
   });
 
+  test.each(Object.keys(API_ROUTE_META) as RouteKey[])('%s has exactly one handler', (key) => {
+    const { method, path } = splitRouteKey(key);
+    expect(t.app.routes.filter((entry) => entry.method === method && entry.path === path)).toHaveLength(1);
+  });
+
+  test('every route is served by a real handler: no 501 and no network call', async () => {
+    const realFetch = globalThis.fetch;
+    const outbound: string[] = [];
+    globalThis.fetch = Object.assign(
+      async (input: string | URL | Request) => {
+        outbound.push(String(input instanceof Request ? input.url : input));
+        throw new Error('network disabled in this test');
+      },
+      { preconnect: realFetch.preconnect },
+    );
+    const sweep = createTestContext();
+    try {
+      const statuses: Record<string, number> = {};
+      for (const key of Object.keys(API_ROUTE_META) as RouteKey[]) {
+        if (API_ROUTE_META[key].responseType === 'sse') continue;
+        const { method, path } = splitRouteKey(key);
+        const response = await sweep.request(path.replace(':id', '999999').replace(':name', 'library_scan'), {
+          method,
+          ...(method === 'GET' || method === 'DELETE' ? {} : { body: '{}' }),
+        });
+        statuses[key] = response.status;
+      }
+      expect(Object.keys(statuses).length).toBeGreaterThan(80);
+      expect(Object.entries(statuses).filter(([, status]) => status === 501)).toEqual([]);
+      expect(outbound.filter((url) => !url.startsWith('https://plex.tv/'))).toEqual([]);
+    } finally {
+      globalThis.fetch = realFetch;
+      sweep.cleanup();
+    }
+  });
+
   test('unknown API path returns a JSON 404', async () => {
     const response = await t.request('/api/v1/does-not-exist');
     expect(response.status).toBe(404);
