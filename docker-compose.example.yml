@@ -1,19 +1,31 @@
+# Wololo next to an existing *arr stack. Add the "wololo" service to the compose file that already runs
+# Radarr, Sonarr (and Plex), or start it on its own with: docker compose -f docker-compose.example.yml up -d
+#
+# Replace OWNER with the GitHub user or organisation that publishes the image, and the host paths with yours.
+# The one rule that matters: mount media at the SAME container path Radarr and Sonarr use (here /data), from the
+# same host folder, so Wololo's temp file and the original live on one filesystem and the final rename is atomic.
 services:
   wololo:
-    # ":main" follows the main branch; switch to ":latest" (newest release) once a v* release exists.
-    image: ghcr.io/OWNER/wololo:main
+    image: ghcr.io/OWNER/wololo:latest
     container_name: wololo
     environment:
-      - PUID=1000
+      - PUID=1000 # same user as Radarr/Sonarr, so converted files keep their owner
       - PGID=1000
-      - TZ=Etc/UTC
+      - TZ=Etc/UTC # e.g. Europe/Bucharest; used for the processing window and backup names
       - UMASK=002
     volumes:
-      - ./wololo/config:/config
-      # Mount media at the same path Radarr/Sonarr use so renames stay atomic.
-      - /path/to/data:/data
+      - ./wololo/config:/config # database, config.json (API key), logs, backups
+      - /srv/data:/data # identical to the Radarr/Sonarr "/data" mount
     ports:
       - 8585:8585
     restart: unless-stopped
-    # Lets a running ffmpeg/mkvmerge job stop cleanly (Docker's default is 10 s).
+    # Lets a running ffmpeg/mkvmerge job stop cleanly before Docker kills it (default is 10 s).
     stop_grace_period: 30s
+    # Join the network Radarr, Sonarr and Plex are on, so they reach each other by service name
+    # (webhook URL http://wololo:8585/..., Radarr at http://radarr:7878). Uncomment both blocks if you use one.
+    # networks:
+    #   - arr
+
+# networks:
+#   arr:
+#     external: true

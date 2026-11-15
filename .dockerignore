@@ -1,13 +1,16 @@
 **/node_modules
+**/*.test.ts
 web/build
 web/.svelte-kit
 config
 dist
-test/.cache
+docs
+test
 .git
 .github
 coverage
 *.log
+*.md
 .env
 .env.*
 .DS_Store

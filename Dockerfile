@@ -2,6 +2,8 @@
 ARG BUN_VERSION=1.4.4
 ARG DEBIAN_RELEASE=trixie
 
+# The web bundle and the production node_modules (pure JavaScript) are identical for every target architecture,
+# so both stages run on the build machine's platform and are never emulated.
 FROM --platform=$BUILDPLATFORM oven/bun:${BUN_VERSION}-slim AS web
 WORKDIR /app
 COPY web/package.json web/bun.lock web/
@@ -32,13 +34,24 @@ RUN apt-get update \
  && mkdir -p /config /data
 
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
+
+# Fails the build when a tool the jobs depend on is missing (ffmpeg must read Blu-ray structures through libbluray).
+RUN bun --version \
+ && ffmpeg -hide_banner -protocols 2>/dev/null | grep -Eq '^[[:space:]]*bluray$' \
+ && ffprobe -hide_banner -version > /dev/null \
+ && mkvmerge --version \
+ && 7z i > /dev/null \
+ && nice --version > /dev/null \
+ && ionice --version \
+ && setpriv --version
+
 WORKDIR /app
 COPY --from=deps /app/node_modules node_modules
-COPY package.json bun.lock ./
+COPY package.json ./
 COPY drizzle drizzle
 COPY src src
 COPY --from=web /app/web/build web/build
-COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --chmod=0755 docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY docker/healthcheck.ts /app/docker/healthcheck.ts
 
 ENV WOLOLO_VERSION=${VERSION} \
@@ -47,6 +60,7 @@ ENV WOLOLO_VERSION=${VERSION} \
     UMASK=002 \
     TZ=Etc/UTC \
     NODE_ENV=production \
+    BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 \
     WOLOLO_DOCKER=1 \
     WOLOLO_CONFIG_DIR=/config \
     WOLOLO_WEB_DIR=/app/web/build
