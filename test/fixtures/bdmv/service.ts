@@ -214,7 +214,7 @@ export function setup(
           {
             id: 2,
             path: '/remote/movies',
-            localPath: holder.library?.roots[0]?.path ?? null,
+            localPath: holder.library?.roots[0]?.path ?? '/missing',
             accessible: true,
             freeBytes: null,
           },

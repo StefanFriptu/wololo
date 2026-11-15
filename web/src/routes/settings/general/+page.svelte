@@ -10,7 +10,7 @@
   import { Resource } from '#lib/resource.svelte.ts';
   import { restarter } from '#lib/restarter.svelte.ts';
   import { runtimeConfig } from '#lib/runtime.ts';
-  import { AUTHENTICATION_MODES, type AuthenticationMode, type GeneralConfigUpdate } from '#lib/shared.ts';
+  import { AUTHENTICATION_MODES, type AuthenticationMode, type GeneralConfig, type GeneralConfigUpdate } from '#lib/shared.ts';
   import type { ThemeChoice } from '#lib/ThemeChoice.ts';
   import { theme } from '#lib/theme.svelte.ts';
   import { attempt } from '#lib/attempt.ts';
@@ -35,6 +35,9 @@
 
   const general = new Resource((signal) => api('GET /api/v1/settings/general', { signal }));
   let form = $state<Required<GeneralConfigUpdate> | null>(null);
+  const locked = $derived(new Set(general.data?.envOverrides ?? []));
+  const lockedHint = (key: keyof GeneralConfig): string | undefined =>
+    locked.has(key) ? `Set by WOLOLO__${key.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase()}` : undefined;
   let showKey = $state(false);
   let busy = $state(false);
 
@@ -105,30 +108,30 @@
           <h2>Host</h2>
           <div class="field">
             <label for="instance-name">Instance name</label>
-            <div class="control"><input id="instance-name" bind:value={form.instanceName} required maxlength="64" /></div>
+            <div class="control"><input id="instance-name" bind:value={form.instanceName} required maxlength="64" disabled={locked.has('instanceName')} title={lockedHint('instanceName')} /></div>
           </div>
           <div class="field">
             <label for="port">Port</label>
-            <div class="control"><input id="port" type="number" min="1" max="65535" bind:value={form.port} required /></div>
+            <div class="control"><input id="port" type="number" min="1" max="65535" bind:value={form.port} required disabled={locked.has('port')} title={lockedHint('port')} /></div>
           </div>
           <div class="field">
             <label for="bind-address">Bind address</label>
             <div class="control">
-              <input id="bind-address" bind:value={form.bindAddress} required />
+              <input id="bind-address" bind:value={form.bindAddress} required disabled={locked.has('bindAddress')} title={lockedHint('bindAddress')} />
               <span class="hint">"*" for every interface, or one IP address.</span>
             </div>
           </div>
           <div class="field">
             <label for="url-base">URL base</label>
             <div class="control">
-              <input id="url-base" bind:value={form.urlBase} placeholder="/wololo" />
+              <input id="url-base" bind:value={form.urlBase} placeholder="/wololo" disabled={locked.has('urlBase')} title={lockedHint('urlBase')} />
               <span class="hint">For a reverse proxy sub-path. Empty serves Wololo at the root.</span>
             </div>
           </div>
           <div class="field">
             <label for="log-level">Log level</label>
             <div class="control">
-              <select id="log-level" bind:value={form.logLevel}>
+              <select id="log-level" bind:value={form.logLevel} disabled={locked.has('logLevel')} title={lockedHint('logLevel')}>
                 {#each LOG_LEVELS as level (level)}<option value={level}>{level}</option>{/each}
               </select>
             </div>
@@ -142,7 +145,7 @@
             <div class="control">
               {#each AUTHENTICATION_MODES as mode (mode)}
                 <label class="check option">
-                  <input type="radio" name="authentication" value={mode} bind:group={form.authentication} />
+                  <input type="radio" name="authentication" value={mode} bind:group={form.authentication} disabled={locked.has('authentication')} />
                   <span>{AUTH_LABELS[mode].label}<span class="hint block">{AUTH_LABELS[mode].hint}</span></span>
                 </label>
               {/each}
@@ -157,7 +160,7 @@
                   {showKey ? 'Hide' : 'Show'}
                 </button>
                 <CopyButton text={current.apiKey} />
-                <button type="button" class="small" onclick={regenerate} disabled={busy}><Icon name="key" size={14} /> New key</button>
+                <button type="button" class="small" onclick={regenerate} disabled={busy || locked.has('apiKey')} title={lockedHint('apiKey')}><Icon name="key" size={14} /> New key</button>
               </div>
               <span class="hint">
                 Used by the API, the Radarr/Sonarr webhooks (Settings > Connect) and

@@ -3,28 +3,12 @@ import { type ApiApp, idParamSchema, pageQuerySchema, parseBody, parseId, parseQ
 import type { AppContext } from '../../app/context.ts';
 import { AppError } from '../../core/errors.ts';
 import {
-  type HistoryEventType,
+  HISTORY_EVENT_TYPES,
   JOB_STATES,
   JOB_TYPES,
   MEDIA_FILE_KINDS,
   MEDIA_FILE_STATUSES,
 } from '../../shared/domain.ts';
-
-const HISTORY_EVENT_FLAGS: Record<HistoryEventType, true> = {
-  queued: true,
-  started: true,
-  completed: true,
-  failed: true,
-  cancelled: true,
-  retried: true,
-  skipped: true,
-  recycled: true,
-  restored: true,
-  purged: true,
-  imported: true,
-  source_deleted: true,
-};
-const HISTORY_EVENTS = Object.keys(HISTORY_EVENT_FLAGS) as [HistoryEventType, ...HistoryEventType[]];
 
 const stateListSchema = z
   .string()
@@ -47,8 +31,15 @@ const enqueueSchema = z
         libraryId: z.number().int().positive().optional(),
         status: z.enum(MEDIA_FILE_STATUSES).optional(),
         failingCodec: z.string().min(1).optional(),
-        kind: z.enum(MEDIA_FILE_KINDS).optional(),
+        kind: z
+          .string()
+          .refine((value) =>
+            value.split(',').every((kind) => (MEDIA_FILE_KINDS as readonly string[]).includes(kind.trim())),
+          )
+          .optional(),
         profileId: z.number().int().positive().optional(),
+        search: z.string().trim().min(1).optional(),
+        codec: z.string().trim().min(1).optional(),
       })
       .optional(),
     priority: z.number().int().min(-100).max(100).optional(),
@@ -59,7 +50,7 @@ const enqueueSchema = z
   });
 
 const historyQuerySchema = pageQuerySchema.extend({
-  event: z.enum(HISTORY_EVENTS).optional(),
+  event: z.enum(HISTORY_EVENT_TYPES).optional(),
   mediaFileId: z.coerce.number().int().positive().optional(),
   jobId: z.coerce.number().int().positive().optional(),
 });

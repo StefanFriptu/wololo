@@ -45,6 +45,7 @@ const webhookEnvelopeSchema = z.looseObject({ eventType: z.string().min(1) });
 const plexUpdateSchema = z.object({
   serverMachineId: z.string().min(1).optional(),
   serverUrl: httpUrl.optional(),
+  serverToken: z.string().trim().min(1).optional(),
   enabled: z.boolean().optional(),
   partialScan: z.boolean().optional(),
   pauseWhileStreaming: z.boolean().optional(),

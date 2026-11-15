@@ -43,25 +43,40 @@ export interface RulesInput {
   probe: ProbeResult;
   profile: EffectiveProfile;
   library: LibraryRuleSettings;
-  /** ISO 639-2/B from Radarr/Sonarr (normalised); when null the engine falls back to the first default audio track's language. */
+  /**
+   * ISO 639-2/B from Radarr/Sonarr (normalised); when null the engine falls back to the first default audio track's
+   * language, then to the first tagged audio track.
+   */
   originalLanguage: string | null;
 }
 
 /**
  * Pure. Decides per stream: copy, encode (target codec/bitrate/channels) or drop. Implements:
- * - skip conversion when a compatible track in the same language with >= channels exists (drop/demote the incompatible one),
- * - Replace (only converted track) vs KeepBoth (converted first + default, original kept after),
+ * - skip conversion when a compatible track of the same programme exists: same tagged language (sameLanguage, so
+ *   untagged tracks never match; fillMissingLanguage tags them first), >= target channels, neither title names a role
+ *   (commentary, description, descriptive, narration, karaoke, isolated, score, trivia, DVS) and durations within
+ *   max(5 s, 2 %) when both are known (drop/demote the incompatible one); otherwise encode,
+ * - Replace (only converted track) vs KeepBoth (each converted track is written before its original; the default
+ *   converted track moves to the first audio position, every other audio stream keeps source order),
  * - fillMissingLanguage first (untagged audio/subtitle -> original or fixed language, PlannedStream.retagged = true),
  * - language keep-list + original language, never removes the last audio track; every language comparison goes
  *   through sameLanguage/normalizeLanguage (src/shared/language.ts), so "ger", "deu" and "de" match,
- * - default flag on the original-language track, titles and language tags kept,
+ * - default flag on the original-language track, never on a role-titled track (commentary, description, ...) while
+ *   another playable track exists; titles and language tags kept,
  * - video codec outside profile.video.allowedCodecs -> action "blocked" (video is never re-encoded in v1),
+ * - an encode whose target codec is not in profile.audio.allowedCodecs (assigned profiles share no target) -> action
+ *   "blocked" with reason "assigned profiles share no audio target codec (<codec> is not allowed by all)"; files
+ *   needing no encode still skip or remux,
  * - lost-feature notes ("Atmos height channels dropped", "7.1 downmixed to 5.1"),
  * - no resample, no normalisation.
  */
 export type PlanConversion = (input: RulesInput) => ConversionPlan;
 
-/** Pure. Strictest combination: intersection of allowed codecs, min maxChannels, first profile's target codec when it is allowed by all. */
+/**
+ * Pure. Strictest combination: intersection of allowed codecs, min maxChannels; target codec: the first profile's when
+ * it is allowed by all, else the first of the profiles' targets then ac3/eac3/aac allowed by all; when none is, the
+ * first profile's target is kept and planConversion blocks.
+ */
 export type ResolveEffectiveProfile = (profiles: DeviceProfile[]) => EffectiveProfile;
 
 /** Pure. Stable key of effective profile versions + every LibraryRuleSettings field, stored as media_files.rules_key. */
@@ -82,9 +97,16 @@ export interface RulesService {
 
 export interface AudioConversionInput {
   inputPath: string;
-  /** Options placed before -i, e.g. ["-playlist", "800"] when inputPath is "bluray:<disc>" (BDMV side files). */
+  /**
+   * Options placed before -i, e.g. ["-playlist", "800"] when inputPath is "bluray:<disc>" (BDMV side files). With
+   * inputOptions the output starts at 0 (no -copyts, no -itsoffset); the caller applies the audio/video offset with
+   * mkvmerge --sync.
+   */
   inputOptions?: string[];
-  /** Temp output in the same folder as the input ("<name>.wololo-tmp.mkv"), or a BDMV side file (".mka"). */
+  /**
+   * Temp output in the same folder as the input ("<name>.wololo-tmp.mkv"), or a BDMV side file (".mka"). Must not exist
+   * when ffmpeg starts: the caller lstat()s it and unlinks a leftover file or symlink first (the argv carries -y).
+   */
   outputPath: string;
   probe: ProbeResult;
   /** Streams to write, in output order. BDMV passes a plan reduced to the one audio stream of a side file. */
@@ -94,9 +116,15 @@ export interface AudioConversionInput {
 /**
  * Pure. Full ffmpeg argv WITHOUT the binary, e.g.
  * ["-hide_banner", "-nostdin", "-y", "-i", in, "-map", "0:0", ..., "-c:v", "copy", "-c:a:0", "ac3", "-b:a:0", "640k", "-ac:a:0", "6",
- *  "-map_chapters", "0", "-map_metadata", "0", "-metadata:s:a:0", "language=eng", "-disposition:a:0", "default",
+ *  "-map_chapters", "0", "-map_metadata", "0", "-metadata:s:a:0", "language=eng", "-disposition:a:0", "+default",
  *  "-progress", "pipe:1", "-nostats", "-f", "matroska", out]
- * Never adds -ar, loudnorm, or dynaudnorm. Lossless sources are decoded from the full stream (ffmpeg decodes DTS-HD MA fully).
+ * Decoder options before -i: "-core_only 0" when a dts track is encoded (full DTS-HD MA, never the core), "-drc_scale 0"
+ * when ac3/eac3 is decoded (no dynamic range compression). Output format from the extension (.mp4/.m4v -> mp4, else
+ * matroska); ".mka" side files get "-map_chapters -1" so mkvmerge does not merge chapters twice. Encoded tracks get
+ * stale mkvmerge statistics tags (BPS, NUMBER_OF_BYTES, ...) cleared. "+default"/"-default" toggle only the default
+ * flag (other dispositions such as commentary stay).
+ * Never adds -ar, loudnorm, or dynaudnorm. Throws when outputPath equals inputPath (after normalisation) or starts
+ * with "-".
  */
 export type BuildAudioConversionArgs = (input: AudioConversionInput) => string[];
 

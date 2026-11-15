@@ -165,8 +165,8 @@ const ACTION_BY_CHECK: Readonly<Record<CheckAction, WebhookAction>> = {
   dry_run: 'dry_run',
   unknown_path: 'unknown_path',
   ignored: 'ignored',
-  blocked: 'ignored',
-  decision_required: 'ignored',
+  blocked: 'blocked',
+  decision_required: 'decision_required',
   failed: 'error',
 };
 
@@ -177,6 +177,8 @@ export function webhookActionFor(action: CheckAction): WebhookAction {
 const ACTION_PRIORITY: readonly WebhookAction[] = [
   'error',
   'queued',
+  'decision_required',
+  'blocked',
   'dry_run',
   'unknown_path',
   'ignored',

@@ -156,8 +156,8 @@ test.each([
   ['dry_run', 'dry_run'],
   ['unknown_path', 'unknown_path'],
   ['ignored', 'ignored'],
-  ['blocked', 'ignored'],
-  ['decision_required', 'ignored'],
+  ['blocked', 'blocked'],
+  ['decision_required', 'decision_required'],
   ['failed', 'error'],
 ] as const)('webhookActionFor - %s maps to %s', (check, expected) => {
   expect(webhookActionFor(check)).toBe(expected);

@@ -111,9 +111,7 @@ export function createBdmvService(ctx: AppContext): BdmvService {
     await requireConvertedOutput(mediaFileId, path);
 
     const torrent = await ctx.services.downloadClient.findTorrentByPath(path);
-    const torrentContent = torrent
-      ? resolve(await ctx.services.pathMappings.toLocal('qbittorrent', torrent.contentPath))
-      : null;
+    const torrentContent = torrent ? resolve(torrent.contentPath) : null;
     if (torrent && torrentContent && path !== torrentContent && isWithin(path, torrentContent))
       throw new AppError(
         'precondition_failed',
@@ -181,6 +179,8 @@ export function createBdmvService(ctx: AppContext): BdmvService {
         playlists: playlistViews(analysis),
         mainPlaylist: analysis.pick.main?.name ?? null,
         needsDecision: analysis.pick.ambiguous && settings.onAmbiguous === 'ask' && !resolvedTitle,
+        parseErrors: analysis.parseErrors,
+        warnings: analysis.warnings,
       };
     },
 

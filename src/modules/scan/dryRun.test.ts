@@ -106,7 +106,7 @@ beforeEach(() => {
     path: '/data/a/4.mkv',
     sizeBytes: GB,
     durationSec: 100,
-    status: 'failed',
+    status: 'blocked',
     planAction: 'blocked',
     failingCodecs: ['mpeg4'],
     videoCodec: 'mpeg4',

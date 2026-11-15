@@ -8,7 +8,19 @@
 export type Iso639_2 = string;
 export type IsoDateTime = string;
 
-export const MEDIA_FILE_STATUSES = ['pending', 'compatible', 'needs_work', 'processing', 'failed', 'ignored'] as const;
+/**
+ * blocked: the plan needs work that cannot be done automatically (ConversionPlan.action "blocked", e.g. a video codec
+ * outside the profile); never queued by "Process all needs-work" or the scan backlog.
+ */
+export const MEDIA_FILE_STATUSES = [
+  'pending',
+  'compatible',
+  'needs_work',
+  'blocked',
+  'processing',
+  'failed',
+  'ignored',
+] as const;
 export type MediaFileStatus = (typeof MEDIA_FILE_STATUSES)[number];
 
 export const MEDIA_FILE_KINDS = ['file', 'bdmv', 'iso'] as const;
@@ -217,7 +229,11 @@ export interface AudioEncodeSpec {
   codec: TargetAudioCodec;
   bitrateKbps: number;
   channels: number;
-  /** ffmpeg channel layout name of the output ("5.1", "stereo", "mono", "5.0"). */
+  /**
+   * Output layout: the source layout when channels are kept, else "5.1" / "stereo" / "mono" for the downmix target.
+   * ffmpeg's ac3/eac3 encoders label 6 channels "5.1(side)" and 5 channels "5.0(side)" in the written file, so never
+   * compare this string with an output probe literally.
+   */
   channelLayout: string;
   downmixed: boolean;
 }
@@ -241,6 +257,12 @@ export interface DroppedStream {
   kind: StreamKind;
   codec: string;
   language: Iso639_2 | null;
+  /**
+   * incompatible_replaced: Replace mode, the source track was encoded in place (its encoded copy is in streams with the
+   * same sourceIndex). compatible_duplicate: an incompatible track dropped because a compatible track in the same
+   * language with >= target channels exists. language_filter: keep-list. unsupported: data streams Matroska cannot hold
+   * (dropped only when the file is written anyway; never a reason to write).
+   */
   reason: 'incompatible_replaced' | 'compatible_duplicate' | 'language_filter' | 'unsupported';
 }
 
@@ -258,7 +280,12 @@ export interface ConversionPlan {
   reasons: string[];
   /** Codecs that failed the profile, used for dry-run grouping and library filters. */
   failingCodecs: string[];
-  /** Output streams in output order. */
+  /**
+   * Output streams in output order. In keep_both mode a converted source appears twice (encode first, copy after) and
+   * the default converted track leads the audio streams, so the output stream count is streams.length, not probe
+   * streams minus dropped. For "blocked", streams/dropped list what would be written if the block were lifted, or
+   * are empty when no output can be planned.
+   */
   streams: PlannedStream[];
   dropped: DroppedStream[];
   /** Notes recorded in history, e.g. "Atmos height channels dropped", "7.1 downmixed to 5.1". */
@@ -337,7 +364,8 @@ export interface VerificationCheck {
     | 'chapters'
     | 'languages'
     | 'free_space'
-    | 'output_exists';
+    | 'output_exists'
+    | 'output_readable';
   passed: boolean;
   detail: string;
 }
@@ -347,19 +375,21 @@ export interface VerificationResult {
   checks: VerificationCheck[];
 }
 
-export type HistoryEventType =
-  | 'queued'
-  | 'started'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-  | 'retried'
-  | 'skipped'
-  | 'recycled'
-  | 'restored'
-  | 'purged'
-  | 'imported'
-  | 'source_deleted';
+export const HISTORY_EVENT_TYPES = [
+  'queued',
+  'started',
+  'completed',
+  'failed',
+  'cancelled',
+  'retried',
+  'skipped',
+  'recycled',
+  'restored',
+  'purged',
+  'imported',
+  'source_deleted',
+] as const;
+export type HistoryEventType = (typeof HISTORY_EVENT_TYPES)[number];
 
 /** Structured payload of a history row. Writers (jobs, bdmv, integrations) and the web UI share these keys. */
 export interface HistoryData {
@@ -386,7 +416,19 @@ export interface HistoryEntry {
   createdAt: IsoDateTime;
 }
 
-export type QueuePauseReason = 'user' | 'window' | 'plex_streaming' | 'shutdown';
+/**
+ * user: POST /queue/pause (persisted as settings.processing.paused). dry_run: settings.processing.enabled is false.
+ * low_disk_space: a job found too little free space; the queue holds for 15 minutes or until settings change.
+ */
+export const QUEUE_PAUSE_REASONS = [
+  'user',
+  'dry_run',
+  'window',
+  'plex_streaming',
+  'low_disk_space',
+  'shutdown',
+] as const;
+export type QueuePauseReason = (typeof QUEUE_PAUSE_REASONS)[number];
 
 export interface QueueState {
   paused: boolean;
@@ -453,7 +495,9 @@ export interface PlexConnection {
   serverMachineId: string | null;
   serverUrl: string | null;
   enabled: boolean;
+  /** The only switch for Plex partial scans after a change (read by plex.refreshPath). */
   partialScan: boolean;
+  /** The only switch for the queue's Plex auto-pause (read by the jobs worker). */
   pauseWhileStreaming: boolean;
 }
 
@@ -483,6 +527,7 @@ export interface DownloadClientConnection {
   category: string | null;
 }
 
+/** savePath and contentPath are local container paths: qbittorrent path mappings are already applied. */
 export interface TorrentInfo {
   hash: string;
   name: string;
@@ -572,8 +617,12 @@ export interface BdmvJobPlan {
   /** Plan of the main title's audio, computed by rules.plan from a bluray: probe of its playlist. */
   audioPlan: ConversionPlan | null;
   dolbyVision: DolbyVisionMode;
+  /** Sum over the titles; a clip shared by two titles counts for each (every title is muxed into its own file). */
   estimatedOutputBytes: number;
-  /** Bytes extracted from an .iso before muxing (playlist clips), 0 for folders. Free space needed: extract + output. */
+  /**
+   * Bytes extracted from an .iso before muxing (playlist clips, summed over the titles like estimatedOutputBytes), 0 for
+   * folders. Free space needed: extract + output.
+   */
   extractBytes: number;
 }
 

@@ -142,6 +142,8 @@ export type CountForcedPgsCompositions = (sup: Uint8Array) => { compositions: nu
 export interface MkvmergeOutputTrack {
   /** PID of the playlist track; for a replacement, the PID of the source track it was encoded from. */
   pid: number;
+  /** ffprobe codec of the source stream; picks between mkvmerge tracks that share a PID (TrueHD + embedded AC-3 core). Null for side files. */
+  codec?: string | null;
   /** Side file (.mka written by ffmpeg) that replaces the playlist track; null = take the track from the playlist. */
   replacementPath: string | null;
   /** mkvmerge --sync for the side file in ms: round((audio startTimeSec - video startTimeSec) * 1000) from the bluray: probe. */
@@ -192,6 +194,12 @@ export interface IsoReader {
   extractForMux(isoPath: string, playlist: string, destDir: string, signal: AbortSignal): Promise<string>;
 }
 
+/**
+ * status needs_work + plan: checkPath enqueues the plan (processing on). status needs_work + plan null + decisionId: a
+ * main_title or movie_match decision is pending; checkPath returns "decision_required" and does not enqueue.
+ * status blocked + plan: the rules plan is "blocked" (reason "blocked: ..."); the plan is kept for the UI. status
+ * ignored: BDMV disabled globally or for the library.
+ */
 export interface BdmvEvaluation {
   status: MediaFileStatus;
   reason: string | null;
@@ -200,7 +208,10 @@ export interface BdmvEvaluation {
 }
 
 export interface BdmvService {
-  /** Is this path a disc root (folder containing BDMV/index.bdmv) or a Blu-ray .iso? */
+  /**
+   * Is this path a disc root (folder containing BDMV/index.bdmv) or an .iso whose 7z listing contains BDMV/index.bdmv?
+   * An .iso that 7z cannot list is still reported, so evaluate shows the 7z error.
+   */
   detect(path: string): Promise<{ kind: 'bdmv' | 'iso'; discRoot: string } | null>;
   analyze(mediaFileId: number): Promise<BdmvDiscInfo>;
   /**
@@ -208,6 +219,8 @@ export interface BdmvService {
    * Encryption check -> main title -> cleanDiscName + Radarr lookup -> bluray: probe + rules.plan -> decisions.
    * A disc that already has a completed bdmv job returns status "compatible", reason "converted to <output>", so scans and
    * profile edits never convert it twice. checkPath enqueues the returned plan (status needs_work) when processing is on.
+   * An output path inside the source disc folder fails the evaluation (the source must stay untouched and deleteSource
+   * would remove the output with it).
    */
   evaluate(mediaFileId: number): Promise<BdmvEvaluation>;
   /**
@@ -218,6 +231,10 @@ export interface BdmvService {
    * "<root>/Title (Year)/", setTempPath(null), delete the temp dir -> importing (arr.addMovie when radarrMovieId is null,
    * then arr.importMovieFolder) -> media.recordJobResult(disc row: status compatible, reason "converted to <output>",
    * path unchanged) -> notifier.fileChanged({ kind: 'created' }).
+   * Importing is best effort: when arr.addMovie / arr.importMovieFolder fails, the job still completes (the MKV is in
+   * place and verified), writes a "failed" history entry with data.error and calls arr.rescan({ kind: 'radarr', itemId })
+   * when the movie id is known; the outcome message carries the error. A blocked rules plan for an extra skips that
+   * extra (noted in the message); for an edition it fails the job. JobOutcome.plan is the main title's audio plan.
    */
   execute: JobExecutor;
   listDecisions(query: BdmvDecisionQuery): Promise<BdmvDecision[]>;
@@ -231,9 +248,11 @@ export interface BdmvService {
    */
   offerSourceDeletion(mediaFileId: number, torrent: TorrentInfo): Promise<BdmvDecision | null>;
   /**
-   * Only after a resolved delete_source decision with confirm: downloadClient.deleteTorrent(hash, true) when a torrent
-   * still owns the path, else removes the folder / .iso itself; writes a "source_deleted" history entry. The next scan
-   * removes the media_files row.
+   * Only after a resolved delete_source decision with confirm. Refuses unless the latest completed bdmv job has an
+   * output_path that is a non-empty file outside the source. downloadClient.deleteTorrent(hash, true) when a torrent
+   * still owns the path (only when its content path is the disc or inside it; refuses when the torrent holds more than
+   * the disc), else removes the folder / .iso itself; writes a "source_deleted" history entry. The next scan removes the
+   * media_files row.
    */
   deleteSource(mediaFileId: number): Promise<void>;
 }

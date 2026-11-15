@@ -6,8 +6,12 @@
  *   1. jobs row: step "replacing", temp_path = verified temp file (persisted BEFORE touching the original).
  *   2. recycleBin.recycleForReplace(original): hard link original -> bin path (same filesystem) + recycle_bin row,
  *      jobs.recycle_bin_entry_id set. Recycle bin disabled: no link, no row.
- *   3. rename(temp, original): atomically swaps the inode at the library path (uid/gid/mode copied first).
+ *   3. fsync(temp), uid/gid/mode copied first. Same path (mkv): rename(temp, original) atomically swaps the inode.
+ *      New path (mp4 -> mkv): link(temp, output) (fails with EEXIST instead of overwriting), then unlink(temp) and
+ *      unlink(original); without hard links: re-check that output does not exist, then rename. fsync(parent dir).
  *   4. jobs row: step "notifying", temp_path = null.
+ * Before ffmpeg starts, the executor lstat()s the temp path and unlinks a leftover file or symlink: the argv carries -y
+ * and ffmpeg's in-place guard only compares names, so a link to the input at that path would truncate the original.
  * If the filesystem refuses hard links (EPERM/ENOTSUP on some FUSE/SMB mounts), step 2 falls back to rename(original,
  * bin) and recover() below closes the short window where the library path is empty.
  */
@@ -54,7 +58,11 @@ export interface NewJob {
   mediaFileId: number;
   priority?: number;
   title?: string;
-  /** Precomputed plan (audio) or BDMV plan; the executor recomputes from a fresh probe before writing anything. */
+  /**
+   * Precomputed plan (audio) or BDMV plan (from bdmv.evaluate), stored on the job for the UI. The executors never
+   * trust it: the audio executor re-plans from a fresh probe, bdmv.execute re-analyzes the disc in step preparing. The
+   * scan backlog enqueues disc rows without a BdmvJobPlan for that reason.
+   */
   plan?: ConversionPlan | null;
   bdmvPlan?: BdmvJobPlan | null;
 }
@@ -64,7 +72,8 @@ export interface JobsService {
   enqueue(job: NewJob): Promise<JobSummary>;
   /**
    * mediaFileIds or filter (expanded through media.list in pages of 500; default status "needs_work").
-   * Rows not in needs_work are skipped unless force; disc rows (kind bdmv|iso) are enqueued with their evaluated plan.
+   * Rows not in needs_work are skipped unless force; disc rows (kind bdmv|iso) are re-evaluated with bdmv.evaluate and
+   * enqueued with that BdmvJobPlan (skipped when it has none, e.g. a pending decision).
    */
   enqueueMany(request: EnqueueRequest): Promise<EnqueueResponse>;
   list(query: JobQuery): Promise<Paginated<JobSummary>>;
@@ -96,7 +105,13 @@ export interface JobsService {
    *        finish the job as completed (verification already passed before "replacing").
    *      - temp file missing and original path exists -> the swap completed: finish the job as completed.
    *      - both missing -> restore from the bin row when there is one, else mark failed ("source missing").
-   *   2. any other step: delete jobs.temp_path (file or directory, only if its name contains TEMP_FILE_MARKER), re-queue
+   *      - temp file and a new output path (mp4 -> mkv) are the same inode -> the no-clobber link happened: unlink the
+   *        temp file and the old source, finish the job as completed.
+   *      - temp file exists, original missing, and an unrelated file sits at a new output path -> never overwrite it:
+   *        restore the original from the bin (delete the temp file, re-queue), else mark failed.
+   *   2. step "notifying" (audio) and the output path exists -> the swap completed: finish the job as completed
+   *      (fresh probe, media.recordJobResult, notifier.fileChanged, "completed" history).
+   *   3. any other step: delete jobs.temp_path (file or directory, only if its name contains TEMP_FILE_MARKER), re-queue
    *      with trigger "recovery".
    * Only after that, housekeeping-style sweeps may delete orphaned "*.wololo-tmp*" entries.
    */
@@ -125,7 +140,7 @@ export interface VerifyRequest {
   compareVideoHash: boolean;
   /** Video packet count of the output (ffprobe -count_packets); BDMV's substitute for the hash. Skipped when omitted. */
   expectedVideoPackets?: number;
-  /** Output audio stream indexes to decode fully (`-f null`). */
+  /** Absolute output stream indexes (ffprobe `index` of the output file) of audio streams to decode fully (`-f null`). */
   decodeAudioStreams: number[];
   /** Chapter count the output must have (source probe, or the playlist's chapter marks). Skipped when omitted. */
   expectedChapterCount?: number;
@@ -155,7 +170,10 @@ export interface JobRunContext {
 }
 
 export interface JobOutcome {
+  /** Stored as jobs.output_path when the job completes. */
   outputPath: string | null;
+  /** The plan the executor applied (recomputed from a fresh probe); HistoryData.retagged comes from it. */
+  plan?: ConversionPlan | null;
   after: MediaStream[] | null;
   lostFeatures: string[];
   verification: VerificationResult | null;

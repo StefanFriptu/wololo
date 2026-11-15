@@ -7,7 +7,6 @@
   import Icon from '#lib/components/Icon.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { Resource } from '#lib/resource.svelte.ts';
-  import { plexFlagWrites } from '#lib/settings/plexFlagWrites.ts';
   import type { ConnectionTestResult, PlexConnection, PlexConnectionUpdate, PlexPin } from '#lib/shared.ts';
   import { attempt } from '#lib/attempt.ts';
   import { toasts } from '#lib/toast.svelte.ts';
@@ -18,7 +17,6 @@
   const servers = new Resource((signal) => api('GET /api/v1/plex/servers', { signal }));
   const sections = new Resource((signal) => api('GET /api/v1/plex/sections', { signal }));
   const sessions = new Resource((signal) => api('GET /api/v1/plex/sessions', { signal }));
-  const settings = new Resource((signal) => api('GET /api/v1/settings', { signal }));
 
   let pin = $state<PinState | null>(null);
   let serverId = $state('');
@@ -37,7 +35,6 @@
   $effect(() => {
     untrack(() => {
       connection.load();
-      settings.load();
     });
   });
 
@@ -97,16 +94,8 @@
   }
 
   async function setFlag(flag: 'partialScan' | 'pauseWhileStreaming', value: boolean): Promise<void> {
-    const writes = plexFlagWrites(flag, value);
     busy = true;
-    const result = await attempt(
-      () => Promise.all([api('PUT /api/v1/plex', { body: writes.plex }), api('PUT /api/v1/settings', { body: writes.settings })]),
-      'Saved',
-    );
-    if (result) {
-      connection.set(result[0]);
-      settings.set(result[1]);
-    }
+    await update({ [flag]: value });
     busy = false;
   }
 
@@ -232,7 +221,7 @@
         <label class="check">
           <input
             type="checkbox"
-            checked={plex.partialScan && (settings.data?.notifications.plexPartialScan ?? true)}
+            checked={plex.partialScan}
             disabled={busy}
             onchange={(event) => setFlag('partialScan', event.currentTarget.checked)}
           />
@@ -241,7 +230,7 @@
         <label class="check">
           <input
             type="checkbox"
-            checked={plex.pauseWhileStreaming && (settings.data?.processing.pauseWhilePlexStreaming ?? true)}
+            checked={plex.pauseWhileStreaming}
             disabled={busy}
             onchange={(event) => setFlag('pauseWhileStreaming', event.currentTarget.checked)}
           />

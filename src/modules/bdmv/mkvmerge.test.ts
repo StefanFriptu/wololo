@@ -1,10 +1,9 @@
 import { expect, test } from 'bun:test';
-import type { MkvmergeIdentify, MplsPlaylist, MplsStream } from '../../contracts/bdmv.ts';
+import type { MkvmergeIdentify, MkvmergeOutputTrack, MplsPlaylist, MplsStream } from '../../contracts/bdmv.ts';
 import {
   buildMkvmergeArgs,
   buildOutputPaths,
   codecFamily,
-  type MkvmergeTrackRequest,
   mkvmergeSucceeded,
   parseMkvmergeIdentify,
   parseMkvmergeProgress,
@@ -93,7 +92,7 @@ const IDENTIFY: MkvmergeIdentify = parseMkvmergeIdentify({
   tracks: [...IDENTIFY_JSON.tracks, { id: 7, type: 'video', codec: 'HEVC/H.265/MPEG-H', properties: { number: 4117 } }],
 });
 
-const track = (pid: number, overrides: Partial<MkvmergeTrackRequest> = {}): MkvmergeTrackRequest => ({
+const track = (pid: number, overrides: Partial<MkvmergeOutputTrack> = {}): MkvmergeOutputTrack => ({
   pid,
   replacementPath: null,
   delayMs: 0,

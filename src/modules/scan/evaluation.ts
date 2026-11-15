@@ -1,5 +1,5 @@
 import type { CheckAction } from '../../contracts/probe-scan.ts';
-import type { ConversionPlan, MediaFileStatus, PlanAction, ProbeResult } from '../../shared/domain.ts';
+import type { ConversionPlan, MediaFileStatus, ProbeResult } from '../../shared/domain.ts';
 
 export interface ProbeSummary {
   videoCodec: string | null;
@@ -19,7 +19,6 @@ export function summarizeProbe(probe: ProbeResult): ProbeSummary {
   };
 }
 
-/** Blocked plans need work that cannot be done automatically: the row is "failed" so no job picks it up. */
 export function statusFromPlan(plan: ConversionPlan): { status: MediaFileStatus; reason: string | null } {
   const reasons = plan.reasons.join('; ');
   switch (plan.action) {
@@ -29,7 +28,7 @@ export function statusFromPlan(plan: ConversionPlan): { status: MediaFileStatus;
     case 'convert':
       return { status: 'needs_work', reason: reasons || null };
     case 'blocked':
-      return { status: 'failed', reason: `blocked: ${reasons || 'needs work that cannot be done automatically'}` };
+      return { status: 'blocked', reason: `blocked: ${reasons || 'needs work that cannot be done automatically'}` };
     default: {
       const unreachable: never = plan.action;
       throw new Error(`unknown plan action ${unreachable}`);
@@ -38,13 +37,14 @@ export function statusFromPlan(plan: ConversionPlan): { status: MediaFileStatus;
 }
 
 /** Action reported for a row that was evaluated without queueing a job. */
-export function checkActionFor(status: MediaFileStatus, planAction: PlanAction | null): CheckAction {
-  if (planAction === 'blocked' && status === 'failed') return 'blocked';
+export function checkActionFor(status: MediaFileStatus): CheckAction {
   switch (status) {
     case 'compatible':
       return 'compatible';
     case 'needs_work':
       return 'dry_run';
+    case 'blocked':
+      return 'blocked';
     case 'ignored':
       return 'ignored';
     case 'processing':

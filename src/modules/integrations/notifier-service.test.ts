@@ -100,16 +100,11 @@ test('notifier.fileChanged - an existing directory is refreshed itself', async (
   expect(refreshes).toEqual([folder]);
 });
 
-test('notifier.fileChanged - honours notification settings', async () => {
-  setup({ settings: { notifications: { rescanArr: false, plexPartialScan: false } } });
+test('notifier.fileChanged - rescanArr off skips the arr rescan, Plex still decides on its own flag', async () => {
+  setup({ settings: { notifications: { rescanArr: false } } });
   await t.ctx.services.notifier.fileChanged(event());
   expect(rescans).toEqual([]);
-  expect(refreshes).toEqual([]);
-  const skipped = t.ctx.logs
-    .entries({ module: 'notifier' })
-    .filter((entry) => entry.level === 'info')
-    .map((entry) => entry.message);
-  expect(skipped).toEqual(['Plex partial scan skipped: turned off in Settings > notifications']);
+  expect(refreshes).toHaveLength(1);
 });
 
 test('notifier.fileChanged - errors are logged, never thrown, and do not stop Plex', async () => {

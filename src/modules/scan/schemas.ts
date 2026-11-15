@@ -14,6 +14,7 @@ import {
   LIBRARY_MODES,
   MEDIA_FILE_KINDS,
   MEDIA_FILE_STATUSES,
+  type MediaFileKind,
   type MediaFileStatus,
   type TaskName,
 } from '../../shared/domain.ts';
@@ -43,38 +44,43 @@ export const FilesystemQuerySchema = z.object({
   includeFiles: queryBoolean.optional(),
 }) satisfies z.ZodType<FilesystemQuery, unknown>;
 
-const STATUS_SET: ReadonlySet<string> = new Set(MEDIA_FILE_STATUSES);
+function splitList(value: string): string[] {
+  return value.split(',').map((part) => part.trim());
+}
+
+function commaList(allowed: readonly string[]) {
+  const known: ReadonlySet<string> = new Set(allowed);
+  return z.string().refine((value) => splitList(value).every((part) => known.has(part)), {
+    message: `expected one or more of ${allowed.join(', ')}`,
+  });
+}
+
+function parseList<T extends string>(allowed: readonly T[], value: string | undefined): T[] {
+  if (!value) return [];
+  const known: ReadonlySet<string> = new Set(allowed);
+  return splitList(value).filter((part): part is T => known.has(part));
+}
 
 export const MediaQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(500).default(50),
   sortDir: z.enum(['asc', 'desc']).optional(),
   sortKey: z.enum(['path', 'size', 'status', 'updatedAt', 'duration']).optional(),
-  status: z
-    .string()
-    .refine(
-      (value) =>
-        value
-          .split(',')
-          .map((part) => part.trim())
-          .every((part) => STATUS_SET.has(part)),
-      { message: `expected one or more of ${MEDIA_FILE_STATUSES.join(', ')}` },
-    )
-    .optional(),
+  status: commaList(MEDIA_FILE_STATUSES).optional(),
   libraryId: id.optional(),
   profileId: id.optional(),
   codec: z.string().trim().min(1).optional(),
   failingCodec: z.string().trim().min(1).optional(),
-  kind: z.enum(MEDIA_FILE_KINDS).optional(),
+  kind: commaList(MEDIA_FILE_KINDS).optional(),
   search: z.string().trim().min(1).optional(),
 }) satisfies z.ZodType<MediaQuery, unknown>;
 
 export function parseStatusList(value: string | undefined): MediaFileStatus[] {
-  if (!value) return [];
-  return value
-    .split(',')
-    .map((part) => part.trim())
-    .filter((part): part is MediaFileStatus => STATUS_SET.has(part));
+  return parseList(MEDIA_FILE_STATUSES, value);
+}
+
+export function parseKindList(value: string | undefined): MediaFileKind[] {
+  return parseList(MEDIA_FILE_KINDS, value);
 }
 
 export const MediaStatsQuerySchema = z.object({ libraryId: id.optional() });

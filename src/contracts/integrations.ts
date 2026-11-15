@@ -100,7 +100,10 @@ export interface PlexService {
   /** GET {server}/library/sections (Accept: application/json). */
   sections(): Promise<PlexSection[]>;
   test(): Promise<ConnectionTestResult>;
-  /** GET {server}/library/sections/{key}/refresh?path=<plex path>; section found by matching Location paths. No-op when disabled. */
+  /**
+   * GET {server}/library/sections/{key}/refresh?path=<plex path>; section found by matching Location paths. No-op when
+   * the connection is disabled or PlexConnection.partialScan is off.
+   */
   refreshPath(localPath: string): Promise<void>;
   /** GET {server}/status/sessions; 0 when Plex is not configured or unreachable. */
   sessions(): Promise<PlexSessions>;
@@ -111,7 +114,10 @@ export interface DownloadClientService {
   save(input: DownloadClientInput): Promise<DownloadClientConnection>;
   remove(): Promise<void>;
   test(input: DownloadClientInput): Promise<ConnectionTestResult>;
-  /** qBittorrent Web API v2 /api/v2/torrents/info; matches content_path / save_path after path mapping. Null when not configured. */
+  /**
+   * qBittorrent Web API v2 /api/v2/torrents/info; matches content_path / save_path after path mapping. Null when not
+   * configured. Every TorrentInfo leaving this service carries local paths (qbittorrent mappings applied).
+   */
   findTorrentByPath(localPath: string): Promise<TorrentInfo | null>;
   /** /api/v2/torrents/delete?hashes=&deleteFiles=true */
   deleteTorrent(hash: string, deleteFiles: boolean): Promise<void>;
@@ -119,7 +125,8 @@ export interface DownloadClientService {
    * Scheduled task (seeding_check). For every torrent whose goal is met:
    * - its content was replaced by an audio job and removeWhenGoalMet -> deleteTorrent(hash, true);
    * - its content is a converted disc (completed bdmv job) and settings.bdmv.deleteSourceWhenSeeded ->
-   *   bdmv.offerSourceDeletion(mediaFileId, torrent) (the user confirms in the UI; nothing is deleted here).
+   *   bdmv.offerSourceDeletion(mediaFileId, torrent) with local paths (the user confirms in the UI; nothing is deleted
+   *   here).
    */
   checkSeedingGoals(): Promise<string>;
 }
@@ -150,7 +157,8 @@ export interface NotifierService {
   /**
    * replaced: arr.rescan(ref) (ref = event.arr, else arr.findByPath(localPath); still unresolved -> warning, no rescan),
    * then plex.refreshPath(folder). created (BDMV output, already imported by bdmv): plex.refreshPath only.
-   * Honours settings.notifications. Errors are logged, never thrown.
+   * Honours settings.notifications.rescanArr; plex.refreshPath honours PlexConnection.partialScan. Errors are logged,
+   * never thrown.
    */
   fileChanged(event: FileChangedEvent): Promise<void>;
 }

@@ -4,7 +4,7 @@ import { deviceProfiles, type JobRow, jobs, libraryProfiles, libraryRoots, media
 import type { MediaFileSummary, MediaQuery, MediaSortKey } from '../../shared/api-types.ts';
 import type { JobSummary, MediaFileStatus } from '../../shared/domain.ts';
 import { relativeToRoot } from './paths.ts';
-import { parseStatusList } from './schemas.ts';
+import { parseKindList, parseStatusList } from './schemas.ts';
 
 const SUMMARY_COLUMNS = {
   id: mediaFiles.id,
@@ -132,7 +132,8 @@ export function mediaConditions(db: Db, query: MediaQuery): SQL[] {
   if (query.profileId !== undefined) conditions.push(profileCondition(db, query.profileId));
   if (query.codec) conditions.push(codecCondition(query.codec));
   if (query.failingCodec) conditions.push(failingCodecCondition(query.failingCodec));
-  if (query.kind) conditions.push(eq(mediaFiles.kind, query.kind));
+  const kinds = parseKindList(query.kind);
+  if (kinds.length > 0) conditions.push(inArray(mediaFiles.kind, kinds));
   if (query.search) conditions.push(sql`instr(lower(${mediaFiles.path}), ${query.search.toLowerCase()}) > 0`);
   return conditions;
 }

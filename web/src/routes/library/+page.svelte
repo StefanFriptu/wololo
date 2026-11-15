@@ -23,7 +23,8 @@
   import { pageInRange } from '#lib/pageInRange.ts';
   import { href } from '#lib/paths.ts';
   import { Resource } from '#lib/resource.svelte.ts';
-  import { MEDIA_FILE_KINDS, MEDIA_FILE_STATUSES, type MediaSortKey } from '#lib/shared.ts';
+  import { MEDIA_FILE_STATUSES, type MediaSortKey } from '#lib/shared.ts';
+  import { MEDIA_KIND_FILTER_LABELS, type MediaKindFilter } from '#lib/library/mediaKindFilterLabels.ts';
   import { attempt } from '#lib/attempt.ts';
 
   const REFRESH_DEBOUNCE_MS = 1500;
@@ -129,6 +130,8 @@
     return value === '' ? undefined : Number(value);
   }
 
+  const KIND_FILTERS = Object.keys(MEDIA_KIND_FILTER_LABELS) as MediaKindFilter[];
+
   const hasFilters = $derived(
     [filters.status, filters.kind, filters.libraryId, filters.profileId, filters.codec, filters.failingCodec, filters.search].some(
       (value) => value !== undefined,
@@ -140,14 +143,13 @@
       filters,
       libraryName: libraries.data?.find((item) => item.id === filters.libraryId)?.name ?? null,
       profileName: profiles.data?.find((item) => item.id === filters.profileId)?.name ?? null,
-      kindLabels: MEDIA_KIND_LABELS,
       listedTotal: media.data?.total ?? null,
     }),
   );
 
   async function processNeedsWork(): Promise<void> {
     const scope = bulkScope;
-    if (!scope.ok || !confirm(scope.question)) return;
+    if (!confirm(scope.question)) return;
     await attempt(
       () => api('POST /api/v1/jobs', { body: { filter: scope.filter } }),
       (result) => `Queued ${result.jobs.length} job(s)${result.skipped.length ? `, skipped ${result.skipped.length}` : ''}`,
@@ -177,16 +179,9 @@
     {#if selected.size > 0}
       <button onclick={processSelected}><Icon name="play" size={16} /> Process {selected.size} selected</button>
     {/if}
-    <button
-      class="primary"
-      onclick={processNeedsWork}
-      disabled={!bulkScope.ok}
-      title={bulkScope.ok ? undefined : bulkScope.reason}
-      aria-describedby={bulkScope.ok ? undefined : 'bulk-hint'}
-    >
+    <button class="primary" onclick={processNeedsWork}>
       <Icon name="play" size={16} /> Process needs-work
     </button>
-    {#if !bulkScope.ok}<span id="bulk-hint" class="sr-only">{bulkScope.reason}</span>{/if}
   {/snippet}
 </PageHeader>
 
@@ -277,10 +272,10 @@
       <select
         value={filters.kind ?? ''}
         onchange={(event) =>
-          update({ kind: MEDIA_FILE_KINDS.find((kind) => kind === event.currentTarget.value) })}
+          update({ kind: KIND_FILTERS.find((kind) => kind === event.currentTarget.value) })}
       >
         <option value="">Any type</option>
-        {#each MEDIA_FILE_KINDS as kind (kind)}<option value={kind}>{MEDIA_KIND_LABELS[kind]}</option>{/each}
+        {#each KIND_FILTERS as kind (kind)}<option value={kind}>{MEDIA_KIND_FILTER_LABELS[kind]}</option>{/each}
       </select>
     </label>
     {#if hasFilters}

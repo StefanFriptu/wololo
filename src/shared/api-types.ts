@@ -45,7 +45,7 @@ import type { ScanStats } from './events.ts';
 import type { DeepPartial, GeneralConfig, Settings } from './settings.ts';
 
 export interface ApiErrorBody {
-  /** Stable machine code: "not_found", "validation", "conflict", "unauthorized", "not_implemented", "internal". */
+  /** Stable machine code: "not_found", "validation", "unprocessable", "conflict", "unauthorized", "precondition_failed", "upstream", "internal". */
   error: string;
   message: string;
   details?: unknown;
@@ -155,6 +155,8 @@ export type SettingsUpdate = DeepPartial<Settings>;
 
 export interface GeneralConfigView extends GeneralConfig {
   restartRequired: boolean;
+  /** Fields pinned by WOLOLO__* environment variables; PUT answers 409 for them. */
+  envOverrides: (keyof GeneralConfig)[];
 }
 
 export type GeneralConfigUpdate = Partial<Omit<GeneralConfig, 'apiKey'>>;
@@ -207,7 +209,8 @@ export interface MediaQuery extends PageQuery {
   codec?: string;
   /** Matches failing codecs only. */
   failingCodec?: string;
-  kind?: MediaFileKind;
+  /** One kind or a comma separated list. */
+  kind?: string;
   /** Case-insensitive substring of the path. */
   search?: string;
 }
@@ -381,13 +384,17 @@ export interface EnqueueRequest {
   force?: boolean;
 }
 
+/** Same meaning as the MediaQuery fields of the same name, so a bulk action queues exactly what the list shows. */
 export interface EnqueueFilter {
   libraryId?: number;
   /** Default "needs_work". */
   status?: MediaFileStatus;
   failingCodec?: string;
-  kind?: MediaFileKind;
+  /** One kind or a comma separated list. */
+  kind?: string;
   profileId?: number;
+  search?: string;
+  codec?: string;
 }
 
 export interface EnqueueResponse {
@@ -417,7 +424,10 @@ export interface ArrInstanceInput {
   kind: ArrKind;
   name: string;
   url: string;
-  /** Send "********" to keep the stored key on update/test. */
+  /**
+   * Send "********" to keep the stored key on update/test. The mask resolves only when url is the stored URL (scheme,
+   * host, port and path; trailing slashes ignored); with another URL it is 422 on create/update and ok: false on test.
+   */
   apiKey: string;
   enabled?: boolean;
 }
@@ -429,8 +439,10 @@ export interface ArrTestRequest extends ArrInstanceInput {
 
 export interface ArrRootFolder {
   id: number;
+  /** Path as Radarr/Sonarr reports it. */
   path: string;
-  localPath: string | null;
+  /** Mapped local path (unchanged when no mapping matches); accessible says whether it exists in the container. */
+  localPath: string;
   accessible: boolean;
   freeBytes: number | null;
 }
@@ -514,14 +526,30 @@ export interface SonarrWebhookPayload {
 
 export interface WebhookResponse {
   accepted: boolean;
-  action: 'test' | 'ignored' | 'compatible' | 'queued' | 'dry_run' | 'unknown_path' | 'error';
+  action:
+    | 'test'
+    | 'ignored'
+    | 'compatible'
+    | 'queued'
+    | 'dry_run'
+    | 'unknown_path'
+    | 'blocked'
+    | 'decision_required'
+    | 'error';
   mediaFileIds: number[];
   message: string;
 }
 
+/**
+ * serverMachineId selects a server from plex.tv resources; serverUrl may pick one of the addresses plex.tv lists for it.
+ * serverUrl alone keeps the selected server's token only when plex.tv lists that host for it; any other URL uses
+ * serverToken when given, else no token (stored tokens never go to a URL the caller chose).
+ */
 export interface PlexConnectionUpdate {
   serverMachineId?: string;
   serverUrl?: string;
+  /** Write-only token for a manual serverUrl that plex.tv does not list (e.g. http://plex:32400). */
+  serverToken?: string;
   enabled?: boolean;
   partialScan?: boolean;
   pauseWhileStreaming?: boolean;
@@ -551,6 +579,10 @@ export interface PlexSessions {
   }[];
 }
 
+/**
+ * password: send "********" (the masked value from GET) to keep the stored password on save and test. Like
+ * ArrInstanceInput.apiKey, the mask resolves only for the stored URL.
+ */
 export type DownloadClientInput = DownloadClientConnection;
 
 export interface PathMappingInput {
@@ -581,6 +613,10 @@ export interface BdmvDiscInfo {
   playlists: BdmvPlaylistView[];
   mainPlaylist: string | null;
   needsDecision: boolean;
+  /** "<file>: <error>" for every MPLS that could not be parsed; the main title may be among them. */
+  parseErrors: string[];
+  /** Non-fatal problems, e.g. a CLPI that could not be parsed for the language fallback. */
+  warnings: string[];
 }
 
 // ---------- route map ----------

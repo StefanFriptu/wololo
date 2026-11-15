@@ -80,6 +80,7 @@ export function createJobLifecycle(ctx: AppContext, options: { log: Logger; onCh
         error: null,
         tempPath: null,
         outputPath: outcome.outputPath,
+        plan: outcome.plan ?? row.plan,
         afterStreams: outcome.after,
         lostFeatures: outcome.lostFeatures,
         verification: outcome.verification ?? row.verification,
@@ -99,7 +100,7 @@ export function createJobLifecycle(ctx: AppContext, options: { log: Logger; onCh
           bytesAfter: outcome.bytesAfter ?? undefined,
           outputPath: outcome.outputPath ?? undefined,
           recycleBinEntryId: updated.recycleBinEntryId ?? undefined,
-          retagged: retaggedStreams(updated.plan ?? updated.bdmvPlan?.audioPlan ?? null),
+          retagged: retaggedStreams(updated.plan),
         }),
       });
       events.emit('job.finished', { job: toJobSummary(updated), state: 'completed' });

@@ -10,4 +10,5 @@ export const VERIFICATION_LABELS: Readonly<Record<VerificationCheck['name'], str
   languages: 'Languages',
   free_space: 'Free space',
   output_exists: 'Output exists',
+  output_readable: 'Output readable',
 };

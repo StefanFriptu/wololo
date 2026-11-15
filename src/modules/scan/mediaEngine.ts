@@ -343,8 +343,7 @@ export function createMediaEngine(ctx: AppContext) {
     const saved = persist(row, evaluation, keepStatus);
     if (evaluation.status === 'failed' && evaluation.planAction === null)
       log.warn('file could not be evaluated', { path, reason: evaluation.reason });
-    if (keepStatus)
-      return { probed, result: outcome(checkActionFor(saved.status, null), saved, `file is ${saved.status}`) };
+    if (keepStatus) return { probed, result: outcome(checkActionFor(saved.status), saved, `file is ${saved.status}`) };
     if (evaluation.decisionId != null)
       return { probed, result: outcome('decision_required', saved, messageFor('decision_required', evaluation)) };
 
@@ -358,7 +357,7 @@ export function createMediaEngine(ctx: AppContext) {
         return { probed, result: outcome('failed', saved, `could not queue a job: ${errorMessage(error)}`) };
       }
     }
-    const action = checkActionFor(saved.status, saved.planAction);
+    const action = checkActionFor(saved.status);
     return { probed, result: outcome(action, saved, messageFor(action, evaluation)) };
   };
 

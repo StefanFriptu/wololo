@@ -71,19 +71,7 @@ export function codecFamily(codec: string): string {
   return CODEC_FAMILIES.find(([pattern]) => pattern.test(name))?.[1] ?? name.toLowerCase();
 }
 
-/**
- * MkvmergeOutputTrack plus the source codec. mkvmerge splits a TrueHD PID into a TrueHD track and its embedded AC-3
- * core, both with the same PID; the codec picks the right one.
- */
-export interface MkvmergeTrackRequest extends MkvmergeOutputTrack {
-  codec?: string | null;
-}
-
-export interface MkvmergeArgsInput extends Omit<MkvmergeInput, 'tracks'> {
-  tracks: readonly MkvmergeTrackRequest[];
-}
-
-function resolvePlaylistTrack(identify: MkvmergeIdentify, request: MkvmergeTrackRequest): MkvmergeTrack {
+function resolvePlaylistTrack(identify: MkvmergeIdentify, request: MkvmergeOutputTrack): MkvmergeTrack {
   const samePid = identify.tracks.filter((track) => track.pid === request.pid);
   const family = request.codec ? codecFamily(request.codec) : null;
   const match = (family && samePid.find((track) => codecFamily(track.codec) === family)) || samePid[0];
@@ -104,8 +92,7 @@ function selection(option: string, none: string, ids: readonly number[]): string
   return ids.length > 0 ? [option, ids.join(',')] : [none];
 }
 
-/** Implements BuildMkvmergeArgs; also accepts MkvmergeTrackRequest.codec to tell TrueHD from its AC-3 core. */
-export function buildMkvmergeArgs(input: MkvmergeArgsInput): string[] {
+export function buildMkvmergeArgs(input: MkvmergeInput): string[] {
   const secondaryPids = new Set(
     input.playlist.streams.filter((stream) => stream.secondaryVideo).map((stream) => stream.pid),
   );

@@ -1,7 +1,7 @@
 import { link, mkdir, readFile, rename, rm, stat, unlink } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import type { AppContext } from '../../app/context.ts';
-import type { MplsPlaylist } from '../../contracts/bdmv.ts';
+import type { MkvmergeOutputTrack, MplsPlaylist } from '../../contracts/bdmv.ts';
 import type { JobExecutor, JobOutcome, JobRunContext } from '../../contracts/jobs.ts';
 import { TEMP_FILE_MARKER } from '../../contracts/jobs.ts';
 import { AppError, errorMessage } from '../../core/errors.ts';
@@ -18,13 +18,7 @@ import type {
   VerificationResult,
 } from '../../shared/domain.ts';
 import { createIsoReader } from './iso.ts';
-import {
-  buildMkvmergeArgs,
-  type MkvmergeTrackRequest,
-  mkvmergeSucceeded,
-  parseMkvmergeIdentify,
-  parseMkvmergeProgress,
-} from './mkvmerge.ts';
+import { buildMkvmergeArgs, mkvmergeSucceeded, parseMkvmergeIdentify, parseMkvmergeProgress } from './mkvmerge.ts';
 import { type DiscPlanner, loadDiscRow, withPlaylistLanguages } from './planner.ts';
 import { countForcedPgsCompositions, playlistNumber } from './titles.ts';
 
@@ -99,7 +93,7 @@ export function sideFilePlan(plan: ConversionPlan, stream: PlannedStream): Conve
   return { ...plan, streams: [{ ...stream, default: false }], dropped: [] };
 }
 
-export interface OutputTrack extends MkvmergeTrackRequest {
+export interface OutputTrack extends MkvmergeOutputTrack {
   kind: 'video' | 'audio' | 'subtitle';
 }
 
@@ -429,6 +423,7 @@ export function createBdmvExecutor(
     run.setStep('done', reason);
     return {
       outputPath: main.title.outputPath,
+      plan: main.plan,
       after,
       lostFeatures,
       verification: main.verification,

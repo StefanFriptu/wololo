@@ -1,4 +1,4 @@
-import { existsSync, statSync, unlinkSync } from 'node:fs';
+import { existsSync, rmSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { Services } from '../../app/context.ts';
 import type { JobExecutor, JobOutcome, JobRunContext } from '../../contracts/jobs.ts';
@@ -16,7 +16,7 @@ export interface AudioExecutorDeps {
   recycleBinEnabled: () => boolean;
   /** Fails when the recycle bin for this path cannot be created or sits on another filesystem. */
   checkRecycleBin: (sourcePath: string) => Promise<void>;
-  /** Stores the plan and source streams the executor actually used (job detail, history "retagged"). */
+  /** Stores the plan and source streams as soon as they are known, so a running or failed job shows them. */
   recordPlan: (jobId: number, plan: ConversionPlan, before: MediaStream[]) => void;
   log: Logger;
   fs?: ReplaceFs;
@@ -147,6 +147,7 @@ export function createAudioExecutor(deps: AudioExecutorDeps): JobExecutor {
         outputPath: null,
         after: null,
         lostFeatures: [],
+        plan,
         verification: null,
         bytesAfter: null,
         recycleBinEntryId: null,
@@ -164,7 +165,7 @@ export function createAudioExecutor(deps: AudioExecutorDeps): JobExecutor {
     if (deps.recycleBinEnabled()) await deps.checkRecycleBin(sourcePath);
 
     await ctx.setTempPath(tempPath);
-    if (existsSync(tempPath)) unlinkSync(tempPath);
+    rmSync(tempPath, { force: true });
     ctx.setStep(plan.action === 'convert' ? 'encoding' : 'muxing', describePlan(plan, probe));
     const args = services.ffmpeg.buildAudioConversionArgs({ inputPath: sourcePath, outputPath: tempPath, probe, plan });
     await runFfmpeg(ctx, deps, args, probe);
@@ -210,6 +211,7 @@ export function createAudioExecutor(deps: AudioExecutorDeps): JobExecutor {
     const { after } = await afterReplace(ctx, deps, media, outputPath);
     return {
       outputPath,
+      plan,
       after: after?.streams ?? null,
       lostFeatures: plan.lostFeatures,
       verification,

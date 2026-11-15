@@ -44,13 +44,8 @@ export function createNotifierService(ctx: AppContext): NotifierService {
 
   return {
     fileChanged: async (event) => {
-      const notifications = ctx.settings.section('notifications');
-      if (event.kind === 'replaced' && notifications.rescanArr) await rescanArr(event);
-      if (notifications.plexPartialScan) {
-        await refreshPlex(event);
-        return;
-      }
-      log.info('Plex partial scan skipped: turned off in Settings > notifications', { path: event.localPath });
+      if (event.kind === 'replaced' && ctx.settings.section('notifications').rescanArr) await rescanArr(event);
+      await refreshPlex(event);
     },
   };
 }

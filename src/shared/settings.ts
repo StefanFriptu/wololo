@@ -30,6 +30,8 @@ export interface Settings {
   processing: {
     /** false = dry-run mode: probe and report only, never write a media file. Default false until the owner opts in. */
     enabled: boolean;
+    /** The user's queue pause (POST /api/v1/queue/pause|resume); survives restarts. Default false. */
+    paused: boolean;
     /** Jobs that may run at the same time. Default 1. */
     concurrency: number;
     /** nice level for child processes (0-19). Default 10. */
@@ -37,8 +39,6 @@ export interface Settings {
     /** ionice class for child processes. Default "idle". */
     ioniceClass: 'idle' | 'best-effort';
     window: { enabled: boolean; start: string; end: string };
-    /** Pause new jobs while Plex has active playback sessions. */
-    pauseWhilePlexStreaming: boolean;
     /** Multiple of real time used for dry-run time estimates (Pi 4 baseline 7.7). */
     estimatedSpeedFactor: number;
     /** Extra free space required on top of the estimated output size, in percent. Default 5. */
@@ -48,7 +48,10 @@ export interface Settings {
   media: {
     /** Lower-case extensions (with dot) the scanner considers. */
     extensions: string[];
-    /** Glob patterns relative to a root that the scanner skips (e.g. "**\/Sample/**"). */
+    /**
+     * Glob patterns relative to a root that the scanner skips (e.g. "**\/Sample/**"). Dot-prefixed names (the default
+     * recycle bin) and Wololo temp files (TEMP_FILE_MARKER) are always skipped, whatever this list says.
+     */
     ignorePatterns: string[];
     /** Scan new or changed files right after a webhook import. */
     checkOnImport: boolean;
@@ -56,7 +59,7 @@ export interface Settings {
   recycleBin: {
     enabled: boolean;
     retentionDays: number;
-    /** null = "<root>/.wololo-recycle" on the same filesystem as the original. */
+    /** Absolute path; null = "<root>/.wololo-recycle" on the same filesystem as the original. */
     path: string | null;
   };
   bdmv: {
@@ -74,9 +77,9 @@ export interface Settings {
     /** Radarr quality profile for movies BDMV adds to Radarr; null = the instance's first profile. */
     qualityProfileId: number | null;
   };
+  /** Plex partial scans are switched on the Plex connection (PlexConnection.partialScan). */
   notifications: {
     rescanArr: boolean;
-    plexPartialScan: boolean;
   };
 }
 
@@ -91,11 +94,11 @@ export type DeepPartial<T> = T extends readonly (infer _U)[]
 export const DEFAULT_SETTINGS: Settings = {
   processing: {
     enabled: false,
+    paused: false,
     concurrency: 1,
     niceLevel: 10,
     ioniceClass: 'idle',
     window: { enabled: false, start: '01:00', end: '08:00' },
-    pauseWhilePlexStreaming: false,
     estimatedSpeedFactor: 7.7,
     freeSpaceMarginPercent: 5,
     maxAttempts: 3,
@@ -116,5 +119,5 @@ export const DEFAULT_SETTINGS: Settings = {
     rootFolderPath: null,
     qualityProfileId: null,
   },
-  notifications: { rescanArr: true, plexPartialScan: true },
+  notifications: { rescanArr: true },
 };

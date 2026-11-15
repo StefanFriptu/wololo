@@ -199,6 +199,19 @@ test('plex.update - a manual URL never receives the account token', async () => 
   expect(server.requests.at(-1)?.headers.get('x-plex-token')).toBeNull();
 });
 
+test('plex.update - a manual URL uses the token sent with it, never the stored one', async () => {
+  await connectServer();
+  const manual = startFakeUpstream({ 'GET /library/sections': () => ({ MediaContainer: { Directory: [] } }) });
+  try {
+    await plex.update({ serverUrl: manual.url, serverToken: 'manual-token' });
+    expect(JSON.stringify(await plex.connection())).not.toContain('manual-token');
+    await plex.sections();
+    expect(manual.requests.at(-1)?.headers.get('x-plex-token')).toBe('manual-token');
+  } finally {
+    manual.stop();
+  }
+});
+
 test('plex.update - switching the selected server to an unlisted URL drops its token', async () => {
   await connectServer();
   const evil = startFakeUpstream({ 'GET /': () => ({ MediaContainer: { friendlyName: 'Evil' } }) });

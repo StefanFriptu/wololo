@@ -140,10 +140,14 @@ export function createPlexService(ctx: AppContext, deps: PlexDeps = {}): PlexSer
 
   /**
    * A URL without serverMachineId keeps the selected server's token only when plex.tv lists that URL's host for it.
-   * Any other URL gets no token (it works when Plex allows this network without auth), so the stored tokens never
-   * reach a server the caller picked.
+   * Any other URL gets the caller's own serverToken, else no token (it works when Plex allows this network without
+   * auth), so the stored tokens never reach a server the caller picked.
    */
-  const manualServer = async (current: PlexConnectionRow, serverUrl: string): Promise<PlexRowPatch> => {
+  const manualServer = async (
+    current: PlexConnectionRow,
+    serverUrl: string,
+    serverToken: string | undefined,
+  ): Promise<PlexRowPatch> => {
     if (current.serverMachineId && current.accountToken) {
       const server = await findServer(current, current.serverMachineId).catch((error: unknown) => {
         log.warn('could not verify the Plex URL with plex.tv', { error: errorMessage(error) });
@@ -151,8 +155,9 @@ export function createPlexService(ctx: AppContext, deps: PlexDeps = {}): PlexSer
       });
       if (server && isPublishedConnection(serverUrl, server.connections ?? [])) return { serverUrl };
     }
-    log.info('Plex URL is not listed by plex.tv for the selected server; it is used without a token', { serverUrl });
-    return { serverUrl, serverToken: null, serverMachineId: null, serverName: null };
+    if (!serverToken)
+      log.info('Plex URL is not listed by plex.tv for the selected server; it is used without a token', { serverUrl });
+    return { serverUrl, serverToken: serverToken ?? null, serverMachineId: null, serverName: null };
   };
 
   return {
@@ -163,7 +168,7 @@ export function createPlexService(ctx: AppContext, deps: PlexDeps = {}): PlexSer
       if (patch.serverMachineId) {
         Object.assign(changes, await selectServer(current, patch.serverMachineId, patch.serverUrl));
       } else if (patch.serverUrl !== undefined) {
-        Object.assign(changes, await manualServer(current, patch.serverUrl));
+        Object.assign(changes, await manualServer(current, patch.serverUrl, patch.serverToken));
       }
       if (patch.enabled !== undefined) changes.enabled = patch.enabled;
       if (patch.partialScan !== undefined) changes.partialScan = patch.partialScan;

@@ -8,7 +8,7 @@ import type { BdmvService } from '../../contracts/bdmv.ts';
 import type { PlexService } from '../../contracts/integrations.ts';
 import type { JobExecutor, JobOutcome } from '../../contracts/jobs.ts';
 import { AppError, type ErrorCode } from '../../core/errors.ts';
-import type { BdmvJobPlan, MediaFileStatus, QueueState } from '../../shared/domain.ts';
+import type { BdmvJobPlan, ConversionPlan, MediaFileStatus, QueueState } from '../../shared/domain.ts';
 import type { DeepPartial, Settings } from '../../shared/settings.ts';
 import { createJobsService } from './index.ts';
 import { getJobRow, updateJobRow } from './jobQueries.ts';
@@ -307,26 +307,8 @@ test('worker - outside the processing window nothing starts', async () => {
   await s.gate.waitStarted(1);
 });
 
-test('worker - pauses while Plex is streaming and resumes when playback stops', async () => {
-  let active = 1;
-  const plex = stubService<PlexService>('plex', {
-    sessions: async () => ({ active, sessions: [] }),
-  });
-  const s = setup({ settings: { processing: { pauseWhilePlexStreaming: true } }, plex });
-  t = s.t;
-  await enqueueDisc(s, s.addFile());
-
-  await t.ctx.services.jobs.start();
-
-  expect(s.gate.started).toEqual([]);
-  expect(t.ctx.services.jobs.state().pauseReasons).toEqual(['plex_streaming']);
-  active = 0;
-  t.ctx.settings.update({ processing: { pauseWhilePlexStreaming: true, freeSpaceMarginPercent: 6 } });
-  await s.gate.waitStarted(1);
-});
-
-test('worker - the Plex connection toggle also enables the streaming pause', async () => {
-  const plex = stubService<PlexService>('plex', {
+function streamingPlex(sessions: () => number): PlexService {
+  return stubService<PlexService>('plex', {
     connection: async () => ({
       signedIn: true,
       username: 'u',
@@ -337,13 +319,45 @@ test('worker - the Plex connection toggle also enables the streaming pause', asy
       partialScan: true,
       pauseWhileStreaming: true,
     }),
+    sessions: async () => ({ active: sessions(), sessions: [] }),
+  });
+}
+
+test('worker - pauses while Plex is streaming and resumes when playback stops', async () => {
+  let active = 1;
+  const s = setup({ plex: streamingPlex(() => active) });
+  t = s.t;
+  await enqueueDisc(s, s.addFile());
+
+  await t.ctx.services.jobs.start();
+
+  expect(s.gate.started).toEqual([]);
+  expect(t.ctx.services.jobs.state().pauseReasons).toEqual(['plex_streaming']);
+  active = 0;
+  t.ctx.settings.update({ processing: { freeSpaceMarginPercent: 6 } });
+  await s.gate.waitStarted(1);
+});
+
+test('worker - streaming does not pause the queue while the Plex connection toggle is off', async () => {
+  const plex = stubService<PlexService>('plex', {
+    connection: async () => ({
+      signedIn: true,
+      username: 'u',
+      serverName: 's',
+      serverMachineId: 'm',
+      serverUrl: 'http://plex',
+      enabled: true,
+      partialScan: true,
+      pauseWhileStreaming: false,
+    }),
     sessions: async () => ({ active: 2, sessions: [] }),
   });
   const s = setup({ plex });
   t = s.t;
   await enqueueDisc(s, s.addFile());
   await t.ctx.services.jobs.start();
-  expect(t.ctx.services.jobs.state().pauseReasons).toEqual(['plex_streaming']);
+  await s.gate.waitStarted(1);
+  expect(t.ctx.services.jobs.state().pauseReasons).toEqual([]);
 });
 
 test('worker - a running job is paused and re-queued when the processing window closes', async () => {
@@ -372,8 +386,7 @@ test('worker - a running job is paused and re-queued when the processing window 
 
 test('worker - a running job is paused when Plex playback starts and resumes after it stops', async () => {
   let active = 0;
-  const plex = stubService<PlexService>('plex', { sessions: async () => ({ active, sessions: [] }) });
-  const s = setup({ settings: { processing: { pauseWhilePlexStreaming: true } }, plex });
+  const s = setup({ plex: streamingPlex(() => active) });
   t = s.t;
   const job = await enqueueDisc(s, s.addFile());
   await t.ctx.services.jobs.start();
@@ -421,28 +434,22 @@ test('worker - a free-space shortage re-queues the job and holds the queue inste
   expect(runs).toBe(2);
 });
 
-test('worker - a completed bdmv job records retagged streams from its audio plan', async () => {
+test('worker - a completed bdmv job records retagged streams from the plan its executor applied', async () => {
   const s = setup();
   t = s.t;
-  const bdmvPlan = {
-    sourceKind: 'bdmv',
-    audioPlan: { streams: [{ kind: 'video' }, { kind: 'audio', language: 'spa', retagged: true }] },
-  } as unknown as BdmvJobPlan;
-  const job = await t.ctx.services.jobs.enqueue({
-    type: 'bdmv',
-    trigger: 'manual',
-    mediaFileId: s.addFile(),
-    bdmvPlan,
-  });
-  await t.ctx.services.jobs.start();
-  await s.gate.waitStarted(1);
+  const applied = {
+    streams: [{ kind: 'video' }, { kind: 'audio', language: 'spa', retagged: true }],
+  } as ConversionPlan;
+  t.ctx.services.bdmv.execute = async () => ({ ...OUTCOME, plan: applied });
+  const job = await enqueueDisc(s, s.addFile());
   const finished = waitForEvent(t.ctx.events, 'job.finished');
 
-  s.gate.release(job.id);
+  await t.ctx.services.jobs.start();
 
   expect((await finished).state).toBe('completed');
   const history = await t.ctx.services.jobs.history({ jobId: job.id, event: 'completed' });
   expect(history.items[0]?.data?.retagged).toEqual(['audio 1 -> spa']);
+  expect((await t.ctx.services.jobs.get(job.id)).plan).toEqual(applied);
 });
 
 test('worker - an executor error fails the job and marks the media file failed', async () => {

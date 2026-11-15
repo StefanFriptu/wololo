@@ -45,20 +45,19 @@ test.each([
   ['convert', ['dts (eng, 5.1) not decoded by profile'], 'needs_work', 'dts (eng, 5.1) not decoded by profile'],
   ['remux', ['a', 'b'], 'needs_work', 'a; b'],
   ['remux', [], 'needs_work', null],
-  ['blocked', ['video vc1 not supported'], 'failed', 'blocked: video vc1 not supported'],
+  ['blocked', ['video vc1 not supported'], 'blocked', 'blocked: video vc1 not supported'],
 ] as const)('statusFromPlan - %s %j -> %s', (action, reasons, status, reason) => {
   expect(statusFromPlan(plan(action, [...reasons]))).toEqual({ status, reason });
 });
 
 test.each([
-  ['compatible', 'skip', 'compatible'],
-  ['needs_work', 'convert', 'dry_run'],
-  ['failed', 'blocked', 'blocked'],
-  ['failed', null, 'failed'],
-  ['ignored', 'convert', 'ignored'],
-  ['ignored', 'blocked', 'ignored'],
-  ['processing', 'convert', 'queued'],
-  ['pending', null, 'failed'],
-] as const)('checkActionFor - %s / %s -> %s', (status, planAction, expected) => {
-  expect(checkActionFor(status as MediaFileStatus, planAction)).toBe(expected);
+  ['compatible', 'compatible'],
+  ['needs_work', 'dry_run'],
+  ['blocked', 'blocked'],
+  ['failed', 'failed'],
+  ['ignored', 'ignored'],
+  ['processing', 'queued'],
+  ['pending', 'failed'],
+] as const)('checkActionFor - %s -> %s', (status, expected) => {
+  expect(checkActionFor(status as MediaFileStatus)).toBe(expected);
 });

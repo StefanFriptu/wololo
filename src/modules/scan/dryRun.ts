@@ -1,4 +1,4 @@
-import { and, asc, count, eq, gt, isNotNull, ne, or, type SQL, sql } from 'drizzle-orm';
+import { and, asc, count, eq, gt, inArray, isNotNull, ne, type SQL, sql } from 'drizzle-orm';
 import type { AppContext } from '../../app/context.ts';
 import type { DryRunService } from '../../contracts/probe-scan.ts';
 import { errorMessage, notFound } from '../../core/errors.ts';
@@ -32,15 +32,15 @@ export function createDryRunService(ctx: AppContext): DryRunService {
 
   const totalsFor = (scope: SQL | undefined): Totals => {
     const rows = ctx.db
-      .select({ status: mediaFiles.status, planAction: mediaFiles.planAction, count: count() })
+      .select({ status: mediaFiles.status, count: count() })
       .from(mediaFiles)
       .where(scope)
-      .groupBy(mediaFiles.status, mediaFiles.planAction)
+      .groupBy(mediaFiles.status)
       .all();
     const totals: Totals = { files: 0, compatible: 0, needsWork: 0, blocked: 0, failed: 0, pending: 0, ignored: 0 };
     for (const row of rows) {
       totals.files += row.count;
-      if (row.status === 'failed' && row.planAction === 'blocked') totals.blocked += row.count;
+      if (row.status === 'blocked') totals.blocked += row.count;
       else if (row.status === 'failed') totals.failed += row.count;
       else if (row.status === 'compatible') totals.compatible += row.count;
       else if (row.status === 'needs_work') totals.needsWork += row.count;
@@ -51,10 +51,7 @@ export function createDryRunService(ctx: AppContext): DryRunService {
   };
 
   const workRows = function* (scope: SQL | undefined) {
-    const isWork = or(
-      eq(mediaFiles.status, 'needs_work'),
-      and(eq(mediaFiles.status, 'failed'), eq(mediaFiles.planAction, 'blocked')),
-    );
+    const isWork = inArray(mediaFiles.status, ['needs_work', 'blocked']);
     let afterId = 0;
     while (true) {
       const page = ctx.db

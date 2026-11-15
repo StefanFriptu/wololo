@@ -1,3 +1,4 @@
+import { isAbsolute } from 'node:path';
 import { z } from 'zod';
 import type { Db } from '../db/client.ts';
 import { settings as settingsTable } from '../db/schema.ts';
@@ -10,11 +11,11 @@ const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'expected HH:MM');
 export const settingsSchema = z.object({
   processing: z.object({
     enabled: z.boolean(),
+    paused: z.boolean(),
     concurrency: z.number().int().min(1).max(8),
     niceLevel: z.number().int().min(0).max(19),
     ioniceClass: z.enum(['idle', 'best-effort']),
     window: z.object({ enabled: z.boolean(), start: hhmm, end: hhmm }),
-    pauseWhilePlexStreaming: z.boolean(),
     estimatedSpeedFactor: z.number().positive().max(1000),
     freeSpaceMarginPercent: z.number().min(0).max(100),
     maxAttempts: z.number().int().min(1).max(10),
@@ -27,7 +28,7 @@ export const settingsSchema = z.object({
   recycleBin: z.object({
     enabled: z.boolean(),
     retentionDays: z.number().int().min(0).max(365),
-    path: z.string().min(1).nullable(),
+    path: z.string().min(1).refine(isAbsolute, 'must be an absolute path').nullable(),
   }),
   bdmv: z.object({
     enabled: z.boolean(),
@@ -44,7 +45,6 @@ export const settingsSchema = z.object({
   }),
   notifications: z.object({
     rescanArr: z.boolean(),
-    plexPartialScan: z.boolean(),
   }),
 }) satisfies z.ZodType<Settings>;
 

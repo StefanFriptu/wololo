@@ -104,7 +104,7 @@ export function createVerifier(deps: VerifierDeps): (request: VerifyRequest) => 
     try {
       facts = await readFacts(request.outputPath);
     } catch (error) {
-      checks.push({ name: 'stream_count', passed: false, detail: `cannot read output: ${errorMessage(error)}` });
+      checks.push({ name: 'output_readable', passed: false, detail: `cannot read output: ${errorMessage(error)}` });
       return summarizeVerification(checks);
     }
     checks.push(checkDuration(request.expectedDurationSec, facts.durationSec, request.durationToleranceSec));

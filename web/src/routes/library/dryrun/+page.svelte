@@ -9,7 +9,7 @@
   import { formatBytes } from '#lib/format/formatBytes.ts';
   import { formatDateTime } from '#lib/format/formatDateTime.ts';
   import { formatEstimate } from '#lib/format/formatEstimate.ts';
-  import { dryRunGroupLinks } from '#lib/library/dryRunGroupLinks.ts';
+  import { dryRunGroupQuery } from '#lib/library/dryRunGroupQuery.ts';
   import { href } from '#lib/paths.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import { attempt } from '#lib/attempt.ts';
@@ -145,11 +145,7 @@
               {#each data.groups as group (group.codec)}
                 <tr>
                   <td>
-                    {#if group.codec === 'bdmv'}<span class="mono">bdmv</span>:{/if}
-                    {#each dryRunGroupLinks(group.codec, libraryId) as link, index (link.query)}
-                      {#if index > 0}·{/if}
-                      <a class="mono" href={href(`/library${link.query}`)}>{link.label}</a>
-                    {/each}
+                    <a class="mono" href={href(`/library${dryRunGroupQuery(group.codec, libraryId)}`)}>{group.codec}</a>
                   </td>
                   <td class="num">{group.files}</td>
                   <td class="num hide-sm">{formatEstimate(group.durationSec)}</td>

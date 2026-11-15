@@ -5,7 +5,7 @@ import type { AppContext } from '../app/context.ts';
 import { isValidBindAddress, isValidUrlBase } from '../core/config.ts';
 import { AppError } from '../core/errors.ts';
 import type { GeneralConfigView } from '../shared/api-types.ts';
-import type { ServerEvent } from '../shared/events.ts';
+import type { ServerEvent, StreamHello } from '../shared/events.ts';
 import { AUTHENTICATION_MODES, type GeneralConfig } from '../shared/settings.ts';
 import { type ApiApp, parseBody, parseQuery, route } from './http.ts';
 
@@ -47,6 +47,7 @@ export function registerCoreRoutes(app: ApiApp, ctx: AppContext): void {
       instanceName: config.instanceName,
       authentication: config.authentication,
       restartRequired: RESTART_KEYS.some((key) => config[key] !== bootConfig[key]),
+      envOverrides: [...config.envOverrides],
     };
   };
 
@@ -75,7 +76,7 @@ export function registerCoreRoutes(app: ApiApp, ctx: AppContext): void {
       });
       await stream.writeSSE({
         event: 'hello',
-        data: JSON.stringify({ version: ctx.config.get().version }),
+        data: JSON.stringify({ version: ctx.config.get().version } satisfies StreamHello),
       });
       while (!stream.aborted && !ctx.shutdownSignal.aborted) {
         if (queue.length === 0) {

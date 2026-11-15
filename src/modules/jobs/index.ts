@@ -180,6 +180,8 @@ export function createJobsService(ctx: AppContext): JobsService {
         failingCodec: filter.failingCodec,
         kind: filter.kind,
         profileId: filter.profileId,
+        search: filter.search,
+        codec: filter.codec,
         page,
         pageSize: ENQUEUE_PAGE_SIZE,
         sortDir: 'asc',

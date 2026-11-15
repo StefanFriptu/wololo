@@ -278,7 +278,7 @@ describe.skipIf(!ffmpegAvailable())('with ffprobe fixtures', () => {
     t.ctx.settings.update({ processing: { enabled: true } });
     const result = await media().checkPath(path, { trigger: 'scan' });
     expect(result.action).toBe('blocked');
-    expect(result.mediaFile).toMatchObject({ status: 'failed', planAction: 'blocked', failingCodecs: ['mpeg4'] });
+    expect(result.mediaFile).toMatchObject({ status: 'blocked', planAction: 'blocked', failingCodecs: ['mpeg4'] });
     expect(result.mediaFile?.statusReason).toContain('blocked: video mpeg4 not supported');
     expect(jobs.calls).toEqual([]);
   });
@@ -480,7 +480,7 @@ describe('media rows without files', () => {
     expect(stats).toEqual({
       total: 3,
       totalBytes: 60,
-      byStatus: { pending: 0, compatible: 0, needs_work: 2, processing: 0, failed: 0, ignored: 1 },
+      byStatus: { pending: 0, compatible: 0, needs_work: 2, blocked: 0, processing: 0, failed: 0, ignored: 1 },
       byFailingCodec: [
         { codec: 'dts', count: 2 },
         { codec: 'truehd', count: 1 },

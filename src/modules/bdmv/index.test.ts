@@ -351,10 +351,10 @@ test('bdmv.evaluate - no Radarr instance fails', async () => {
   );
 });
 
-test('bdmv.evaluate - a blocked rules plan fails but keeps the plan for the UI', async () => {
+test('bdmv.evaluate - a blocked rules plan is blocked and keeps the plan for the UI', async () => {
   const { t, mediaFileId } = setup({ plan: conversionPlan('blocked') });
   const evaluation = await t.ctx.services.bdmv.evaluate(mediaFileId);
-  expect(evaluation.status).toBe('failed');
+  expect(evaluation.status).toBe('blocked');
   expect(evaluation.reason).toBe('blocked: video codec vc1 not decoded by profile');
   expect(evaluation.plan?.audioPlan?.action).toBe('blocked');
 });
@@ -495,10 +495,9 @@ test('bdmv.resolveDecision - confirmed delete_source removes the folder and reco
 test('bdmv.deleteSource - a torrent whose content is the disc is removed with its files instead', async () => {
   const s = setup({
     settings: { bdmv: { deleteSourceWhenSeeded: true } },
-    torrent: (path) => ({ ...TORRENT, contentPath: `/remote${path}` }),
+    torrent: (path) => ({ ...TORRENT, contentPath: path }),
   });
   converted(s);
-  s.t.ctx.services.pathMappings.toLocal = async (_scope, path) => path.replace(/^\/remote/, '');
   await confirmDeletion(s);
   expect(s.calls.deleteTorrent).toEqual([['abc123', true]]);
   expect(existsSync(s.disc)).toBe(true);

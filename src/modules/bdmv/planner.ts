@@ -368,7 +368,7 @@ export function createDiscPlanner(ctx: AppContext, deps: { isoReader: SevenZipIs
     };
     if (audioPlan.action === 'blocked')
       return result(
-        'failed',
+        'blocked',
         `blocked: ${audioPlan.reasons.join('; ') || 'the device profile cannot play this disc'}`,
         {
           plan: jobPlan,

@@ -15,8 +15,14 @@ export interface ScanStats {
   filesChanged: number;
   filesRemoved: number;
   filesProbed: number;
+  /** Files whose evaluation failed (ffprobe error, missing file, bdmv.evaluate error, queue error), discs included. */
   probeErrors: number;
   jobsQueued: number;
+}
+
+/** Payload of the stream-only "hello" frame: sent once per SSE connection (and reconnection), never on the bus. */
+export interface StreamHello {
+  version: string;
 }
 
 /**
