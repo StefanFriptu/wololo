@@ -1,11 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
-import { eq } from 'drizzle-orm';
 import type { AppContext } from '../../app/context.ts';
 import type { ScanService } from '../../contracts/probe-scan.ts';
 import { errorMessage, notFound } from '../../core/errors.ts';
 import { yieldToEventLoop } from '../../core/yieldToEventLoop.ts';
-import { mediaFiles } from '../../db/schema.ts';
 import type { ScanRequest, ScanStatus } from '../../shared/api-types.ts';
 import type { Library, LibraryRoot, MediaFileKind, MediaFileStatus } from '../../shared/domain.ts';
 import type { ScanStats } from '../../shared/events.ts';
@@ -14,12 +12,13 @@ import { eligibilityRules } from './eligibility.ts';
 import { rootDiskInfo } from './libraries.ts';
 import { libraryQuery } from './libraryQuery.ts';
 import { createMediaEngine, type RulesContext } from './mediaEngine.ts';
-import { activeJobMediaIdsQuery } from './mediaQuery.ts';
+import { activeJobMediaIdsQuery, rootEntriesPageQuery, storedEntryQuery } from './mediaQuery.ts';
 import { isWithin } from './paths.ts';
 import { walkRoot } from './walker.ts';
 
 const PROGRESS_INTERVAL_MS = 1000;
 const ENQUEUE_SLICE = 50;
+const REMOVAL_PAGE_SIZE = 1000;
 
 type Presence = 'missing' | 'present' | 'unknown';
 
@@ -108,25 +107,10 @@ export function createScanService(ctx: AppContext): ScanService {
       log.warn('library root is not accessible, skipped (rows kept)', { root: root.path });
       return `root ${root.path} is not accessible`;
     }
-    const stored = new Map(
-      ctx.db
-        .select({
-          id: mediaFiles.id,
-          path: mediaFiles.path,
-          kind: mediaFiles.kind,
-          sizeBytes: mediaFiles.sizeBytes,
-          mtimeMs: mediaFiles.mtimeMs,
-          rulesKey: mediaFiles.rulesKey,
-          status: mediaFiles.status,
-        })
-        .from(mediaFiles)
-        .where(eq(mediaFiles.rootId, root.id))
-        .all()
-        .map((row) => [row.path, row]),
-    );
     const report = { unreadable: [] as string[] };
-    const seen = new Set<string>();
+    const seen = new Set<number>();
     const backlog: { id: number; kind: string; path: string }[] = [];
+    const storedAt = (path: string) => storedEntryQuery(ctx.db, { rootId: root.id, path }) ?? null;
 
     const entries = walkRoot(
       root.path,
@@ -135,12 +119,12 @@ export function createScanService(ctx: AppContext): ScanService {
     );
     for await (const entry of entries) {
       if (options.signal.aborted) break;
-      seen.add(entry.path);
       scan.stats.filesSeen += 1;
       progress(scan, entry.path);
-      const row = stored.get(entry.path) ?? null;
+      const row = storedAt(entry.path);
+      if (row) seen.add(row.id);
       if (!needsRecheck(entry, row, rules.rulesKey, options.force)) {
-        if (row?.status === 'needs_work') backlog.push(row);
+        if (row?.status === 'needs_work') backlog.push({ id: row.id, kind: row.kind, path: row.path });
         continue;
       }
       const { result, probed } = await engine.evaluatePath(
@@ -148,6 +132,8 @@ export function createScanService(ctx: AppContext): ScanService {
         { trigger: 'scan' },
         { entry, rules, force: options.force, forceProbe: options.force, signal: options.signal },
       );
+      const saved = row ?? storedAt(entry.path);
+      if (saved) seen.add(saved.id);
       if (options.signal.aborted) break;
       if (!row) scan.stats.filesNew += 1;
       else if (row.sizeBytes !== entry.sizeBytes || row.mtimeMs !== entry.mtimeMs) scan.stats.filesChanged += 1;
@@ -157,26 +143,39 @@ export function createScanService(ctx: AppContext): ScanService {
     }
     if (options.signal.aborted) return null;
 
-    const candidates = [...stored.values()].filter(
-      (row) =>
-        !seen.has(row.path) && row.status !== 'processing' && !report.unreadable.some((dir) => isWithin(row.path, dir)),
-    );
-    const problems: string[] = [];
-    if (seen.size === 0 && candidates.length > 0 && !options.force) {
-      log.warn('library root looks empty, rows kept', { root: root.path, rows: candidates.length });
-      problems.push(
-        `root ${root.path} looks empty (not mounted?), kept ${candidates.length} file(s); force scan removes them`,
-      );
-    } else {
-      const removed: number[] = [];
-      let unchecked = 0;
-      for (const row of candidates) {
-        const presence = await presenceOf(row.path);
-        if (presence === 'unknown') unchecked += 1;
-        if (removable(row, presence)) removed.push(row.id);
+    const candidatePages = function* () {
+      let afterId = 0;
+      while (true) {
+        const page = rootEntriesPageQuery(ctx.db, { rootId: root.id, afterId, limit: REMOVAL_PAGE_SIZE });
+        yield page.filter(
+          (row) =>
+            !seen.has(row.id) &&
+            row.status !== 'processing' &&
+            !report.unreadable.some((dir) => isWithin(row.path, dir)),
+        );
+        const last = page.at(-1);
+        if (!last || page.length < REMOVAL_PAGE_SIZE) return;
+        afterId = last.id;
       }
-      engine.deleteRows(removed);
-      scan.stats.filesRemoved += removed.length;
+    };
+    const problems: string[] = [];
+    const looksEmpty = seen.size === 0 && !options.force;
+    const kept = looksEmpty ? [...candidatePages()].reduce((sum, page) => sum + page.length, 0) : 0;
+    if (kept > 0) {
+      log.warn('library root looks empty, rows kept', { root: root.path, rows: kept });
+      problems.push(`root ${root.path} looks empty (not mounted?), kept ${kept} file(s); force scan removes them`);
+    } else {
+      let unchecked = 0;
+      for (const page of candidatePages()) {
+        const removed: number[] = [];
+        for (const row of page) {
+          const presence = await presenceOf(row.path);
+          if (presence === 'unknown') unchecked += 1;
+          if (removable(row, presence)) removed.push(row.id);
+        }
+        engine.deleteRows(removed);
+        scan.stats.filesRemoved += removed.length;
+      }
       if (unchecked > 0) problems.push(`${unchecked} file(s) under ${root.path} could not be checked`);
     }
     await enqueueBacklog(scan, backlog);

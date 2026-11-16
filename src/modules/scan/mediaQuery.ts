@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, inArray, notExists, or, type SQL, sql, sum } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, inArray, notExists, or, type SQL, sql, sum } from 'drizzle-orm';
 import type { Db } from '../../db/client.ts';
 import { deviceProfiles, type JobRow, jobs, libraryProfiles, libraryRoots, mediaFiles } from '../../db/schema.ts';
 import type { MediaFileSummary, MediaQuery, MediaSortKey } from '../../shared/api-types.ts';
@@ -230,6 +230,34 @@ export function jobsForMediaQuery(db: Db, mediaFileId: number, limit = 20): JobS
 }
 
 /** Media file ids with a queued or running job, limited to the given ids. */
+const STORED_ENTRY_COLUMNS = {
+  id: mediaFiles.id,
+  path: mediaFiles.path,
+  kind: mediaFiles.kind,
+  sizeBytes: mediaFiles.sizeBytes,
+  mtimeMs: mediaFiles.mtimeMs,
+  rulesKey: mediaFiles.rulesKey,
+  status: mediaFiles.status,
+};
+
+export function storedEntryQuery(db: Db, options: { rootId: number; path: string }) {
+  return db
+    .select(STORED_ENTRY_COLUMNS)
+    .from(mediaFiles)
+    .where(and(eq(mediaFiles.rootId, options.rootId), eq(mediaFiles.path, options.path)))
+    .get();
+}
+
+export function rootEntriesPageQuery(db: Db, options: { rootId: number; afterId: number; limit: number }) {
+  return db
+    .select(STORED_ENTRY_COLUMNS)
+    .from(mediaFiles)
+    .where(and(eq(mediaFiles.rootId, options.rootId), gt(mediaFiles.id, options.afterId)))
+    .orderBy(asc(mediaFiles.id))
+    .limit(options.limit)
+    .all();
+}
+
 export function activeJobMediaIdsQuery(db: Db, mediaFileIds: readonly number[]): Set<number> {
   const ids = new Set<number>();
   for (let start = 0; start < mediaFileIds.length; start += 500) {

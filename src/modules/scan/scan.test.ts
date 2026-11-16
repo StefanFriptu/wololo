@@ -241,6 +241,18 @@ test('scan - cancelling during a probe leaves the row for the next scan', async 
   expect(rowOf(path)).toMatchObject({ status: 'compatible', sizeBytes: 1 });
 });
 
+test('scan - removes rows missing on disk across several pages and keeps the files still there', async () => {
+  fakeProbe();
+  const present = file('Here (2020).mkv');
+  await runScan();
+  for (let i = 0; i < 1200; i++) insertMediaFile(t.ctx.db, seeded(), { path: join(root, `Gone ${i}.mkv`) });
+
+  const finished = await runScan();
+
+  expect(finished.stats.filesRemoved).toBe(1200);
+  expect(t.ctx.db.select({ path: mediaFiles.path }).from(mediaFiles).all()).toEqual([{ path: present }]);
+});
+
 test('scan - queueing a large backlog lets the event loop run between slices', async () => {
   const paths = Array.from({ length: 120 }, (_, i) => file(`Movie ${i} (2020).mkv`));
   t.ctx.services.probe = {
