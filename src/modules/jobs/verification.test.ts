@@ -8,9 +8,11 @@ import {
   checkStreamCount,
   checkVideoHashes,
   checkVideoPackets,
+  checkVideoTimeline,
   failedChecksMessage,
   parseMediaFacts,
   parseStreamHashes,
+  parseVideoPackets,
   summarizeVerification,
 } from './verification.ts';
 
@@ -163,4 +165,41 @@ test('parseMediaFacts - missing duration is null, missing arrays are empty', () 
 
 test('parseMediaFacts - rejects foreign shapes', () => {
   expect(() => parseMediaFacts({ streams: 'nope' })).toThrow();
+});
+
+const TS_PACKETS = '0,1.483333,K__\n0,1.608333,___\n0,1.525000,___\n0,N/A,___\n';
+const MKV_PACKETS = '0,0.006000,K__\n0,0.131000,___\n0,0.047000,___\n0,N/A,___\n';
+
+test('parseVideoPackets - stream, timestamp and keyframe flag per packet, unknown timestamps are null', () => {
+  expect(parseVideoPackets(`${TS_PACKETS}noise\n`)).toEqual([
+    { stream: 0, ptsSec: 1.483333, key: true },
+    { stream: 0, ptsSec: 1.608333, key: false },
+    { stream: 0, ptsSec: 1.525, key: false },
+    { stream: 0, ptsSec: null, key: false },
+  ]);
+});
+
+test('checkVideoTimeline - the same packets at shifted, millisecond-rounded timestamps pass', () => {
+  const result = checkVideoTimeline(parseVideoPackets(TS_PACKETS), parseVideoPackets(MKV_PACKETS), 1);
+  expect(result).toEqual({
+    name: 'video_checksum',
+    passed: true,
+    detail: 'MPEG-TS source: packets, keyframes and timestamps unchanged (4)',
+  });
+});
+
+test.each([
+  ['a missing packet', '0,0.006000,K__\n0,0.131000,___\n0,0.047000,___\n', '4 source packets vs 3 output packets'],
+  ['a moved keyframe', MKV_PACKETS.replace('0.131000,___', '0.131000,K__'), 'packet 1 keyframe flag differs'],
+  ['a shifted frame', MKV_PACKETS.replace('0.047000', '0.089000'), 'packet 2 timestamp'],
+  ['a lost timestamp', MKV_PACKETS.replace('0.047000', 'N/A'), 'packet 2 timestamp'],
+])('checkVideoTimeline - %s fails', (_name, output, detail) => {
+  const result = checkVideoTimeline(parseVideoPackets(TS_PACKETS), parseVideoPackets(output), 1);
+  expect(result.passed).toBe(false);
+  expect(result.detail).toContain(detail);
+});
+
+test('checkVideoTimeline - an output without its video stream never passes', () => {
+  expect(checkVideoTimeline(parseVideoPackets(TS_PACKETS), [], 1).passed).toBe(false);
+  expect(checkVideoTimeline(parseVideoPackets(TS_PACKETS), parseVideoPackets(MKV_PACKETS), 2).passed).toBe(false);
 });

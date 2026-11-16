@@ -11,10 +11,13 @@ import {
   checkStreamCount,
   checkVideoHashes,
   checkVideoPackets,
+  checkVideoTimeline,
   type MediaFacts,
   parseMediaFacts,
   parseStreamHashes,
+  parseVideoPackets,
   summarizeVerification,
+  type VideoPacket,
 } from './verification.ts';
 
 export interface VerifierDeps {
@@ -60,6 +63,46 @@ export function createVerifier(deps: VerifierDeps): (request: VerifyRequest) => 
     });
     if (result.exitCode !== 0) throw new Error(`streamhash of ${path} exited with ${result.exitCode}`);
     return parseStreamHashes(result.stdout);
+  };
+
+  const isMpegTs = async (path: string): Promise<boolean> => {
+    const result = await deps.run({
+      command: deps.ffprobe,
+      args: ['-v', 'error', '-show_entries', 'format=format_name', '-of', 'csv=p=0', path],
+    });
+    if (result.exitCode !== 0) throw new Error(`ffprobe of ${path} exited with ${result.exitCode}`);
+    return result.stdout.trim().split(',').includes('mpegts');
+  };
+
+  const videoTimeline = async (path: string): Promise<VideoPacket[]> => {
+    const result = await deps.run({
+      command: deps.ffprobe,
+      args: [
+        '-v',
+        'error',
+        '-select_streams',
+        'V',
+        '-show_entries',
+        'packet=stream_index,pts_time,flags',
+        '-of',
+        'csv=p=0',
+        path,
+      ],
+    });
+    if (result.exitCode !== 0) throw new Error(`packet list of ${path} exited with ${result.exitCode}`);
+    return parseVideoPackets(result.stdout);
+  };
+
+  const compareVideo = async (request: VerifyRequest, outputVideoStreams: number): Promise<VerificationCheck> => {
+    if (await isMpegTs(request.sourcePath)) {
+      const [source, output] = await Promise.all([
+        videoTimeline(request.sourcePath),
+        videoTimeline(request.outputPath),
+      ]);
+      return checkVideoTimeline(source, output, outputVideoStreams);
+    }
+    const [source, output] = await Promise.all([videoHashes(request.sourcePath), videoHashes(request.outputPath)]);
+    return checkVideoHashes(source, output, outputVideoStreams);
   };
 
   const videoPackets = async (path: string): Promise<number | null> => {
@@ -112,8 +155,7 @@ export function createVerifier(deps: VerifierDeps): (request: VerifyRequest) => 
 
     if (request.compareVideoHash) {
       try {
-        const [source, output] = await Promise.all([videoHashes(request.sourcePath), videoHashes(request.outputPath)]);
-        checks.push(checkVideoHashes(source, output, facts.videoStreamCount));
+        checks.push(await compareVideo(request, facts.videoStreamCount));
       } catch (error) {
         checks.push({ name: 'video_checksum', passed: false, detail: errorMessage(error) });
       }

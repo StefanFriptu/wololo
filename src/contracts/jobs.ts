@@ -137,7 +137,11 @@ export interface VerifyRequest {
   /** Default 0.1 (100 ms). */
   durationToleranceSec?: number;
   expectedStreamCount: number;
-  /** Compare the video stream hash (ffmpeg -f streamhash -hash md5) of source and output. Off for BDMV, see ARCHITECTURE.md "v1 scope decisions". */
+  /**
+   * Compare the video stream hash (ffmpeg -f streamhash -hash md5) of source and output; an MPEG-TS source (Annex B
+   * bytes) compares its packet count, keyframes and timestamps instead. Off for BDMV, see ARCHITECTURE.md "v1 scope
+   * decisions".
+   */
   compareVideoHash: boolean;
   /** Video packet count of the output (ffprobe -count_packets); BDMV's substitute for the hash. Skipped when omitted. */
   expectedVideoPackets?: number;

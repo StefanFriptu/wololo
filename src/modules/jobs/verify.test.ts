@@ -224,4 +224,40 @@ describe.skipIf(!ffmpegAvailable())('createVerifier on real files', () => {
     });
     expect(after.stdout.trim().split('\n')).toEqual(['h264', 'ac3']);
   }, 60_000);
+
+  test.each([
+    ['h264', 'libx264'],
+    ['hevc', 'libx265'],
+  ])(
+    'verify - an MPEG-TS %s source remuxed to Matroska passes the video check',
+    async (codec, encoder) => {
+      const ts = join(dir, `${codec}.ts`);
+      await ffmpeg([
+        ...['-f', 'lavfi', '-i', 'testsrc=size=160x120:rate=24:duration=2', '-f', 'lavfi', '-i', 'sine=duration=2'],
+        ...['-c:v', encoder, '-preset', 'ultrafast', '-bf', '2', '-g', '12', '-pix_fmt', 'yuv420p', '-c:a', 'eac3'],
+        ...['-f', 'mpegts', ts],
+      ]);
+      const mkv = join(dir, `${codec}.wololo-tmp.mkv`);
+      await ffmpeg(['-i', ts, '-map', '0', '-c', 'copy', '-c:a', 'ac3', '-f', 'matroska', mkv]);
+      const dropped = join(dir, `${codec}-dropped.mkv`);
+      await ffmpeg(['-i', ts, '-map', '0', '-c', 'copy', '-c:a', 'ac3', '-frames:v', '40', '-f', 'matroska', dropped]);
+      const tsRequest = (outputPath: string): VerifyRequest => ({
+        sourcePath: ts,
+        outputPath,
+        expectedDurationSec: 2,
+        durationToleranceSec: 0.5,
+        expectedStreamCount: 2,
+        compareVideoHash: true,
+        decodeAudioStreams: [1],
+      });
+
+      const good = await verify(tsRequest(mkv));
+      const bad = await verify(tsRequest(dropped));
+
+      expect(good.checks.filter((check) => !check.passed)).toEqual([]);
+      expect(good.checks.find((check) => check.name === 'video_checksum')?.detail).toContain('MPEG-TS source');
+      expect(bad.checks.find((check) => check.name === 'video_checksum')?.passed).toBe(false);
+    },
+    60_000,
+  );
 });

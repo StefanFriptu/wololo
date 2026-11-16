@@ -115,6 +115,81 @@ export function checkVideoHashes(
   };
 }
 
+const TIMESTAMP_TOLERANCE_SEC = 0.0015;
+
+export interface VideoPacket {
+  stream: number;
+  ptsSec: number | null;
+  key: boolean;
+}
+
+/** `ffprobe -show_entries packet=stream_index,pts_time,flags -of csv=p=0` ("0,1.483333,K__") -> packets in order. */
+export function parseVideoPackets(output: string): VideoPacket[] {
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.trim().split(','))
+    .filter((parts) => parts.length >= 3 && /^\d+$/.test(parts[0] ?? ''))
+    .map(([stream, pts, flags]) => {
+      const ptsSec = Number(pts);
+      return { stream: Number(stream), ptsSec: Number.isFinite(ptsSec) ? ptsSec : null, key: flags?.[0] === 'K' };
+    });
+}
+
+function byStream(packets: readonly VideoPacket[]): VideoPacket[][] {
+  const groups = new Map<number, VideoPacket[]>();
+  for (const packet of packets) groups.set(packet.stream, [...(groups.get(packet.stream) ?? []), packet]);
+  return [...groups.values()];
+}
+
+function relativePts(packets: readonly VideoPacket[]): (number | null)[] {
+  const first = packets[0]?.ptsSec ?? null;
+  return packets.map((packet) => (packet.ptsSec === null || first === null ? null : packet.ptsSec - first));
+}
+
+function timelineMismatch(source: readonly VideoPacket[], output: readonly VideoPacket[]): string | null {
+  if (source.length !== output.length) return `${source.length} source packets vs ${output.length} output packets`;
+  const sourcePts = relativePts(source);
+  const outputPts = relativePts(output);
+  for (const [i, packet] of source.entries()) {
+    if (packet.key !== output[i]?.key) return `packet ${i} keyframe flag differs`;
+    const a = sourcePts[i] ?? null;
+    const b = outputPts[i] ?? null;
+    if (a === null && b === null) continue;
+    if (a === null || b === null || Math.abs(a - b) > TIMESTAMP_TOLERANCE_SEC)
+      return `packet ${i} timestamp ${a ?? 'none'} s vs ${b ?? 'none'} s`;
+  }
+  return null;
+}
+
+/**
+ * MPEG-TS sources carry H.264/HEVC as Annex B and Matroska stores length-prefixed NAL units with the parameter sets in
+ * extradata, so the bytes (and the md5) always differ. The copied video is proven unchanged by its packet timeline
+ * instead: the same packets, keyframes and presentation timestamps per video stream.
+ */
+export function checkVideoTimeline(
+  source: readonly VideoPacket[],
+  output: readonly VideoPacket[],
+  outputVideoStreams: number,
+): VerificationCheck {
+  const sourceStreams = byStream(source);
+  const outputStreams = byStream(output);
+  const fail = (detail: string): VerificationCheck => ({ name: 'video_checksum', passed: false, detail });
+  if (outputStreams.length !== outputVideoStreams)
+    return fail(`${outputStreams.length} video timelines for ${outputVideoStreams} video streams in the output`);
+  if (sourceStreams.length !== outputStreams.length)
+    return fail(`${sourceStreams.length} source video streams vs ${outputStreams.length} in the output`);
+  for (const [i, packets] of sourceStreams.entries()) {
+    const mismatch = timelineMismatch(packets, outputStreams[i] ?? []);
+    if (mismatch) return fail(`video stream ${i}: ${mismatch}`);
+  }
+  const counts = sourceStreams.map((packets) => packets.length).join(', ');
+  return {
+    name: 'video_checksum',
+    passed: true,
+    detail: `MPEG-TS source: packets, keyframes and timestamps unchanged (${counts || 'no video'})`,
+  };
+}
+
 export function checkVideoPackets(expected: number, actual: number | null): VerificationCheck {
   return {
     name: 'video_packets',
