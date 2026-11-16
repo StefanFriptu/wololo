@@ -6,6 +6,7 @@
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { href } from '#lib/paths.ts';
   import { Resource } from '#lib/resource.svelte.ts';
+  import { secretForForm, secretForRequest } from '#lib/settings/secretField.ts';
   import type { ConnectionTestResult, DownloadClientInput } from '#lib/shared.ts';
   import { toasts } from '#lib/toast.svelte.ts';
 
@@ -21,6 +22,7 @@
 
   const client = new Resource((signal) => api('GET /api/v1/downloadclient', { signal }));
   let form = $state<DownloadClientInput>({ ...BLANK });
+  let storedPassword = $state('');
   let test = $state<ConnectionTestResult | null>(null);
   let busy = $state(false);
 
@@ -32,14 +34,17 @@
     if (client.data === undefined) return;
     const loaded = client.data;
     untrack(() => {
-      form = loaded ? { ...loaded } : { ...BLANK };
+      form = loaded ? { ...loaded, password: secretForForm(loaded.password) } : { ...BLANK };
+      storedPassword = loaded?.password ?? '';
     });
   });
+
+  const requestBody = (): DownloadClientInput => ({ ...form, password: secretForRequest(form.password, storedPassword) });
 
   async function runTest(): Promise<void> {
     busy = true;
     try {
-      test = await api('POST /api/v1/downloadclient/test', { body: form });
+      test = await api('POST /api/v1/downloadclient/test', { body: requestBody() });
     } catch (error) {
       test = { ok: false, message: errorMessage(error), version: null };
     } finally {
@@ -51,7 +56,7 @@
     event.preventDefault();
     busy = true;
     try {
-      const body = { ...form, url: form.url.trim().replace(/\/+$/, ''), category: form.category?.trim() || null };
+      const body = { ...requestBody(), url: form.url.trim().replace(/\/+$/, ''), category: form.category?.trim() || null };
       client.set(await api('PUT /api/v1/downloadclient', { body }));
       toasts.success('qBittorrent saved');
     } catch (error) {
@@ -101,8 +106,22 @@
       <div class="field">
         <label for="qb-password">Password</label>
         <div class="control">
-          <input id="qb-password" type="password" bind:value={form.password} autocomplete="off" aria-describedby={client.data ? 'qb-password-hint' : undefined} />
-          {#if client.data}<span id="qb-password-hint" class="hint">The saved password is kept unless you type a new one.</span>{/if}
+          <input
+            id="qb-password"
+            type="password"
+            bind:value={form.password}
+            autocomplete="off"
+            placeholder={storedPassword ? 'Saved, leave empty to keep' : undefined}
+            aria-describedby={storedPassword ? 'qb-password-hint' : undefined}
+          />
+          {#if storedPassword}
+            <span id="qb-password-hint" class="hint">
+              Leave empty to keep the saved password.
+              <button type="button" class="ghost small" onclick={() => (storedPassword = '')}>Remove saved password</button>
+            </span>
+          {:else if client.data?.password}
+            <span class="hint">The saved password is removed when you save.</span>
+          {/if}
         </div>
       </div>
       <div class="field">

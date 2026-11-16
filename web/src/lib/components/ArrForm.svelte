@@ -3,6 +3,7 @@
   import { api } from '#lib/api/client.ts';
   import { errorMessage } from '#lib/api/errorMessage.ts';
   import Modal from '#lib/components/Modal.svelte';
+  import { secretForForm, secretForRequest } from '#lib/settings/secretField.ts';
   import type { ArrInstance, ArrInstanceInput, ArrKind, ConnectionTestResult } from '#lib/shared.ts';
   import { toasts } from '#lib/toast.svelte.ts';
 
@@ -17,6 +18,7 @@
   const DEFAULT_PORTS: Record<ArrKind, number> = { radarr: 7878, sonarr: 8989 };
 
   let form = $state<ArrInstanceInput>({ kind: 'radarr', name: '', url: '', apiKey: '', enabled: true });
+  let storedKey = $state('');
   let test = $state<ConnectionTestResult | null>(null);
   let testing = $state(false);
   let busy = $state(false);
@@ -29,8 +31,9 @@
     const fallbackKind = kind;
     untrack(() => {
       test = null;
+      storedKey = source?.apiKey ?? '';
       form = source
-        ? { kind: source.kind, name: source.name, url: source.url, apiKey: source.apiKey, enabled: source.enabled }
+        ? { kind: source.kind, name: source.name, url: source.url, apiKey: secretForForm(source.apiKey), enabled: source.enabled }
         : {
             kind: fallbackKind,
             name: fallbackKind === 'radarr' ? 'Radarr' : 'Sonarr',
@@ -41,10 +44,12 @@
     });
   });
 
+  const withKey = (): ArrInstanceInput => ({ ...form, apiKey: secretForRequest(form.apiKey, storedKey) });
+
   async function runTest(): Promise<void> {
     testing = true;
     try {
-      test = await api('POST /api/v1/arr/test', { body: { ...form, id: instance?.id } });
+      test = await api('POST /api/v1/arr/test', { body: { ...withKey(), id: instance?.id } });
     } catch (error) {
       test = { ok: false, message: errorMessage(error), version: null };
     } finally {
@@ -54,7 +59,7 @@
 
   async function save(event: SubmitEvent): Promise<void> {
     event.preventDefault();
-    const body = { ...form, name: form.name.trim(), url: form.url.trim().replace(/\/+$/, '') };
+    const body = { ...withKey(), name: form.name.trim(), url: form.url.trim().replace(/\/+$/, '') };
     busy = true;
     try {
       if (instance) await api('PUT /api/v1/arr/:id', { params: { id: instance.id }, body });
@@ -86,8 +91,15 @@
     <div class="field">
       <label for="{uid}-key">API key</label>
       <div class="control">
-        <input id="{uid}-key" type="password" bind:value={form.apiKey} required autocomplete="off" />
-        <span class="hint">{label} > Settings > General > API Key.</span>
+        <input
+          id="{uid}-key"
+          type="password"
+          bind:value={form.apiKey}
+          required={!storedKey}
+          autocomplete="off"
+          placeholder={storedKey ? 'Saved, leave empty to keep' : undefined}
+        />
+        <span class="hint">{label} > Settings > General > API Key.{storedKey ? ' Leave empty to keep the saved key.' : ''}</span>
       </div>
     </div>
     <div class="field">
@@ -101,7 +113,7 @@
     {/if}
   </form>
   {#snippet footer()}
-    <button type="button" onclick={runTest} disabled={testing || !form.url || !form.apiKey}>{testing ? 'Testing…' : 'Test'}</button>
+    <button type="button" onclick={runTest} disabled={testing || !form.url || (!form.apiKey && !storedKey)}>{testing ? 'Testing…' : 'Test'}</button>
     <span class="spacer"></span>
     <button type="button" onclick={() => (open = false)}>Cancel</button>
     <button class="primary" type="submit" form="{uid}-form" disabled={busy}>Save</button>
