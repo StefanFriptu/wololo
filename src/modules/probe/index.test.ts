@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
 import { ensureFixture, FIXTURES, ffmpegAvailable } from '../../../test/helpers/fixtures.ts';
@@ -32,7 +32,7 @@ test('probe - missing ffprobe binary is an upstream error', async () => {
   }
 });
 
-function countingFfprobe(dir: string): { env: Record<string, string>; counts: () => number[] } {
+function countingFfprobe(dir: string): { env: Record<string, string>; counts: () => number[]; running: () => number } {
   const script = join(dir, 'fake-ffprobe.sh');
   const log = join(dir, 'probe-counts');
   mkdirSync(dir, { recursive: true });
@@ -51,6 +51,7 @@ function countingFfprobe(dir: string): { env: Record<string, string>; counts: ()
   return {
     env: { WOLOLO__FFPROBE: script },
     counts: () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split(/\s+/).map(Number) : []),
+    running: () => (existsSync(join(dir, 'running')) ? readdirSync(join(dir, 'running')).length : 0),
   };
 }
 
@@ -78,9 +79,10 @@ test('probe - aborted while queued never spawns ffprobe', async () => {
     const file = join(limited.dir, 'a.mkv');
     writeFileSync(file, 'x');
     const busy = [limited.ctx.services.probe.probe(file), limited.ctx.services.probe.probe(file)];
+    while (fake.running() < 2) await Bun.sleep(5);
     const controller = new AbortController();
     const queued = limited.ctx.services.probe.probe(file, { signal: controller.signal });
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await Bun.sleep(50);
 
     controller.abort();
 
