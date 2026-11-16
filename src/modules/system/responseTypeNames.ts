@@ -56,6 +56,7 @@ export const RESPONSE_TYPE_NAMES: { readonly [K in RouteKey]: string } = {
   'POST /api/v1/jobs': 'EnqueueResponse',
   'GET /api/v1/jobs/:id': 'JobDetail',
   'GET /api/v1/jobs/:id/log': 'string',
+  'GET /api/v1/jobs/:id/log/tail': 'JobLogChunk',
   'POST /api/v1/jobs/:id/cancel': 'JobSummary',
   'POST /api/v1/jobs/:id/retry': 'JobSummary',
   'DELETE /api/v1/jobs/:id': 'NoContent',

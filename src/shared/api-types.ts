@@ -408,6 +408,19 @@ export interface EnqueueResponse {
   skipped: { mediaFileId: number; reason: string }[];
 }
 
+export interface JobLogTailQuery {
+  /** Byte offset to continue from (the `end` of the previous chunk); omitted starts at the tail of the log. */
+  from?: number;
+}
+
+/** Whole lines of a job log; `start` and `end` are byte offsets, `size` is the file size when it was read. */
+export interface JobLogChunk {
+  text: string;
+  start: number;
+  end: number;
+  size: number;
+}
+
 export interface HistoryQuery extends PageQuery {
   event?: HistoryEventType;
   mediaFileId?: number;
@@ -742,6 +755,7 @@ export interface ApiRoutes {
   'POST /api/v1/jobs': { body: EnqueueRequest; response: EnqueueResponse };
   'GET /api/v1/jobs/:id': { params: IdParams; response: JobDetail };
   'GET /api/v1/jobs/:id/log': { params: IdParams; response: string };
+  'GET /api/v1/jobs/:id/log/tail': { params: IdParams; query: JobLogTailQuery; response: JobLogChunk };
   'POST /api/v1/jobs/:id/cancel': { params: IdParams; response: JobSummary };
   'POST /api/v1/jobs/:id/retry': { params: IdParams; response: JobSummary };
   'DELETE /api/v1/jobs/:id': { params: IdParams; response: NoContent };

@@ -6,7 +6,7 @@ import type { JobDetail } from '#lib/shared.ts';
  * Keeps a job's log in step with the job without reacting to every progress event: the log loads when it first
  * exists and on each start/finish, and while the job runs a timer polls it (or the job detail, until the log exists).
  */
-export function syncJobLog(job: Resource<JobDetail>, log: Resource<string>, pollMs: number): void {
+export function syncJobLog<T>(job: Resource<JobDetail>, log: Resource<T>, pollMs: number): void {
   const hasLog = $derived(job.data?.hasLog === true);
   const running = $derived(job.data?.state === 'running');
 

@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AppContext } from '../../app/context.ts';
 import type { JobsService, NewJob } from '../../contracts/jobs.ts';
@@ -33,6 +33,7 @@ import {
 import { createJobLifecycle } from './lifecycle.ts';
 import { toHistoryEntry, toJobDetail, toJobSummary } from './mappers.ts';
 import { jobLogPathFor, jobTitleFor, outputPathFor } from './paths.ts';
+import { readLogChunk } from './readLogChunk.ts';
 import { deleteTempPath, resolveInterruptedJob } from './recover.ts';
 import { sweepOrphanedTempPaths } from './sweepOrphanedTempPaths.ts';
 import { createWorker } from './worker.ts';
@@ -44,6 +45,7 @@ const JOB_LOG_RETENTION_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const PRUNE_BATCH = 500;
 const JOB_LOG_NAME = /^(\d+)\.txt$/;
+const LOG_TAIL_BYTES = 256 * 1024;
 
 function pageWindow(query: PageQuery): PageWindow {
   return {
@@ -362,7 +364,13 @@ export function createJobsService(ctx: AppContext): JobsService {
     log: async (id) => {
       const logPath = logPathOf(mustGet(id));
       if (logPath === null || !existsSync(logPath)) return null;
-      return readFileSync(logPath, 'utf8');
+      return Bun.file(logPath).text();
+    },
+
+    logTail: async (id, from) => {
+      const logPath = logPathOf(mustGet(id));
+      if (logPath === null || !existsSync(logPath)) return null;
+      return readLogChunk(logPath, { from, maxBytes: LOG_TAIL_BYTES });
     },
 
     cancel: async (id) => {

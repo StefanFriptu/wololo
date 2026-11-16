@@ -20,6 +20,7 @@ import type {
   EnqueueRequest,
   EnqueueResponse,
   HistoryQuery,
+  JobLogChunk,
   JobQuery,
   PageQuery,
   Paginated,
@@ -80,6 +81,8 @@ export interface JobsService {
   get(id: number): Promise<JobDetail>;
   /** Full per-job log text, or null when no log exists. */
   log(id: number): Promise<string | null>;
+  /** Whole log lines after byte `from`, or the end of the log when `from` is omitted or far behind; null without a log. */
+  logTail(id: number, from?: number): Promise<JobLogChunk | null>;
   cancel(id: number): Promise<JobSummary>;
   retry(id: number): Promise<JobSummary>;
   remove(id: number): Promise<void>;

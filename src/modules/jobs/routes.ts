@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { type ApiApp, idParamSchema, pageQuerySchema, parseBody, parseId, parseQuery, route } from '../../api/http.ts';
 import type { AppContext } from '../../app/context.ts';
 import { AppError } from '../../core/errors.ts';
+import type { JobLogTailQuery } from '../../shared/api-types.ts';
 import {
   HISTORY_EVENT_TYPES,
   JOB_STATES,
@@ -57,6 +58,10 @@ const historyQuerySchema = pageQuerySchema.extend({
 
 const purgeSchema = z.object({ all: z.boolean().optional() });
 
+const logTailQuerySchema = z.object({
+  from: z.coerce.number().int().nonnegative().optional(),
+}) satisfies z.ZodType<JobLogTailQuery, unknown>;
+
 export function registerJobsRoutes(app: ApiApp, ctx: AppContext): void {
   const jobs = () => ctx.services.jobs;
   const recycleBin = () => ctx.services.recycleBin;
@@ -80,6 +85,17 @@ export function registerJobsRoutes(app: ApiApp, ctx: AppContext): void {
       return c.text(text, 200, { 'content-type': 'text/plain; charset=utf-8' });
     },
     { params: idParamSchema },
+  );
+  route(
+    app,
+    'GET /api/v1/jobs/:id/log/tail',
+    async (c) => {
+      const id = parseId(c);
+      const chunk = await jobs().logTail(id, parseQuery(c, logTailQuerySchema).from);
+      if (chunk === null) throw new AppError('not_found', `job ${id} has no log`);
+      return chunk;
+    },
+    { params: idParamSchema, query: logTailQuerySchema },
   );
   route(app, 'POST /api/v1/jobs/:id/cancel', (c) => jobs().cancel(parseId(c)), { params: idParamSchema });
   route(app, 'POST /api/v1/jobs/:id/retry', (c) => jobs().retry(parseId(c)), { params: idParamSchema });

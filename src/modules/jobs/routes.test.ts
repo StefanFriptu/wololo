@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
 import { insertJob, insertLibrary, insertMediaFile } from '../../../test/helpers/seed.ts';
@@ -103,6 +103,33 @@ test('GET /api/v1/jobs/:id and /log - detail, 404s and the plain-text log', asyn
   expect(log.status).toBe(200);
   expect(log.headers.get('content-type')).toContain('text/plain');
   expect(await log.text()).toBe('line one\nline two\n');
+});
+
+test('GET /api/v1/jobs/:id/log/tail - returns only the tail of a large log, then what was appended', async () => {
+  const { t } = setup();
+  const row = insertJob(t.ctx.db, { sourcePath: '/a.mkv', state: 'running' });
+  expect((await t.request(`/api/v1/jobs/${row.id}/log/tail`)).status).toBe(404);
+
+  const logPath = join(t.ctx.config.get().jobLogDir, `${row.id}.txt`);
+  mkdirSync(t.ctx.config.get().jobLogDir, { recursive: true });
+  const flood = 'Past duration 0.999 too large\n'.repeat(20_000);
+  writeFileSync(logPath, `${flood}last line\n`);
+  updateJobRow(t.ctx.db, row.id, { logPath });
+  const size = Bun.file(logPath).size;
+  expect(size).toBeGreaterThan(512 * 1024);
+
+  const tail = await (await t.request(`/api/v1/jobs/${row.id}/log/tail`)).json();
+  expect(tail.size).toBe(size);
+  expect(tail.end).toBe(size);
+  expect(tail.start).toBeGreaterThan(0);
+  expect(size - tail.start).toBeLessThanOrEqual(256 * 1024);
+  expect(tail.text.startsWith('Past duration')).toBe(true);
+  expect(tail.text.endsWith('last line\n')).toBe(true);
+
+  appendFileSync(logPath, 'appended\n');
+  const next = await (await t.request(`/api/v1/jobs/${row.id}/log/tail?from=${tail.end}`)).json();
+  expect(next).toEqual({ text: 'appended\n', start: size, end: size + 9, size: size + 9 });
+  expect((await t.request(`/api/v1/jobs/${row.id}/log/tail?from=-1`)).status).toBe(400);
 });
 
 test('job actions - cancel, retry and delete answer with the right status codes', async () => {

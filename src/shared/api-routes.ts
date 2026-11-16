@@ -116,6 +116,7 @@ export const API_ROUTE_META: { readonly [K in RouteKey]: RouteMeta } = {
     responseType: 'text',
     summary: 'Full ffmpeg/mkvmerge log of a job',
   },
+  'GET /api/v1/jobs/:id/log/tail': json('jobs', 'Last part of a job log, or the lines appended after a byte offset'),
   'POST /api/v1/jobs/:id/cancel': json('jobs', 'Cancel a queued or running job'),
   'POST /api/v1/jobs/:id/retry': json('jobs', 'Retry a failed or cancelled job'),
   'DELETE /api/v1/jobs/:id': empty('jobs', 'Remove a finished job'),

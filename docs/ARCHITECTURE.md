@@ -251,6 +251,7 @@ Calling a route (web): `api('GET /api/v1/jobs/:id', { params: { id } })` from `w
 | `POST /api/v1/jobs`                         | jobs         | apikey | body `EnqueueRequest`                             | `EnqueueResponse`                  |
 | `GET /api/v1/jobs/:id`                      | jobs         | apikey | params `IdParams`                                 | `JobDetail`                        |
 | `GET /api/v1/jobs/:id/log`                  | jobs         | apikey | params `IdParams`                                 | text                               |
+| `GET /api/v1/jobs/:id/log/tail`             | jobs         | apikey | params `IdParams`, query `JobLogTailQuery`        | `JobLogChunk`                      |
 | `POST /api/v1/jobs/:id/cancel`              | jobs         | apikey | params `IdParams`                                 | `JobSummary`                       |
 | `POST /api/v1/jobs/:id/retry`               | jobs         | apikey | params `IdParams`                                 | `JobSummary`                       |
 | `DELETE /api/v1/jobs/:id`                   | jobs         | apikey | params `IdParams`                                 | 204 No Content                     |

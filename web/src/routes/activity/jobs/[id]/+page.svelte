@@ -15,6 +15,7 @@
   import { formatDateTime } from '#lib/format/formatDateTime.ts';
   import { formatDuration } from '#lib/format/formatDuration.ts';
   import { formatSpeed } from '#lib/format/formatSpeed.ts';
+  import { appendLogChunk } from '#lib/jobs/appendLogChunk.ts';
   import { attemptNumber } from '#lib/jobs/attemptNumber.ts';
   import { isRemovable } from '#lib/jobs/isRemovable.ts';
   import { patchJob } from '#lib/jobs/patchJob.ts';
@@ -30,15 +31,21 @@
   } from '#lib/labels.ts';
   import { href } from '#lib/paths.ts';
   import { Resource } from '#lib/resource.svelte.ts';
+  import type { JobLogChunk } from '#lib/shared.ts';
   import { pairStreams } from '#lib/streams/pairStreams.ts';
   import { attempt } from '#lib/attempt.ts';
   import { toasts } from '#lib/toast.svelte.ts';
 
   const LOG_POLL_MS = 3000;
+  const LOG_VIEW_BYTES = 256 * 1024;
 
   const id = $derived(Number(page.params.id));
   const job = new Resource((signal) => api('GET /api/v1/jobs/:id', { params: { id }, signal }));
-  const log = new Resource((signal) => api('GET /api/v1/jobs/:id/log', { params: { id }, signal }));
+  const log: Resource<JobLogChunk> = new Resource(async (signal) => {
+    const shown = log.data;
+    const chunk = await api('GET /api/v1/jobs/:id/log/tail', { params: { id }, query: { from: shown?.end }, signal });
+    return appendLogChunk(shown, chunk, LOG_VIEW_BYTES);
+  });
   let follow = $state(true);
   let busy = $state(false);
   let logElement = $state<HTMLPreElement>();
@@ -110,9 +117,9 @@
     busy = false;
   }
 
-  function saveLog(): void {
-    if (log.data === undefined) return;
-    downloadBlob(new Blob([log.data], { type: 'text/plain' }), `wololo-job-${id}.txt`);
+  async function saveLog(): Promise<void> {
+    const text = await attempt(() => api('GET /api/v1/jobs/:id/log', { params: { id } }));
+    if (text !== undefined) downloadBlob(new Blob([text], { type: 'text/plain' }), `wololo-job-${id}.txt`);
   }
 
   function sizeChange(before: number, after: number): string {
@@ -278,9 +285,14 @@
         {/if}
       </div>
       {#if data.hasLog}
-        <Async resource={log} isEmpty={(text) => text.length === 0} emptyText="The log is empty.">
-          {#snippet children(text)}
-            <pre class="log" bind:this={logElement} aria-label="Job log">{text}</pre>
+        <Async resource={log} isEmpty={(view) => view.size === 0} emptyText="The log is empty.">
+          {#snippet children(view)}
+            {#if view.start > 0}
+              <p class="muted">
+                Showing the last {formatBytes(view.end - view.start)} of {formatBytes(view.size)}. Download has the full log.
+              </p>
+            {/if}
+            <pre class="log" bind:this={logElement} aria-label="Job log">{view.text}</pre>
           {/snippet}
         </Async>
       {:else}
