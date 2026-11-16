@@ -48,7 +48,7 @@ beforeEach(() => {
   tv = startFakeUpstream({
     'POST /api/v2/pins': () => ({ id: 42, code: 'ABCD', authToken: null, expiresAt: '2999-01-01T00:00:00Z' }),
     'GET /api/v2/pins/42': () => ({ id: 42, code: 'ABCD', ...pinState }),
-    'GET /api/v2/user': () => ({ username: 'stefan', title: 'Stefan' }),
+    'GET /api/v2/user': () => ({ username: 'plexuser', title: 'Plex User' }),
     'GET /api/v2/resources': () => [
       { name: 'Player', provides: 'player', clientIdentifier: 'p1', owned: true, connections: [] },
       {
@@ -131,7 +131,7 @@ test('plex.checkPin - stores the account token and username once authorised', as
   expect(status).toMatchObject({
     authenticated: true,
     expired: false,
-    connection: { signedIn: true, username: 'stefan' },
+    connection: { signedIn: true, username: 'plexuser' },
   });
   expect(tv.requestsTo('GET /api/v2/user')[0]?.headers.get('x-plex-token')).toBe(ACCOUNT_TOKEN);
 });
