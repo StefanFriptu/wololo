@@ -290,3 +290,25 @@ test('dryRun.report - writes nothing', async () => {
   await t.ctx.services.dryRun.report({});
   expect(JSON.stringify(t.ctx.db.select().from(mediaFiles).all())).toBe(before);
 });
+
+test('dryRun.report - a large library lets the event loop run between pages', async () => {
+  const probe = fileProbe('dts', MB, 60);
+  for (let i = 0; i < 600; i++) {
+    insertMediaFile(t.ctx.db, libraryA, {
+      path: `/data/a/bulk/${i}.mkv`,
+      status: 'needs_work',
+      probe,
+      planAction: 'convert',
+      failingCodecs: ['dts'],
+    });
+  }
+  let ranDuringReport = false;
+  setImmediate(() => {
+    ranDuringReport = true;
+  });
+
+  const report = await t.ctx.services.dryRun.report({});
+
+  expect(ranDuringReport).toBe(true);
+  expect(report.totals.needsWork).toBeGreaterThan(600);
+});

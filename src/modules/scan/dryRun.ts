@@ -2,6 +2,7 @@ import { and, asc, count, eq, gt, inArray, isNotNull, ne, type SQL, sql } from '
 import type { AppContext } from '../../app/context.ts';
 import type { DryRunService } from '../../contracts/probe-scan.ts';
 import { errorMessage, notFound } from '../../core/errors.ts';
+import { yieldToEventLoop } from '../../core/yieldToEventLoop.ts';
 import { mediaFiles } from '../../db/schema.ts';
 import type { DryRunGroup, DryRunProfileRow, DryRunReport } from '../../shared/api-types.ts';
 import type { DeviceProfile, Library } from '../../shared/domain.ts';
@@ -50,7 +51,7 @@ export function createDryRunService(ctx: AppContext): DryRunService {
     return totals;
   };
 
-  const workRows = function* (scope: SQL | undefined) {
+  const workRows = async function* (scope: SQL | undefined) {
     const isWork = inArray(mediaFiles.status, ['needs_work', 'blocked']);
     let afterId = 0;
     while (true) {
@@ -76,10 +77,11 @@ export function createDryRunService(ctx: AppContext): DryRunService {
       const last = page.at(-1);
       if (!last || page.length < PAGE_SIZE) return;
       afterId = last.id;
+      await yieldToEventLoop();
     }
   };
 
-  const groupsAndSpace = (scope: SQL | undefined) => {
+  const groupsAndSpace = async (scope: SQL | undefined) => {
     const settings = ctx.settings.get();
     const speed = settings.processing.estimatedSpeedFactor;
     const recycling = settings.recycleBin.enabled && settings.recycleBin.retentionDays > 0;
@@ -90,7 +92,7 @@ export function createDryRunService(ctx: AppContext): DryRunService {
     let largestIsoExtract = 0;
     let recycleBytes = 0;
 
-    for (const row of workRows(scope)) {
+    for await (const row of workRows(scope)) {
       const blocked = row.planAction === 'blocked';
       const input = {
         planAction: row.planAction,
@@ -196,6 +198,7 @@ export function createDryRunService(ctx: AppContext): DryRunService {
         const last = page.at(-1);
         if (!last || page.length < PROBE_PAGE_SIZE) break;
         afterId = last.id;
+        await yieldToEventLoop();
       }
     }
     row.durationSec = Math.round(row.durationSec);
@@ -231,7 +234,7 @@ export function createDryRunService(ctx: AppContext): DryRunService {
       const libraries = libraryQuery(ctx.db, libraryId === undefined ? {} : { id: libraryId });
       if (libraryId !== undefined && libraries.length === 0) throw notFound(`library ${libraryId}`);
       const scope = libraryId === undefined ? undefined : eq(mediaFiles.libraryId, libraryId);
-      const space = groupsAndSpace(scope);
+      const space = await groupsAndSpace(scope);
       return {
         generatedAt: new Date().toISOString(),
         libraryId: libraryId ?? null,
