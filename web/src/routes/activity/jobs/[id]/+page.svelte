@@ -7,9 +7,9 @@
   import Async from '#lib/components/Async.svelte';
   import Badge from '#lib/components/Badge.svelte';
   import Icon from '#lib/components/Icon.svelte';
+  import JobStreamsCompare from '#lib/components/JobStreamsCompare.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import ProgressBar from '#lib/components/ProgressBar.svelte';
-  import StreamCompare from '#lib/components/StreamCompare.svelte';
   import { downloadBlob } from '#lib/download.ts';
   import { formatBytes } from '#lib/format/formatBytes.ts';
   import { formatDateTime } from '#lib/format/formatDateTime.ts';
@@ -32,7 +32,6 @@
   import { href } from '#lib/paths.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import type { JobLogChunk } from '#lib/shared.ts';
-  import { pairStreams } from '#lib/streams/pairStreams.ts';
   import { attempt } from '#lib/attempt.ts';
   import { toasts } from '#lib/toast.svelte.ts';
 
@@ -218,11 +217,7 @@
     {#if data.before || data.after}
       <section class="card">
         <h2>Streams before and after</h2>
-        <StreamCompare
-          caption="Streams before and after the job"
-          rows={pairStreams({ before: data.before, plan: data.plan, after: data.after })}
-          afterLabel={data.after ? 'After' : 'Planned'}
-        />
+        <JobStreamsCompare job={data} caption="Streams before and after the job" />
       </section>
     {/if}
 

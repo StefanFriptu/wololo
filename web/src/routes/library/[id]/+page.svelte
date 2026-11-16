@@ -7,6 +7,7 @@
   import Async from '#lib/components/Async.svelte';
   import Badge from '#lib/components/Badge.svelte';
   import Icon from '#lib/components/Icon.svelte';
+  import JobStreamsCompare from '#lib/components/JobStreamsCompare.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import StreamCompare from '#lib/components/StreamCompare.svelte';
   import { formatBytes } from '#lib/format/formatBytes.ts';
@@ -24,6 +25,7 @@
     PLAN_ACTION_LABELS,
     PLAN_ACTION_TONES,
   } from '#lib/labels.ts';
+  import { convertedByJob } from '#lib/library/convertedByJob.ts';
   import { fileProcessAction } from '#lib/library/fileProcessAction.ts';
   import { href } from '#lib/paths.ts';
   import { Resource } from '#lib/resource.svelte.ts';
@@ -39,6 +41,15 @@
     api('GET /api/v1/history', { query: { mediaFileId: id, pageSize: 20, sortDir: 'desc' }, signal }),
   );
   const disc = new Resource((signal) => api('GET /api/v1/bdmv/discs/:id', { params: { id }, signal }));
+  const convertingJobId = $derived(convertedByJob(detail.data));
+  const convertingJob = new Resource((signal) => {
+    if (convertingJobId === null) throw new Error('this file was not converted by a job');
+    return api('GET /api/v1/jobs/:id', { params: { id: convertingJobId }, signal });
+  });
+  const convertedJob = $derived.by(() => {
+    const job = convertingJob.data;
+    return job?.id === convertingJobId && job.state === 'completed' && job.after ? job : undefined;
+  });
   let busy = $state(false);
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -48,6 +59,7 @@
       detail.reset();
       history.reset();
       disc.reset();
+      convertingJob.reset();
       detail.load();
       history.load();
       libraries.load();
@@ -56,6 +68,10 @@
 
   $effect(() => {
     if (detail.data?.kind === 'bdmv' || detail.data?.kind === 'iso') untrack(() => disc.load());
+  });
+
+  $effect(() => {
+    if (convertingJobId !== null) untrack(() => convertingJob.load());
   });
 
   function refreshSoon(): void {
@@ -197,7 +213,19 @@
 
     <section class="card">
       <h2>Streams</h2>
-      {#if file.probe}
+      {#if convertedJob}
+        {@const job = convertedJob}
+        <JobStreamsCompare {job} caption="Streams before and after the last job" />
+        {#if job.lostFeatures.length > 0}
+          <div class="alert tone-warning lost">
+            <strong>What was lost</strong>
+            <ul class="bullets">
+              {#each job.lostFeatures as feature, index (index)}<li>{feature}</li>{/each}
+            </ul>
+          </div>
+        {/if}
+        <p class="hint">From <a href={href(`/activity/jobs/${job.id}`)}>job #{job.id}</a>.</p>
+      {:else if file.probe}
         <StreamCompare
           caption="Streams now and after conversion"
           beforeLabel="Now"
