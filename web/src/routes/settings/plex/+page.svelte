@@ -6,6 +6,7 @@
   import Badge from '#lib/components/Badge.svelte';
   import Icon from '#lib/components/Icon.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
+  import { syncPlexConnection } from '#lib/plex/syncPlexConnection.svelte.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import type { ConnectionTestResult, PlexConnection, PlexConnectionUpdate, PlexPin } from '#lib/shared.ts';
   import { attempt } from '#lib/attempt.ts';
@@ -38,18 +39,17 @@
     });
   });
 
-  $effect(() => {
-    const current = connection.data;
-    if (!current?.signedIn) return;
-    untrack(() => {
-      serverId = current.serverMachineId ?? '';
-      serverUrl = current.serverUrl ?? '';
-      servers.load();
-      if (current.serverUrl) {
-        sections.load();
-        sessions.load();
-      }
-    });
+  syncPlexConnection({
+    connection: () => connection.data,
+    onSavedServer: (machineId, url) => {
+      serverId = machineId;
+      serverUrl = url;
+    },
+    loadServers: () => servers.load(),
+    loadServerData: () => {
+      sections.load();
+      sessions.load();
+    },
   });
 
   $effect(() => {
@@ -102,12 +102,8 @@
   async function saveServer(): Promise<void> {
     if (!serverId || !serverUrl) return;
     busy = true;
-    const result = await update({ serverMachineId: serverId, serverUrl }, 'Server saved');
+    await update({ serverMachineId: serverId, serverUrl }, 'Server saved');
     busy = false;
-    if (result) {
-      sections.load();
-      sessions.load();
-    }
   }
 
   async function runTest(): Promise<void> {
