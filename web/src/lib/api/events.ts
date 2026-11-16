@@ -3,6 +3,7 @@ import { EVENT_NAMES, type EventMap, type EventName, type ServerEvent } from '#l
 import type { EventHandler } from './EventHandler.ts';
 import { reconnectDelay } from './reconnectDelay.ts';
 import type { StreamStatus } from './StreamStatus.ts';
+import { visibleOnly } from './visibleOnly.ts';
 
 interface SubscribeOptions {
   apiKey: string;
@@ -13,16 +14,12 @@ interface SubscribeOptions {
   onOpen?: (reconnected: boolean) => void;
 }
 
-/**
- * Subscribes to GET /api/v1/events (SSE). EventSource retries dropped connections itself; when it gives up (HTTP
- * error, server gone) a new one is opened with exponential back-off. Returns an unsubscribe function.
- */
-export function subscribeEvents(handler: EventHandler, options: SubscribeOptions): () => void {
+function connect(handler: EventHandler, options: SubscribeOptions, resumed: boolean): () => void {
   const names = options.names ?? EVENT_NAMES;
   let source: EventSource | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let attempt = 0;
-  let opened = false;
+  let opened = resumed;
   let closed = false;
 
   const open = (): void => {
@@ -67,4 +64,16 @@ export function subscribeEvents(handler: EventHandler, options: SubscribeOptions
     clearTimeout(timer);
     source?.close();
   };
+}
+
+/**
+ * Subscribes to GET /api/v1/events (SSE). EventSource retries dropped connections itself; when it gives up (HTTP
+ * error, server gone) a new one is opened with exponential back-off. A hidden tab closes its stream, because browsers
+ * allow six HTTP/1.1 connections per origin across all tabs; it reopens as a reconnect once the tab is visible again.
+ * Returns an unsubscribe function.
+ */
+export function subscribeEvents(handler: EventHandler, options: SubscribeOptions): () => void {
+  return visibleOnly(typeof document === 'undefined' ? null : document, (resumed) =>
+    connect(handler, options, resumed),
+  );
 }
