@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { chmodSync, closeSync, existsSync, openSync, readFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, openSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type BunSQLiteDatabase, drizzle } from 'drizzle-orm/bun-sqlite';
@@ -51,13 +51,27 @@ export function openDatabase(path: string): DbHandle {
 
 export interface MigrateOptions {
   migrationsFolder?: string;
-  /** When set and an existing database has pending migrations, it is first copied to <backupDir>/pre-migration-<ts>.db. */
+  /**
+   * When set and an existing database has pending migrations, it is first copied to <backupDir>/pre-migration-<ts>.db.
+   * After a successful migration only the newest two copies are kept.
+   */
   backupDir?: string;
 }
 
 export interface MigrateResult {
   pending: boolean;
   backupPath: string | null;
+}
+
+const PRE_MIGRATION_COPY = /^pre-migration-.+\.db$/;
+const PRE_MIGRATION_COPIES_KEPT = 2;
+
+/** Names carry an ISO timestamp, so name order is age order. */
+function prunePreMigrationCopies(backupDir: string): void {
+  const copies = readdirSync(backupDir)
+    .filter((name) => PRE_MIGRATION_COPY.test(name))
+    .sort();
+  for (const name of copies.slice(0, -PRE_MIGRATION_COPIES_KEPT)) rmSync(join(backupDir, name), { force: true });
 }
 
 function latestJournalMillis(migrationsFolder: string): number {
@@ -105,6 +119,7 @@ export function runMigrations(handle: DbHandle, options: MigrateOptions = {}): M
   } finally {
     handle.sqlite.run('PRAGMA foreign_keys = ON');
   }
+  if (backupPath !== null && options.backupDir) prunePreMigrationCopies(options.backupDir);
   return { pending, backupPath };
 }
 

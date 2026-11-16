@@ -125,3 +125,52 @@ test('runMigrations - the pre-migration copy and its folder are private', () => 
     handle.close();
   }
 });
+
+const OLD_COPIES = [1, 2, 3, 4].map((day) => `pre-migration-2020-01-0${day}T00-00-00-000Z.db`);
+
+function upgradeWithOldCopies(second: string): { backupDir: string; run: () => void } {
+  const work = mkdtempSync(join(tmpdir(), 'wololo-db-'));
+  dirs.push(work);
+  const handle = openDatabase(join(work, 'wololo.db'));
+  const backupDir = join(work, 'backups');
+  runMigrations(handle, { migrationsFolder: migrationsFolder([{ tag: '0000_init', sql: INIT, when: 1 }]) });
+  mkdirSync(backupDir);
+  for (const name of [...OLD_COPIES, 'notes.txt']) writeFileSync(join(backupDir, name), '');
+  const folder = migrationsFolder([
+    { tag: '0000_init', sql: INIT, when: 1 },
+    { tag: '0001_next', sql: second, when: 2 },
+  ]);
+  return {
+    backupDir,
+    run: () => {
+      try {
+        runMigrations(handle, { migrationsFolder: folder, backupDir });
+      } finally {
+        handle.close();
+      }
+    },
+  };
+}
+
+test('runMigrations - keeps only the newest two pre-migration copies after a successful upgrade', () => {
+  const { backupDir, run } = upgradeWithOldCopies(REBUILD);
+  expect(readdirSync(backupDir)).toHaveLength(5);
+
+  run();
+
+  const left = readdirSync(backupDir).sort();
+  expect(left).toHaveLength(3);
+  expect(left).toContain('notes.txt');
+  expect(left).toContain(OLD_COPIES[3]);
+  expect(left.filter((name) => name.startsWith('pre-migration-2020'))).toEqual([OLD_COPIES[3]]);
+});
+
+test('runMigrations - a failed upgrade deletes no pre-migration copy', () => {
+  const { backupDir, run } = upgradeWithOldCopies('THIS IS NOT SQL;');
+
+  expect(run).toThrow();
+
+  const left = readdirSync(backupDir);
+  expect(left).toHaveLength(6);
+  for (const name of OLD_COPIES) expect(left).toContain(name);
+});
