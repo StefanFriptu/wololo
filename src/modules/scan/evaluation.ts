@@ -4,6 +4,7 @@ import type { ConversionPlan, MediaFileStatus, ProbeResult } from '../../shared/
 export interface ProbeSummary {
   videoCodec: string | null;
   audioCodecs: string[];
+  streamCodecs: string[];
   subtitleLanguages: string[];
 }
 
@@ -13,6 +14,7 @@ export function summarizeProbe(probe: ProbeResult): ProbeSummary {
   return {
     videoCodec: video?.codec ?? null,
     audioCodecs: unique(probe.streams.filter((stream) => stream.kind === 'audio').map((stream) => stream.codec)),
+    streamCodecs: unique(probe.streams.map((stream) => stream.codec)),
     subtitleLanguages: unique(
       probe.streams.filter((stream) => stream.kind === 'subtitle').map((stream) => stream.language),
     ),

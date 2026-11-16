@@ -17,7 +17,7 @@ function plan(action: PlanAction, reasons: string[] = []): ConversionPlan {
   };
 }
 
-test('summarizeProbe - first real video codec, unique audio codecs, subtitle languages', () => {
+test('summarizeProbe - first real video codec, unique audio and stream codecs, subtitle languages', () => {
   const probe = probeResult([
     videoStream({ codec: 'mjpeg', attachedPicture: true }),
     videoStream({ codec: 'hevc' }),
@@ -32,6 +32,7 @@ test('summarizeProbe - first real video codec, unique audio codecs, subtitle lan
   expect(summarizeProbe(probe)).toEqual({
     videoCodec: 'hevc',
     audioCodecs: ['truehd', 'ac3'],
+    streamCodecs: ['mjpeg', 'hevc', 'truehd', 'ac3', 'subrip'],
     subtitleLanguages: ['eng', 'spa'],
   });
 });

@@ -15,6 +15,7 @@ import { mediaFiles } from '../../db/schema.ts';
 import type { MediaQuery } from '../../shared/api-types.ts';
 import type { ArrItemRef, BdmvJobPlan, ConversionPlan, Library } from '../../shared/domain.ts';
 import type { EventMap } from '../../shared/events.ts';
+import { summarizeProbe } from './evaluation.ts';
 import { fakeJobs, fakeRules, TEST_DEFINITION } from './test-fakes.ts';
 
 let t: TestContext;
@@ -416,8 +417,7 @@ describe('media rows without files', () => {
       sizeBytes: 300,
       status: 'needs_work',
       probe: dts,
-      videoCodec: 'h264',
-      audioCodecs: ['dts'],
+      ...summarizeProbe(dts),
       failingCodecs: ['dts'],
     });
     insertMediaFile(t.ctx.db, seeded(), {
@@ -426,6 +426,7 @@ describe('media rows without files', () => {
       status: 'compatible',
       videoCodec: 'hevc',
       audioCodecs: ['ac3'],
+      streamCodecs: ['hevc', 'ac3'],
     });
     insertMediaFile(t.ctx.db, seeded(), { path: join(root, 'Disc'), sizeBytes: 200, kind: 'bdmv', status: 'failed' });
 

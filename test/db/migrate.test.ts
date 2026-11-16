@@ -1,5 +1,15 @@
 import { afterEach, expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDatabase, runMigrations } from '../../src/db/client.ts';
@@ -173,4 +183,44 @@ test('runMigrations - a failed upgrade deletes no pre-migration copy', () => {
   const left = readdirSync(backupDir);
   expect(left).toHaveLength(6);
   for (const name of OLD_COPIES) expect(left).toContain(name);
+});
+
+test('0002_media_stream_codecs - backfills the codec of every probed stream from the stored probe', () => {
+  const work = mkdtempSync(join(tmpdir(), 'wololo-db-'));
+  dirs.push(work);
+  const real = join(import.meta.dir, '..', '..', 'drizzle');
+  const journal = JSON.parse(readFileSync(join(real, 'meta', '_journal.json'), 'utf8')) as {
+    entries: { tag: string; when: number }[];
+  };
+  const upTo = (tag: string) => {
+    const entries = journal.entries.slice(0, journal.entries.findIndex((entry) => entry.tag === tag) + 1);
+    return migrationsFolder(
+      entries.map((entry) => ({ ...entry, sql: readFileSync(join(real, `${entry.tag}.sql`), 'utf8') })),
+    );
+  };
+  const handle = openDatabase(join(work, 'wololo.db'));
+  try {
+    runMigrations(handle, { migrationsFolder: upTo('0001_windy_masque') });
+    handle.sqlite.run("INSERT INTO libraries (id, name) VALUES (1, 'Movies')");
+    handle.sqlite.run("INSERT INTO library_roots (id, library_id, path) VALUES (1, 1, '/m')");
+    const probe = JSON.stringify({
+      streams: [{ codec: 'h264' }, { codec: 'dts' }, { codec: 'hdmv_pgs_subtitle' }, { codec: 'dts' }],
+    });
+    handle.sqlite.run(
+      "INSERT INTO media_files (library_id, root_id, path, size_bytes, mtime_ms, probe) VALUES (1, 1, '/m/a.mkv', 1, 1, ?)",
+      [probe],
+    );
+    handle.sqlite.run(
+      "INSERT INTO media_files (library_id, root_id, path, size_bytes, mtime_ms) VALUES (1, 1, '/m/b.mkv', 1, 1)",
+    );
+
+    runMigrations(handle, { migrationsFolder: upTo('0002_media_stream_codecs') });
+
+    expect(handle.sqlite.query('SELECT path, stream_codecs FROM media_files ORDER BY path').all()).toEqual([
+      { path: '/m/a.mkv', stream_codecs: '["h264","dts","hdmv_pgs_subtitle"]' },
+      { path: '/m/b.mkv', stream_codecs: '[]' },
+    ]);
+  } finally {
+    handle.close();
+  }
 });

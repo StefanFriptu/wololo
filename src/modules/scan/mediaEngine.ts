@@ -211,13 +211,16 @@ export function createMediaEngine(ctx: AppContext) {
     };
     if (evaluation.probe !== undefined) {
       const probe = evaluation.probe;
-      const summary = probe ? summarizeProbe(probe) : { videoCodec: null, audioCodecs: [], subtitleLanguages: [] };
+      const summary = probe
+        ? summarizeProbe(probe)
+        : { videoCodec: null, audioCodecs: [], streamCodecs: [], subtitleLanguages: [] };
       Object.assign(values, {
         probe,
         durationSec: probe?.durationSec ?? null,
         formatName: probe?.formatName ?? null,
         videoCodec: summary.videoCodec,
         audioCodecs: summary.audioCodecs,
+        streamCodecs: summary.streamCodecs,
         subtitleLanguages: summary.subtitleLanguages,
         probedAt: probe?.probedAt ?? row.probedAt,
       });

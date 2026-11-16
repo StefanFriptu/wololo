@@ -115,9 +115,7 @@ function profileCondition(db: Db, profileId: number): SQL {
 
 function codecCondition(codec: string): SQL {
   const value = codec.toLowerCase();
-  return sql`(${mediaFiles.videoCodec} = ${value}
-    OR EXISTS (SELECT 1 FROM json_each(${mediaFiles.audioCodecs}) WHERE value = ${value})
-    OR EXISTS (SELECT 1 FROM json_each(${mediaFiles.probe}, '$.streams') WHERE json_extract(value, '$.codec') = ${value}))`;
+  return sql`EXISTS (SELECT 1 FROM json_each(${mediaFiles.streamCodecs}) WHERE value = ${value})`;
 }
 
 function failingCodecCondition(codec: string): SQL {

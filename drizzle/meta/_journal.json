@@ -15,6 +15,13 @@
       "when": 1794780379191,
       "tag": "0001_windy_masque",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794825983926,
+      "tag": "0002_media_stream_codecs",
+      "breakpoints": true
     }
   ]
 }

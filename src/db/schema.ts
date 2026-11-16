@@ -128,6 +128,8 @@ export const mediaFiles = sqliteTable(
     formatName: text('format_name'),
     videoCodec: text('video_codec'),
     audioCodecs: json<string[]>('audio_codecs').notNull().default([]),
+    /** Codec of every probed stream: the media list codec filter matches it without parsing the probe JSON. */
+    streamCodecs: json<string[]>('stream_codecs').notNull().default([]),
     subtitleLanguages: json<string[]>('subtitle_languages').notNull().default([]),
     failingCodecs: json<string[]>('failing_codecs').notNull().default([]),
     originalLanguage: text('original_language'),
