@@ -229,9 +229,11 @@ function similarDuration(a: number | null, b: number | null): boolean {
   return Math.abs(a - b) <= tolerance;
 }
 
-function samePresentation(track: AudioTrack, other: AudioTrack): boolean {
+/** keep_both drops nothing on a match, so two untagged tracks may pair; replace would drop a real untagged dub. */
+function samePresentation(track: AudioTrack, other: AudioTrack, mode: LibraryRuleSettings['mode']): boolean {
   if (hasRole(track.stream.title) || hasRole(other.stream.title)) return false;
-  if (!sameLanguage(track.language, other.language)) return false;
+  const languageMatches = mode === 'keep_both' ? sameGroup : sameLanguage;
+  if (!languageMatches(track.language, other.language)) return false;
   return similarDuration(track.stream.durationSec, other.stream.durationSec);
 }
 
@@ -261,7 +263,8 @@ function decideAudio(
     if (compatible(track)) return { outcome: 'copy', track };
     const encode = encodeSpec(track.stream, definition.audio);
     const duplicateOf = [...kept].find(
-      (other) => compatible(other) && other.stream.channels >= encode.channels && samePresentation(track, other),
+      (other) =>
+        compatible(other) && other.stream.channels >= encode.channels && samePresentation(track, other, library.mode),
     );
     if (duplicateOf) return { outcome: 'duplicate', track, duplicateOf };
     return { outcome: 'encode', track, encode };

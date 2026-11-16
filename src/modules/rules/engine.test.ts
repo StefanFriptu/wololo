@@ -438,6 +438,39 @@ test('planConversion - keep both puts the converted track first, marks it defaul
   expect(result.lostFeatures).toEqual([]);
 });
 
+function applyPlan(source: readonly MediaStream[], result: ConversionPlan): MediaStream[] {
+  return result.streams.map((planned, index): MediaStream => {
+    const from = source.find((stream) => stream.index === planned.sourceIndex) as MediaStream;
+    const common = { index, language: planned.language, title: planned.title, default: planned.default };
+    if (from.kind !== 'audio' || planned.encode === null) return { ...from, ...common };
+    const { codec, channels, channelLayout } = planned.encode;
+    return { ...from, ...common, codec, channels, channelLayout, lossless: false, profile: null };
+  });
+}
+
+test.each([
+  ['tagged', 'eng'],
+  ['untagged', null],
+] as const)('planConversion - keep both re-plans a converted %s file as skip', (_name, language) => {
+  const source = [videoStream(), audioStream({ index: 1, codec: 'dts', language })];
+  const first = plan(source, { library: { mode: 'keep_both' } });
+  expect(first.action).toBe('convert');
+
+  const converted = applyPlan(source, first);
+  expect(converted.map((stream) => stream.codec)).toEqual(['h264', 'ac3', 'dts']);
+  expect(plan(converted, { library: { mode: 'keep_both' } }).action).toBe('skip');
+});
+
+test('planConversion - replace never pairs an untagged compatible track with an untagged incompatible one', () => {
+  const result = plan([
+    videoStream(),
+    audioStream({ codec: 'ac3', language: null, default: true }),
+    audioStream({ codec: 'dts', language: null, default: false }),
+  ]);
+  expect(result.action).toBe('convert');
+  expect(result.dropped.map((drop) => drop.reason)).toEqual(['incompatible_replaced']);
+});
+
 test('planConversion - keep both pairs every converted track with its original', () => {
   const result = plan(
     [
