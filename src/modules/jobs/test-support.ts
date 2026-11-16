@@ -183,6 +183,7 @@ export interface MediaRecorder {
   statuses: { id: number; status: MediaFileStatus; reason: string | null }[];
   results: { id: number; update: JobResultUpdate }[];
   ignored: { id: number; ignored: boolean; reason: string | null | undefined }[];
+  reprobed: { id: number; status: MediaFileStatus; path: string }[];
 }
 
 export function mediaDetail(id: number, path: string, overrides: Partial<MediaFileDetail> = {}): MediaFileDetail {
@@ -221,6 +222,7 @@ export function recordingMediaService(files: MediaFileDetail[]): { service: Medi
     statuses: [],
     results: [],
     ignored: [],
+    reprobed: [],
   };
   const service = stubService<MediaService>('media', {
     get: async (id) => {
@@ -254,6 +256,12 @@ export function recordingMediaService(files: MediaFileDetail[]): { service: Medi
           lastJobId: update.lastJobId,
           path: update.path ?? file.path,
         });
+    },
+    reprobe: async (id) => {
+      const file = recorder.files.get(id);
+      if (!file) throw notFound(`media file ${id}`);
+      recorder.reprobed.push({ id, status: file.status, path: file.path });
+      return file;
     },
     setIgnored: async (id, ignored, reason) => {
       recorder.ignored.push({ id, ignored, reason });

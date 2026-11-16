@@ -124,6 +124,7 @@ export function createRecycleBinService(ctx: AppContext, options: RecycleBinOpti
   const ignoreRestored = async (row: RecycleBinRow, currentPath: string | null) => {
     const mediaFileId = row.mediaFileId;
     if (mediaFileId === null) return;
+    let onOriginalPath = currentPath === row.originalPath;
     if (currentPath !== null && currentPath !== row.originalPath && row.jobId !== null) {
       try {
         await ctx.services.media.recordJobResult(mediaFileId, {
@@ -132,6 +133,7 @@ export function createRecycleBinService(ctx: AppContext, options: RecycleBinOpti
           lastJobId: row.jobId,
           path: row.originalPath,
         });
+        onOriginalPath = true;
       } catch (error) {
         log.warn('cannot move the media row back to the restored path', { mediaFileId, error: errorMessage(error) });
       }
@@ -140,6 +142,13 @@ export function createRecycleBinService(ctx: AppContext, options: RecycleBinOpti
       await ctx.services.media.setIgnored(mediaFileId, true, RESTORED_REASON);
     } catch (error) {
       log.warn('cannot mark the restored file as ignored', { mediaFileId, error: errorMessage(error) });
+      return;
+    }
+    if (!onOriginalPath) return;
+    try {
+      await ctx.services.media.reprobe(mediaFileId);
+    } catch (error) {
+      log.warn('cannot re-probe the restored file', { mediaFileId, error: errorMessage(error) });
     }
   };
 

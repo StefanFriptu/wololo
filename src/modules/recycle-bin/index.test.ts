@@ -166,6 +166,7 @@ test('restore - puts the original back, bins the converted file, ignores the row
   expect(active.total).toBe(1);
   expect(readFileSync(active.items[0]?.recyclePath ?? '', 'utf8')).toBe('converted');
   expect(s.recorder.ignored).toEqual([{ id: s.mediaFileId, ignored: true, reason: 'restored from recycle bin' }]);
+  expect(s.recorder.reprobed).toEqual([{ id: s.mediaFileId, status: 'ignored', path: s.source }]);
   expect(s.notified).toEqual([
     { kind: 'replaced', localPath: s.source, mediaFileId: s.mediaFileId, arr: null, jobId: s.jobId },
   ]);
@@ -185,6 +186,8 @@ test('restore - a converted file at a new path (mp4 -> mkv) is binned too', asyn
   expect(readFileSync(mp4, 'utf8')).toBe('mp4 original');
   expect(existsSync(s.source)).toBe(false);
   expect(readdirSync(dirname(s.source))).toEqual(['Old.mp4']);
+  expect(s.recorder.ignored).toHaveLength(1);
+  expect(s.recorder.reprobed).toEqual([]);
 });
 
 test('restore - an mp4 converted to mkv moves the media row back to the mp4 path and ignores it', async () => {
@@ -215,6 +218,7 @@ test('restore - an mp4 converted to mkv moves the media row back to the mp4 path
   });
   expect(s.recorder.files.get(s.mediaFileId)).toMatchObject({ path: mp4, status: 'ignored' });
   expect(s.recorder.ignored).toEqual([{ id: s.mediaFileId, ignored: true, reason: 'restored from recycle bin' }]);
+  expect(s.recorder.reprobed).toEqual([{ id: s.mediaFileId, status: 'ignored', path: mp4 }]);
 });
 
 test('recycleForReplace - falls back to moving the original when the filesystem refuses hard links', async () => {
