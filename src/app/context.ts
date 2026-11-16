@@ -118,7 +118,7 @@ export function createAppContext(options: CreateContextOptions): AppContext {
     dbHandle: options.dbHandle,
     db: options.dbHandle.db,
     events,
-    settings: new SettingsStore(options.dbHandle.db, events),
+    settings: new SettingsStore(options.dbHandle.db, events, log),
     services: {} as Services,
     startedAt: new Date(),
     shutdownSignal: shutdown.signal,

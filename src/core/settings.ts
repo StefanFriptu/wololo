@@ -5,6 +5,7 @@ import { settings as settingsTable } from '../db/schema.ts';
 import { DEFAULT_SETTINGS, type DeepPartial, type Settings, type SettingsSection } from '../shared/settings.ts';
 import { AppError } from './errors.ts';
 import type { EventBus } from './events.ts';
+import type { Logger } from './logger.ts';
 
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'expected HH:MM');
 
@@ -71,6 +72,7 @@ export class SettingsStore {
   constructor(
     private readonly db: Db,
     private readonly events?: EventBus,
+    private readonly log?: Logger,
   ) {
     this.cache = this.load();
   }
@@ -107,18 +109,24 @@ export class SettingsStore {
     return this.cache;
   }
 
+  private loadSection(key: SettingsSection, stored: unknown): unknown {
+    const defaults = structuredClone(DEFAULT_SETTINGS[key]);
+    if (stored === undefined) return defaults;
+    const schema: z.ZodType = settingsSchema.shape[key];
+    const parsed = schema.safeParse(deepMerge(defaults, stored));
+    if (parsed.success) return parsed.data;
+    this.log?.warn('stored settings section invalid, using defaults', {
+      section: key,
+      issues: z.treeifyError(parsed.error),
+    });
+    return defaults;
+  }
+
   private load(): Settings {
     const rows = this.db.select().from(settingsTable).all();
-    let merged: Settings = structuredClone(DEFAULT_SETTINGS);
-    for (const row of rows) {
-      if (SECTIONS.includes(row.key as SettingsSection)) {
-        merged = {
-          ...merged,
-          [row.key]: deepMerge(merged[row.key as SettingsSection], row.value),
-        };
-      }
-    }
-    const parsed = settingsSchema.safeParse(merged);
-    return parsed.success ? parsed.data : structuredClone(DEFAULT_SETTINGS);
+    const stored = new Map(rows.map((row) => [row.key, row.value]));
+    return settingsSchema.parse(
+      Object.fromEntries(SECTIONS.map((key) => [key, this.loadSection(key, stored.get(key))])),
+    );
   }
 }
