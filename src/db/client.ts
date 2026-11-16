@@ -1,9 +1,10 @@
 import { Database } from 'bun:sqlite';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, openSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type BunSQLiteDatabase, drizzle } from 'drizzle-orm/bun-sqlite';
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator';
+import { ensurePrivateDir } from '../core/ensurePrivateDir.ts';
 import * as schema from './schema.ts';
 
 export type Db = BunSQLiteDatabase<typeof schema>;
@@ -16,7 +17,18 @@ export interface DbHandle {
 
 export const MIGRATIONS_DIR = fileURLToPath(new URL('../../drizzle', import.meta.url));
 
+const OWNER_ONLY = 0o600;
+
+/** The database holds integration secrets; SQLite gives new -wal and -shm files the main file's mode. */
+function restrictToOwner(path: string): void {
+  if (!existsSync(path)) closeSync(openSync(path, 'a', OWNER_ONLY));
+  for (const file of [path, `${path}-wal`, `${path}-shm`]) {
+    if (existsSync(file)) chmodSync(file, OWNER_ONLY);
+  }
+}
+
 export function openDatabase(path: string): DbHandle {
+  restrictToOwner(path);
   const sqlite = new Database(path, { create: true, strict: true });
   sqlite.run('PRAGMA journal_mode = WAL');
   sqlite.run('PRAGMA synchronous = NORMAL');
@@ -77,9 +89,10 @@ export function runMigrations(handle: DbHandle, options: MigrateOptions = {}): M
   const pending = applied === null || applied < latestJournalMillis(migrationsFolder);
   let backupPath: string | null = null;
   if (pending && applied !== null && options.backupDir) {
-    mkdirSync(options.backupDir, { recursive: true });
+    ensurePrivateDir(options.backupDir);
     backupPath = join(options.backupDir, `pre-migration-${new Date().toISOString().replace(/[:.]/g, '-')}.db`);
     handle.sqlite.run('VACUUM INTO ?', [backupPath]);
+    chmodSync(backupPath, OWNER_ONLY);
   }
   handle.sqlite.run('PRAGMA foreign_keys = OFF');
   try {

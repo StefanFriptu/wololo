@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDatabase, runMigrations } from '../../src/db/client.ts';
@@ -69,6 +69,58 @@ test('a drizzle-kit table rebuild keeps child rows, backs up first and re-enable
     expect(second.pending).toBe(true);
     expect(second.backupPath && existsSync(second.backupPath)).toBe(true);
     expect(readdirSync(join(work, 'backups'))).toHaveLength(1);
+  } finally {
+    handle.close();
+  }
+});
+
+const modeOf = (path: string) => statSync(path).mode & 0o777;
+
+test('openDatabase - a new database and its WAL files are readable by the owner only', () => {
+  const work = mkdtempSync(join(tmpdir(), 'wololo-db-'));
+  dirs.push(work);
+  const path = join(work, 'wololo.db');
+  const previous = process.umask(0o002);
+  try {
+    const handle = openDatabase(path);
+    handle.sqlite.run('CREATE TABLE t (id INTEGER)');
+    expect([modeOf(path), modeOf(`${path}-wal`), modeOf(`${path}-shm`)]).toEqual([0o600, 0o600, 0o600]);
+    handle.close();
+  } finally {
+    process.umask(previous);
+  }
+});
+
+test('openDatabase - tightens an existing world-readable database and its WAL files', () => {
+  const work = mkdtempSync(join(tmpdir(), 'wololo-db-'));
+  dirs.push(work);
+  const path = join(work, 'wololo.db');
+  for (const file of [path, `${path}-wal`, `${path}-shm`]) {
+    writeFileSync(file, '');
+    chmodSync(file, 0o644);
+  }
+  const handle = openDatabase(path);
+  expect([modeOf(path), modeOf(`${path}-wal`), modeOf(`${path}-shm`)]).toEqual([0o600, 0o600, 0o600]);
+  handle.close();
+});
+
+test('runMigrations - the pre-migration copy and its folder are private', () => {
+  const work = mkdtempSync(join(tmpdir(), 'wololo-db-'));
+  dirs.push(work);
+  const handle = openDatabase(join(work, 'wololo.db'));
+  const backupDir = join(work, 'backups');
+  try {
+    runMigrations(handle, { migrationsFolder: migrationsFolder([{ tag: '0000_init', sql: INIT, when: 1 }]) });
+    const result = runMigrations(handle, {
+      migrationsFolder: migrationsFolder([
+        { tag: '0000_init', sql: INIT, when: 1 },
+        { tag: '0001_rebuild', sql: REBUILD, when: 2 },
+      ]),
+      backupDir,
+    });
+    expect(result.backupPath).not.toBeNull();
+    expect(modeOf(result.backupPath as string)).toBe(0o600);
+    expect(modeOf(backupDir)).toBe(0o700);
   } finally {
     handle.close();
   }

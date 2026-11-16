@@ -1,7 +1,8 @@
 import type { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { ensurePrivateDir } from '../../core/ensurePrivateDir.ts';
 import { AppError, errorMessage, notFound } from '../../core/errors.ts';
 import type { Logger } from '../../core/logger.ts';
 import type { BackupInfo, RestoreResult } from '../../shared/api-types.ts';
@@ -93,7 +94,7 @@ export function createBackupStore(deps: BackupStoreDeps): BackupStore {
   };
 
   const createUnlocked = async (kind: BackupKind): Promise<BackupInfo> => {
-    mkdirSync(deps.backupDir, { recursive: true });
+    ensurePrivateDir(deps.backupDir);
     removeInterruptedTempFiles();
     const date = deps.now();
     let clash = 0;
@@ -103,6 +104,7 @@ export function createBackupStore(deps: BackupStoreDeps): BackupStore {
     const partial = join(deps.backupDir, `.${name}.partial`);
     try {
       deps.sqlite.run('VACUUM INTO ?', [snapshot]);
+      chmodSync(snapshot, 0o600);
       const entries = [{ name: DATABASE_FILE, sourcePath: snapshot }];
       if (existsSync(deps.configFile)) entries.push({ name: CONFIG_FILE, sourcePath: deps.configFile });
       await writeZipArchive(partial, entries);

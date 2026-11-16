@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
-import { existsSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { unzipSync } from 'fflate';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
@@ -109,6 +109,11 @@ test('backups - create, list, download as zip, delete', async () => {
 
   expect((await t.request(`/api/v1/system/backups/${created.name}`, { method: 'DELETE' })).status).toBe(204);
   expect(await json<BackupInfo[]>(await t.request('/api/v1/system/backups'))).toEqual([]);
+});
+
+test('backups - the backup folder is private to the owner', async () => {
+  await createBackup();
+  expect(statSync(t.ctx.config.get().backupDir).mode & 0o777).toBe(0o700);
 });
 
 test.each([
