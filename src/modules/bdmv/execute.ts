@@ -255,6 +255,7 @@ export function createBdmvExecutor(
           outputPath,
           probe: work.probe,
           plan: sideFilePlan(work.plan, stream),
+          tagAllLanguages: true,
         }),
         onStdoutLine: (line) => {
           const update = parser.push(line);

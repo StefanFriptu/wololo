@@ -67,21 +67,20 @@ function encodeOptions(stream: PlannedStream, specifier: string): string[] {
   ];
 }
 
-function streamOptions(stream: PlannedStream, specifier: string, format: OutputFormat): string[] {
+function streamOptions(stream: PlannedStream, specifier: string, format: OutputFormat, tagAll: boolean): string[] {
+  const language =
+    stream.language && (tagAll || stream.retagged) ? [`-metadata:s:${specifier}`, `language=${stream.language}`] : [];
   if (stream.kind === 'audio') {
     return [
       ...encodeOptions(stream, specifier),
-      ...(stream.language ? [`-metadata:s:${specifier}`, `language=${stream.language}`] : []),
+      ...language,
       `-disposition:${specifier}`,
       stream.default ? '+default' : '-default',
     ];
   }
   if (stream.kind === 'subtitle') {
     const conversion = subtitleConversion(format, stream.codec);
-    return [
-      ...(conversion ? [`-c:${specifier}`, conversion] : []),
-      ...(stream.language ? [`-metadata:s:${specifier}`, `language=${stream.language}`] : []),
-    ];
+    return [...(conversion ? [`-c:${specifier}`, conversion] : []), ...language];
   }
   return [];
 }
@@ -92,6 +91,7 @@ export const buildAudioConversionArgs: BuildAudioConversionArgs = ({
   outputPath,
   probe,
   plan,
+  tagAllLanguages = false,
 }) => {
   if (outputPath.startsWith('-')) throw new Error(`output path ${outputPath} would be read as an ffmpeg option`);
   if (normalize(outputPath) === normalize(inputPath)) throw new Error(`output path ${outputPath} is the input file`);
@@ -109,7 +109,7 @@ export const buildAudioConversionArgs: BuildAudioConversionArgs = ({
   const perStream = plan.streams.flatMap((stream) => {
     const position = counters.get(stream.kind) ?? 0;
     counters.set(stream.kind, position + 1);
-    return streamOptions(stream, `${STREAM_SPECIFIERS[stream.kind]}:${position}`, format);
+    return streamOptions(stream, `${STREAM_SPECIFIERS[stream.kind]}:${position}`, format, tagAllLanguages);
   });
 
   return [

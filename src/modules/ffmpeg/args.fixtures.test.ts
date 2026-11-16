@@ -388,6 +388,25 @@ describe.skipIf(!ffmpegAvailable())('buildAudioConversionArgs with real ffmpeg',
   );
 
   test(
+    'buildAudioConversionArgs - source language tags are kept as written (fra stays fra, deu stays deu)',
+    async () => {
+      const conversion = await convert({
+        name: 'rules-ffmpeg-terminology-language-codes',
+        audio: [
+          { codec: 'dts', layout: '5.1', language: 'fra', title: 'Francais' },
+          { codec: 'ac3', layout: 'stereo', language: 'deu', title: 'Deutsch', default: false },
+        ],
+      });
+      await expectSafeOutput(conversion);
+      expect(audioOf(conversion.output).map((stream) => [stream.codec_name, stream.tags.language])).toEqual([
+        ['ac3', 'fra'],
+        ['ac3', 'deu'],
+      ]);
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
     'buildAudioConversionArgs - untagged audio is tagged with the original language',
     async () => {
       const conversion = await convert(FIXTURES.untaggedLanguage, {

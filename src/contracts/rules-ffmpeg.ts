@@ -111,12 +111,18 @@ export interface AudioConversionInput {
   probe: ProbeResult;
   /** Streams to write, in output order. BDMV passes a plan reduced to the one audio stream of a side file. */
   plan: ConversionPlan;
+  /**
+   * Write the planned language of every audio and subtitle stream. BDMV sets it: its probe carries the playlist
+   * languages the disc streams lack. Otherwise only filled-in (retagged) languages are written and every other tag is
+   * copied from the source unchanged ("fra" stays "fra", never rewritten to "fre").
+   */
+  tagAllLanguages?: boolean;
 }
 
 /**
  * Pure. Full ffmpeg argv WITHOUT the binary, e.g.
  * ["-hide_banner", "-nostdin", "-y", "-i", in, "-map", "0:0", ..., "-c:v", "copy", "-c:a:0", "ac3", "-b:a:0", "640k", "-ac:a:0", "6",
- *  "-map_chapters", "0", "-map_metadata", "0", "-metadata:s:a:0", "language=eng", "-disposition:a:0", "+default",
+ *  "-map_chapters", "0", "-map_metadata", "0", "-disposition:a:0", "+default",
  *  "-progress", "pipe:1", "-nostats", "-f", "matroska", out]
  * Decoder options before -i: "-core_only 0" when a dts track is encoded (full DTS-HD MA, never the core), "-drc_scale 0"
  * when ac3/eac3 is decoded (no dynamic range compression). Output format from the extension (.mp4/.m4v -> mp4, else

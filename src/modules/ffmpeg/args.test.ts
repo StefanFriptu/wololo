@@ -104,12 +104,8 @@ test('buildAudioConversionArgs - dts 5.1 movie becomes the full ac3 conversion a
     '-ac:a:0',
     '6',
     ...clearedTags('a:0'),
-    '-metadata:s:a:0',
-    'language=eng',
     '-disposition:a:0',
     '+default',
-    '-metadata:s:s:0',
-    'language=eng',
     '-map_chapters',
     '0',
     '-map_metadata',
@@ -208,6 +204,21 @@ test('buildAudioConversionArgs - retagged streams get their filled language', ()
     }),
   );
   expect(valueAfter(args, '-metadata:s:a:0')).toBe('language=spa');
+  expect(valueAfter(args, '-metadata:s:s:0')).toBe('language=spa');
+});
+
+test('buildAudioConversionArgs - tagged streams keep the source tag: no language metadata is written', () => {
+  const args = buildAudioConversionArgs(
+    input([audioStream({ codec: 'dts', language: 'fra' }), subtitleStream({ language: 'fra' })]),
+  );
+  expect(valueAfter(args, '-c:a:0')).toBe('ac3');
+  expect(args.some((arg) => arg.startsWith('language='))).toBe(false);
+});
+
+test('buildAudioConversionArgs - tagAllLanguages writes every planned language (disc playlist languages)', () => {
+  const base = input([audioStream({ codec: 'ac3', language: 'fre' }), subtitleStream({ language: 'spa' })]);
+  const args = buildAudioConversionArgs({ ...base, tagAllLanguages: true });
+  expect(valueAfter(args, '-metadata:s:a:0')).toBe('language=fre');
   expect(valueAfter(args, '-metadata:s:s:0')).toBe('language=spa');
 });
 
