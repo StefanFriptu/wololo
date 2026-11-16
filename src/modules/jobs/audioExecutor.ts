@@ -128,6 +128,7 @@ export function createAudioExecutor(deps: AudioExecutorDeps): JobExecutor {
 
     ctx.setStep('preparing', 'probing source and planning');
     const media = await services.media.get(job.mediaFileId);
+    const expectedSource = fs.stat(sourcePath);
     const probe = await services.probe.probe(sourcePath, { signal: ctx.signal });
     const library = await services.libraries.get(media.libraryId);
     const profile = await services.rules.effectiveProfileForLibrary(media.libraryId);
@@ -190,6 +191,7 @@ export function createAudioExecutor(deps: AudioExecutorDeps): JobExecutor {
     ctx.setStep('replacing', outputPath === sourcePath ? sourcePath : `${sourcePath} -> ${outputPath}`);
     const { recycleBinEntryId } = await replaceOriginal({
       sourcePath,
+      expectedSource,
       tempPath,
       outputPath,
       recycle: deps.recycleBinEnabled()

@@ -95,6 +95,7 @@ test('replaceOriginal - flushes the temp file before the swap and the folder aft
 
   await replaceOriginal({
     sourcePath: inPlace,
+    expectedSource: statSync(inPlace),
     tempPath: temp,
     outputPath: inPlace,
     recycle: null,
@@ -112,7 +113,15 @@ test('replaceOriginal - a new output path is created by link + unlink and the ol
   const { source, temp, mkv } = files();
   const { fs, calls } = recordingFs();
 
-  await replaceOriginal({ sourcePath: source, tempPath: temp, outputPath: mkv, recycle: null, fs, warn: () => {} });
+  await replaceOriginal({
+    sourcePath: source,
+    expectedSource: statSync(source),
+    tempPath: temp,
+    outputPath: mkv,
+    recycle: null,
+    fs,
+    warn: () => {},
+  });
 
   expect(calls.some((call) => call.startsWith('rename'))).toBe(false);
   expect(readdirSync(dir)).toEqual(['Movie.mkv']);
@@ -131,6 +140,7 @@ test('replaceOriginal - an output that appears after the check is never overwrit
 
   const error = await replaceOriginal({
     sourcePath: source,
+    expectedSource: statSync(source),
     tempPath: temp,
     outputPath: mkv,
     recycle: null,
@@ -155,7 +165,15 @@ test('replaceOriginal - without hard links a new output path is created by renam
   const { source, temp, mkv } = files();
   const { fs } = recordingFs(noLinks);
 
-  await replaceOriginal({ sourcePath: source, tempPath: temp, outputPath: mkv, recycle: null, fs, warn: () => {} });
+  await replaceOriginal({
+    sourcePath: source,
+    expectedSource: statSync(source),
+    tempPath: temp,
+    outputPath: mkv,
+    recycle: null,
+    fs,
+    warn: () => {},
+  });
 
   expect(readdirSync(dir)).toEqual(['Movie.mkv']);
   expect(readFileSync(mkv, 'utf8')).toBe('new');
@@ -171,7 +189,15 @@ test('replaceOriginal - without hard links an output that appears after the firs
   writeFileSync(mkv, 'foreign');
 
   await expect(
-    replaceOriginal({ sourcePath: source, tempPath: temp, outputPath: mkv, recycle: null, fs, warn: () => {} }),
+    replaceOriginal({
+      sourcePath: source,
+      expectedSource: statSync(source),
+      tempPath: temp,
+      outputPath: mkv,
+      recycle: null,
+      fs,
+      warn: () => {},
+    }),
   ).rejects.toThrow('output path appeared during the job');
 
   expect(readFileSync(mkv, 'utf8')).toBe('foreign');
@@ -186,6 +212,7 @@ test('replaceOriginal - the source keeps its permission bits on the new file', a
 
   await replaceOriginal({
     sourcePath: inPlace,
+    expectedSource: statSync(inPlace),
     tempPath: temp,
     outputPath: inPlace,
     recycle: null,
@@ -195,4 +222,36 @@ test('replaceOriginal - the source keeps its permission bits on the new file', a
 
   expect(statSync(inPlace).mode & 0o777).toBe(0o604);
   expect(warnings).toEqual([]);
+});
+
+test('replaceOriginal - a source swapped since it was probed is never replaced and nothing is touched', async () => {
+  const { temp } = files();
+  const inPlace = join(dir, 'Movie.mkv');
+  writeFileSync(inPlace, 'old');
+  const probed = statSync(inPlace);
+  const swaps: Partial<Stats>[] = [{ ino: probed.ino + 1 }, { mtimeMs: probed.mtimeMs + 1000 }, { size: 1 }];
+
+  for (const swap of swaps) {
+    const { fs, calls } = recordingFs({ stat: (path) => ({ ...statSync(path), ...swap }) as Stats });
+    let recycled = false;
+    const error = await replaceOriginal({
+      sourcePath: inPlace,
+      expectedSource: probed,
+      tempPath: temp,
+      outputPath: inPlace,
+      recycle: async () => {
+        recycled = true;
+        return { entryId: 1, mode: 'link' };
+      },
+      fs,
+      warn: () => {},
+    }).catch((caught: unknown) => caught);
+
+    expect((error as AppError).code).toBe('conflict');
+    expect((error as AppError).message).toContain('source changed during the job');
+    expect(calls).toEqual([`stat ${inPlace}`]);
+    expect(recycled).toBe(false);
+  }
+  expect(readFileSync(inPlace, 'utf8')).toBe('old');
+  expect(readFileSync(temp, 'utf8')).toBe('new');
 });

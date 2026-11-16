@@ -82,8 +82,22 @@ function moveWithoutClobber(fs: ReplaceFs, tempPath: string, outputPath: string)
   fs.unlink(tempPath);
 }
 
+/** What identifies the source as the file that was probed and planned; ctime is left out, the bin hard link bumps it. */
+export type SourceIdentity = Pick<Stats, 'dev' | 'ino' | 'size' | 'mtimeMs'>;
+
+function sameSource(current: Stats, expected: SourceIdentity): boolean {
+  return (
+    current.dev === expected.dev &&
+    current.ino === expected.ino &&
+    current.size === expected.size &&
+    current.mtimeMs === expected.mtimeMs
+  );
+}
+
 export interface ReplaceInput {
   sourcePath: string;
+  /** The source as it was stat'ed before probing; a different file there now is never replaced. */
+  expectedSource: SourceIdentity;
   tempPath: string;
   outputPath: string;
   /** Recycle-bin step 2 of the contract; null when the bin is disabled. */
@@ -102,6 +116,8 @@ export async function replaceOriginal(input: ReplaceInput): Promise<{ recycleBin
   const { fs, sourcePath, tempPath, outputPath } = input;
   const inPlace = outputPath === sourcePath;
   const sourceStats = fs.stat(sourcePath);
+  if (!sameSource(sourceStats, input.expectedSource))
+    throw new AppError('conflict', `source changed during the job, not replacing it: ${sourcePath}`);
   const ownershipWarning = copyOwnership(fs, sourceStats, tempPath);
   if (ownershipWarning) input.warn(ownershipWarning);
   fs.fsync(tempPath);
