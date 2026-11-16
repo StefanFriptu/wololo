@@ -329,14 +329,19 @@ describe('URL base', () => {
   });
 
   const builtIndex = join(import.meta.dir, '..', '..', 'web', 'build', 'index.html');
-  test.skipIf(!existsSync(builtIndex))('the real web build has no root-absolute asset URL left', async () => {
-    const based = urlBaseContext(readFileSync(builtIndex, 'utf8'));
-    try {
-      const html = await (await based.app.request('/wololo/')).text();
-      expect(html).not.toMatch(/["'(]\/_app\//);
-      expect(html).not.toContain('base: ""');
-    } finally {
-      based.cleanup();
-    }
-  });
+  const requireWebBuild = process.env.WOLOLO_REQUIRE_WEB_BUILD === '1';
+  test.skipIf(!existsSync(builtIndex) && !requireWebBuild)(
+    'the real web build has no root-absolute asset URL left',
+    async () => {
+      expect(existsSync(builtIndex)).toBe(true);
+      const based = urlBaseContext(readFileSync(builtIndex, 'utf8'));
+      try {
+        const html = await (await based.app.request('/wololo/')).text();
+        expect(html).not.toMatch(/["'(]\/_app\//);
+        expect(html).not.toContain('base: ""');
+      } finally {
+        based.cleanup();
+      }
+    },
+  );
 });
