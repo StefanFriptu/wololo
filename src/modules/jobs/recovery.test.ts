@@ -27,6 +27,12 @@ test.each<[string, Partial<RecoveryInput>, RecoveryAction]>([
     'complete',
   ],
   ['no temp, original present, bin disabled', { sourceExists: true, outputExists: true }, 'complete'],
+  ['temp, original deleted by someone else, no bin entry', { tempExists: true }, 'fail_source_missing'],
+  [
+    'mp4 source deleted by someone else, temp left, no bin entry',
+    { samePath: false, tempExists: true },
+    'fail_source_missing',
+  ],
   ['nothing left but the bin', { hasBinEntry: true }, 'restore_from_bin'],
   ['nothing left at all', {}, 'fail_source_missing'],
   ['mp4 source: temp + source, no output', { samePath: false, tempExists: true, sourceExists: true }, 'keep_original'],

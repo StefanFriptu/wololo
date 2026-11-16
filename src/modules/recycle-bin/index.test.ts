@@ -238,6 +238,51 @@ test('recycleForReplace - falls back to moving the original when the filesystem 
   expect(getJobRow(t.ctx.db, s.jobId)?.recycleBinEntryId).toBe(entry.id);
 });
 
+const refuseLinks = () => {
+  throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+};
+
+test('recycleForReplace - in move mode the row and job link exist before the original leaves the library', async () => {
+  const s = setup();
+  t = s.t;
+  const db = t.ctx.db;
+  const seen: { rows: number; linked: number | null }[] = [];
+  const service = createRecycleBinService(t.ctx, {
+    link: refuseLinks,
+    rename: (from, to) => {
+      seen.push({
+        rows: db.select().from(recycleBin).all().length,
+        linked: getJobRow(db, s.jobId)?.recycleBinEntryId ?? null,
+      });
+      renameSync(from, to);
+    },
+  });
+
+  const { entry } = await service.recycleForReplace(s.source, { jobId: s.jobId, mediaFileId: s.mediaFileId });
+
+  expect(seen).toEqual([{ rows: 1, linked: entry.id }]);
+  expect(entry.sizeBytes).toBe(8);
+});
+
+test('recycleForReplace - a failed move into the bin leaves no row and no job link', async () => {
+  const s = setup();
+  t = s.t;
+  const service = createRecycleBinService(t.ctx, {
+    link: refuseLinks,
+    rename: () => {
+      throw Object.assign(new Error('cross-device link not permitted'), { code: 'EXDEV' });
+    },
+  });
+
+  await expect(service.recycleForReplace(s.source, { jobId: s.jobId, mediaFileId: null })).rejects.toThrow(
+    'cross-device',
+  );
+
+  expect(readFileSync(s.source, 'utf8')).toBe('original');
+  expect(t.ctx.db.select().from(recycleBin).all()).toEqual([]);
+  expect(getJobRow(t.ctx.db, s.jobId)?.recycleBinEntryId).toBeNull();
+});
+
 test('recycleForReplace - other link errors are not mistaken for missing hard-link support', async () => {
   const s = setup();
   t = s.t;

@@ -35,6 +35,17 @@ export function linkJobToRecycleRow(db: Db, jobId: number, entryId: number): voi
   db.update(jobs).set({ recycleBinEntryId: entryId, updatedAt: nowIso() }).where(eq(jobs.id, jobId)).run();
 }
 
+export function insertRecycleRowForJob(
+  db: Db,
+  values: typeof recycleBin.$inferInsert & { jobId: number },
+): RecycleBinRow {
+  return db.transaction((tx) => {
+    const row = tx.insert(recycleBin).values(values).returning().get();
+    tx.update(jobs).set({ recycleBinEntryId: row.id, updatedAt: nowIso() }).where(eq(jobs.id, values.jobId)).run();
+    return row;
+  });
+}
+
 export function listActiveRecycleRows(
   db: Db,
   window: { page: number; pageSize: number; sortDir: 'asc' | 'desc' },

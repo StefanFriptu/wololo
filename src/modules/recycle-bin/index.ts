@@ -1,4 +1,14 @@
-import { chmodSync, chownSync, existsSync, linkSync, mkdirSync, renameSync, statSync, unlinkSync } from 'node:fs';
+import {
+  chmodSync,
+  chownSync,
+  existsSync,
+  linkSync,
+  mkdirSync,
+  renameSync,
+  type Stats,
+  statSync,
+  unlinkSync,
+} from 'node:fs';
 import { dirname } from 'node:path';
 import type { AppContext } from '../../app/context.ts';
 import type { RecycleBinService } from '../../contracts/jobs.ts';
@@ -11,8 +21,10 @@ import { checkRecycleBinLocation } from './checkRecycleBinLocation.ts';
 import { removeEmptyRecycleDirs } from './cleanup.ts';
 import { expiresAtFor, isNormalizedAbsolutePath, isRecyclePath, recyclePathFor, recycleStamp } from './paths.ts';
 import {
+  deleteRecycleRow,
   getRecycleRow,
   insertRecycleRow,
+  insertRecycleRowForJob,
   linkJobToRecycleRow,
   listActiveRecycleRows,
   markRecycleRow,
@@ -27,6 +39,7 @@ type Refs = { jobId?: number | null; mediaFileId?: number | null };
 export interface RecycleBinOptions {
   now?: () => Date;
   link?: (from: string, to: string) => void;
+  rename?: (from: string, to: string) => void;
 }
 
 export function createRecycleBinService(ctx: AppContext, options: RecycleBinOptions = {}): RecycleBinService {
@@ -34,6 +47,7 @@ export function createRecycleBinService(ctx: AppContext, options: RecycleBinOpti
   const { db } = ctx;
   const now = options.now ?? (() => new Date());
   const link = options.link ?? linkSync;
+  const rename = options.rename ?? renameSync;
 
   const history = async (entry: Parameters<AppContext['services']['jobs']['addHistory']>[0]) => {
     try {
@@ -60,27 +74,43 @@ export function createRecycleBinService(ctx: AppContext, options: RecycleBinOpti
     return target;
   };
 
-  const record = async (path: string, target: string, refs: Refs, mode: 'link' | 'move'): Promise<RecycleBinRow> => {
-    const stats = statSync(target);
-    const row = insertRecycleRow(db, {
-      originalPath: path,
-      recyclePath: target,
-      sizeBytes: stats.size,
-      uid: stats.uid,
-      gid: stats.gid,
-      mode: stats.mode & 0o7777,
-      jobId: refs.jobId ?? null,
-      mediaFileId: refs.mediaFileId ?? null,
-      expiresAt: expiresAtFor(now(), ctx.settings.section('recycleBin').retentionDays),
-    });
-    await history({
+  const rowValues = (path: string, target: string, stats: Stats, refs: Refs) => ({
+    originalPath: path,
+    recyclePath: target,
+    sizeBytes: stats.size,
+    uid: stats.uid,
+    gid: stats.gid,
+    mode: stats.mode & 0o7777,
+    jobId: refs.jobId ?? null,
+    mediaFileId: refs.mediaFileId ?? null,
+    expiresAt: expiresAtFor(now(), ctx.settings.section('recycleBin').retentionDays),
+  });
+
+  const recordHistory = async (row: RecycleBinRow, refs: Refs, mode: 'link' | 'move') =>
+    history({
       event: 'recycled',
-      path,
-      message: `${mode === 'link' ? 'linked' : 'moved'} to ${target}`,
+      path: row.originalPath,
+      message: `${mode === 'link' ? 'linked' : 'moved'} to ${row.recyclePath}`,
       jobId: refs.jobId ?? null,
       mediaFileId: refs.mediaFileId ?? null,
       data: { recycleBinEntryId: row.id },
     });
+
+  const record = async (path: string, target: string, refs: Refs, mode: 'link' | 'move'): Promise<RecycleBinRow> => {
+    const row = insertRecycleRow(db, rowValues(path, target, statSync(target), refs));
+    await recordHistory(row, refs, mode);
+    return row;
+  };
+
+  const moveForReplace = async (path: string, target: string, refs: { jobId: number; mediaFileId: number | null }) => {
+    const row = insertRecycleRowForJob(db, { ...rowValues(path, target, statSync(path), refs), jobId: refs.jobId });
+    try {
+      rename(path, target);
+    } catch (error) {
+      deleteRecycleRow(db, row.id);
+      throw error;
+    }
+    await recordHistory(row, refs, 'move');
     return row;
   };
 
@@ -175,18 +205,16 @@ export function createRecycleBinService(ctx: AppContext, options: RecycleBinOpti
     recycleForReplace: async (path, refs) => {
       if (!existsSync(path)) throw notFound(path);
       const target = await prepareTarget(path);
-      let mode: 'link' | 'move' = 'link';
       try {
         link(path, target);
       } catch (error) {
         if (!isLinkUnsupported(error)) throw error;
         log.warn('hard links unsupported here, moving the original into the bin', { path, error: errorMessage(error) });
-        renameSync(path, target);
-        mode = 'move';
+        return { entry: toRecycleBinEntry(await moveForReplace(path, target, refs)), mode: 'move' };
       }
-      const row = await record(path, target, refs, mode);
+      const row = await record(path, target, refs, 'link');
       linkJobToRecycleRow(db, refs.jobId, row.id);
-      return { entry: toRecycleBinEntry(row), mode };
+      return { entry: toRecycleBinEntry(row), mode: 'link' };
     },
 
     restore: async (id) => {

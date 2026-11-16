@@ -257,6 +257,7 @@ export function createJobsService(ctx: AppContext): JobsService {
           continue;
         }
         if (resolution.kind === 'source_missing') {
+          if (resolution.tempDeleted) counts.tempFilesDeleted += 1;
           await lifecycle.failed(row, 'source file missing after an interrupted replace');
           continue;
         }

@@ -9,7 +9,7 @@ import { decideRecovery, type RecoveryAction } from './recovery.ts';
 export type ReplaceResolution =
   | { kind: 'completed'; outputPath: string; action: RecoveryAction }
   | { kind: 'requeue'; action: RecoveryAction; tempDeleted: boolean }
-  | { kind: 'source_missing'; action: RecoveryAction };
+  | { kind: 'source_missing'; action: RecoveryAction; tempDeleted: boolean };
 
 function sameInode(a: string, b: string): boolean {
   try {
@@ -61,7 +61,10 @@ export function resolveInterruptedJob(
       return { kind: 'requeue', action, tempDeleted: deleteTempPath(tempPath) };
     case 'keep_original': {
       if (binRow && binActive) {
-        if (sameInode(binRow.recyclePath, sourcePath)) {
+        if (!existsSync(binRow.recyclePath)) {
+          deleteRecycleRow(db, binRow.id);
+          notes(`dropped recycle-bin entry ${binRow.id}: the original never reached ${binRow.recyclePath}`);
+        } else if (sameInode(binRow.recyclePath, sourcePath)) {
           unlinkSync(binRow.recyclePath);
           removeEmptyRecycleDirs(binRow.recyclePath);
           deleteRecycleRow(db, binRow.id);
@@ -73,7 +76,7 @@ export function resolveInterruptedJob(
       return { kind: 'requeue', action, tempDeleted: deleteTempPath(tempPath) };
     }
     case 'finish_rename':
-      if (!tempPath) return { kind: 'source_missing', action };
+      if (!tempPath) return { kind: 'source_missing', action, tempDeleted: false };
       renameSync(tempPath, outputPath);
       notes(`moved verified ${tempPath} to ${outputPath}`);
       return { kind: 'completed', outputPath, action };
@@ -89,13 +92,13 @@ export function resolveInterruptedJob(
       notes(`dropped ${tempPath} and the old source, ${outputPath} is in place`);
       return { kind: 'completed', outputPath, action };
     case 'restore_from_bin': {
-      if (!binRow) return { kind: 'source_missing', action };
+      if (!binRow) return { kind: 'source_missing', action, tempDeleted: false };
       renameSync(binRow.recyclePath, sourcePath);
       markRecycleRow(db, binRow.id, { restoredAt: options.now.toISOString() });
       notes(`restored ${sourcePath} from the recycle bin`);
       return { kind: 'requeue', action, tempDeleted: deleteTempPath(tempPath) };
     }
     case 'fail_source_missing':
-      return { kind: 'source_missing', action };
+      return { kind: 'source_missing', action, tempDeleted: deleteTempPath(tempPath) };
   }
 }

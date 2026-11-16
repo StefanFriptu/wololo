@@ -11,7 +11,7 @@ import { TEMP_FILE_MARKER } from '../../contracts/jobs.ts';
 import type { LibraryService } from '../../contracts/probe-scan.ts';
 import type { JobRow, NewJobRow } from '../../db/schema.ts';
 import { createRecycleBinService } from '../recycle-bin/index.ts';
-import { insertRecycleRow } from '../recycle-bin/recycleBinQueries.ts';
+import { getRecycleRow, insertRecycleRow } from '../recycle-bin/recycleBinQueries.ts';
 import { createAudioExecutor } from './audioExecutor.ts';
 import { getJobRow, updateJobRow } from './jobQueries.ts';
 import { tempPathFor } from './paths.ts';
@@ -284,6 +284,41 @@ describe('crash recovery decisions on seeded state', () => {
       error: 'source file missing after an interrupted replace',
     });
     expect(s.recorder.statuses.map((entry) => entry.status)).toEqual(['failed']);
+  });
+
+  test('recover - a source deleted by someone else fails the job and deletes the verified temp file', async () => {
+    const s = setup();
+    t = s.t;
+    const source = join(s.root, 'E', 'E.mkv');
+    const temp = write(tempPathFor(source), 'converted');
+    const row = s.seedJob(source, { step: 'replacing', tempPath: temp });
+
+    expect(await t.ctx.services.jobs.recover()).toEqual({ requeued: 0, completed: 0, tempFilesDeleted: 1 });
+
+    expect(existsSync(source)).toBe(false);
+    expect(existsSync(temp)).toBe(false);
+    expect(getJobRow(t.ctx.db, row.id)?.state).toBe('failed');
+    expect(s.notified).toEqual([]);
+  });
+
+  test('recover - a bin row whose move never happened is dropped and the original kept', async () => {
+    const s = setup();
+    t = s.t;
+    const source = write(join(s.root, 'F', 'F.mkv'), 'original');
+    const temp = write(tempPathFor(source), 'converted');
+    const entry = insertRecycleRow(t.ctx.db, {
+      originalPath: source,
+      recyclePath: join(s.root, '.wololo-recycle', '20261115T000000Z', 'F', 'F.mkv'),
+      sizeBytes: 8,
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    });
+    const row = s.seedJob(source, { step: 'replacing', tempPath: temp, recycleBinEntryId: entry.id });
+
+    expect(await t.ctx.services.jobs.recover()).toEqual({ requeued: 1, completed: 0, tempFilesDeleted: 1 });
+
+    expect(readFileSync(source, 'utf8')).toBe('original');
+    expect(getRecycleRow(t.ctx.db, entry.id)).toBeUndefined();
+    expect(getJobRow(t.ctx.db, row.id)?.recycleBinEntryId).toBeNull();
   });
 
   test('recover - an mp4 source left next to its finished mkv output is removed', async () => {

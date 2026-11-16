@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
 import { ensureFixtureCopy, FIXTURES, type FixtureSpec, ffmpegAvailable } from '../../../test/helpers/fixtures.ts';
@@ -325,6 +334,23 @@ describe.skipIf(!ffmpegAvailable())('audio job end to end', () => {
     expect(job.step).toBe('replacing');
     expect(await sha256(s.source)).toBe(originalHash);
     expect(readdirSync(dirname(s.source))).toEqual(['Movie (2020).mkv']);
+  }, 60_000);
+
+  test('audio job - a source deleted while the job reaches the replace step is not brought back', async () => {
+    const s = await setup();
+    t = s.t;
+    t.ctx.events.on('job.step', (event) => {
+      if (event.step === 'replacing') unlinkSync(s.source);
+    });
+
+    const { state, job } = await runOneJob(t, s.mediaFileId);
+
+    expect(state).toBe('failed');
+    expect(job.error).toContain('source missing');
+    expect(existsSync(dirname(s.source))).toBe(true);
+    expect(readdirSync(dirname(s.source))).toEqual([]);
+    expect(s.notified).toEqual([]);
+    expect(getJobRow(t.ctx.db, job.id)?.tempPath).toBeNull();
   }, 60_000);
 
   test('audio job - recycle bin disabled replaces without keeping the original', async () => {
