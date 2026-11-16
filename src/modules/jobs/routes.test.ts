@@ -5,7 +5,7 @@ import { createTestContext, type TestContext } from '../../../test/helpers/conte
 import { insertJob, insertLibrary, insertMediaFile } from '../../../test/helpers/seed.ts';
 import { stubService } from '../../../test/helpers/stubs.ts';
 import type { LibraryService } from '../../contracts/probe-scan.ts';
-import type { EnqueueResponse } from '../../shared/api-types.ts';
+import type { EnqueueResponse, JobLogChunk } from '../../shared/api-types.ts';
 import { getJobRow, updateJobRow } from './jobQueries.ts';
 import { mediaDetail, recordingMediaService } from './test-support.ts';
 
@@ -118,7 +118,7 @@ test('GET /api/v1/jobs/:id/log/tail - returns only the tail of a large log, then
   const size = Bun.file(logPath).size;
   expect(size).toBeGreaterThan(512 * 1024);
 
-  const tail = await (await t.request(`/api/v1/jobs/${row.id}/log/tail`)).json();
+  const tail = (await (await t.request(`/api/v1/jobs/${row.id}/log/tail`)).json()) as JobLogChunk;
   expect(tail.size).toBe(size);
   expect(tail.end).toBe(size);
   expect(tail.start).toBeGreaterThan(0);
