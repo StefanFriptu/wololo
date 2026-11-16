@@ -15,6 +15,7 @@
   import type { ArrInstance, ArrKind, PathMapping } from '#lib/shared.ts';
   import { attempt } from '#lib/attempt.ts';
   import { toasts } from '#lib/toast.svelte.ts';
+  import { isLoopbackAddress, loadWebhookAddress, saveWebhookAddress } from '#lib/webhookAddress.ts';
   import { webhookUrl } from '#lib/webhookUrl.ts';
 
   const instances = new Resource((signal) => api('GET /api/v1/arr', { signal }));
@@ -26,6 +27,8 @@
   let arrKind = $state<ArrKind>('radarr');
   let mappingOpen = $state(false);
   let mappingEditing = $state<PathMapping | null>(null);
+  let address = $state(loadWebhookAddress(() => localStorage, location.origin));
+  const webhookOrigin = $derived(address.trim() || location.origin);
 
   $effect(() => {
     untrack(() => {
@@ -37,7 +40,7 @@
 
   const urlFor = (instance: ArrInstance): string =>
     webhookUrl({
-      origin: location.origin,
+      origin: webhookOrigin,
       urlBase: runtimeConfig().urlBase,
       kind: instance.kind,
       instanceId: instance.id,
@@ -102,6 +105,26 @@
       <p class="muted">No instance yet. Add Radarr or Sonarr, then paste the webhook URL into it.</p>
     {/snippet}
     {#snippet children(data)}
+      <div class="field">
+        <label for="webhook-address">Address Radarr/Sonarr use to reach Wololo</label>
+        <div class="control">
+          <input
+            id="webhook-address"
+            type="url"
+            bind:value={address}
+            onchange={() => saveWebhookAddress(() => localStorage, address, location.origin)}
+            placeholder={location.origin}
+            aria-describedby="webhook-address-hint"
+          />
+          {#if isLoopbackAddress(webhookOrigin)}
+            <span id="webhook-address-hint" class="hint">
+              Radarr and Sonarr in other containers cannot reach localhost. Use http://wololo:8585 or the host IP.
+            </span>
+          {:else}
+            <span id="webhook-address-hint" class="hint">Used in the webhook URLs below; remembered in this browser.</span>
+          {/if}
+        </div>
+      </div>
       <ul class="list-plain instances">
         {#each data as instance (instance.id)}
           <li>

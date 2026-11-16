@@ -96,7 +96,7 @@ Wololo needs two links: it calls Radarr/Sonarr (rescans, lookups), and they call
 - URL: `http://radarr:7878` (service name on the same Docker network) or `http://<host-ip>:7878`.
 - API key: from Radarr **Settings > General > Security**.
 
-Press **Test**, then save. Repeat for Sonarr (`http://sonarr:8989`). Wololo then shows the webhook URL for that instance. The host part is the address your browser used to open Wololo, so check it. It looks like this when you open Wololo as `http://wololo:8585`:
+Press **Test**, then save. Repeat for Sonarr (`http://sonarr:8989`). Wololo then shows the webhook URL for that instance. The host part comes from the **Address Radarr/Sonarr use to reach Wololo** field above the list. It starts as the address your browser used to open Wololo, so set it to one Radarr can reach (it is remembered in this browser). It looks like this when you open Wololo as `http://wololo:8585`:
 
 ```
 http://wololo:8585/api/v1/webhook/radarr?instance=1&apikey=<your Wololo API key>
