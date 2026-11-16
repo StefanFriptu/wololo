@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { chmodSync, mkdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import * as fsPromises from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
@@ -14,6 +15,7 @@ import { AppError } from '../../core/errors.ts';
 import { jobs as jobsTable, mediaFiles } from '../../db/schema.ts';
 import type { Library } from '../../shared/domain.ts';
 import type { EventMap, ScanStats } from '../../shared/events.ts';
+import { removable } from './scan.ts';
 import { fakeJobs, fakeRules } from './test-fakes.ts';
 
 let t: TestContext;
@@ -186,6 +188,51 @@ test.skipIf(process.getuid?.() === 0)(
     }
   },
 );
+
+test('scan - keeps a row whose file still exists but could not be stat-ed during the walk', async () => {
+  fakeProbe();
+  file('Keep/Keep.mkv');
+  const flaky = file('Flaky/Flaky.mkv');
+  await runScan();
+  const before = rowOf(flaky);
+  expect(before).toBeDefined();
+  const realStat = fsPromises.stat;
+  let failed = 0;
+  const spy = spyOn(fsPromises, 'stat').mockImplementation(((path: string, options?: never) => {
+    if (path === flaky && failed === 0) {
+      failed += 1;
+      return Promise.reject(Object.assign(new Error(`EIO: i/o error, stat '${path}'`), { code: 'EIO' }));
+    }
+    return realStat(path, options);
+  }) as typeof fsPromises.stat);
+  try {
+    const finished = await runScan();
+
+    expect(failed).toBe(1);
+    expect(finished.stats).toMatchObject({ filesSeen: 1, filesRemoved: 0 });
+    expect(finished.error).toContain('1 file(s) under');
+    expect(rowOf(flaky)?.id).toBe(before?.id ?? -1);
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+test.each([
+  ['missing', false, true],
+  ['unknown', true, false],
+  ['present', true, true],
+  ['present', false, false],
+] as const)(
+  'removable - a needs-work file %s on disk, excluded %p, is removable %p',
+  (presence, excluded, expected) => {
+    expect(removable({ kind: 'file', status: 'needs_work' }, presence, excluded)).toBe(expected);
+  },
+);
+
+test('removable - an excluded ignored file and an excluded disc stay', () => {
+  expect(removable({ kind: 'file', status: 'ignored' }, 'present', true)).toBe(false);
+  expect(removable({ kind: 'bdmv', status: 'compatible' }, 'present', true)).toBe(false);
+});
 
 test('scan - a discs-only library indexes disc folders and images, never the seeding files beside them', async () => {
   fakeProbe();

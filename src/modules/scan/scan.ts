@@ -8,7 +8,7 @@ import type { ScanRequest, ScanStatus } from '../../shared/api-types.ts';
 import type { Library, LibraryRoot, MediaFileKind, MediaFileStatus } from '../../shared/domain.ts';
 import type { ScanStats } from '../../shared/events.ts';
 import { needsRecheck } from './change-detection.ts';
-import { eligibilityRules } from './eligibility.ts';
+import { eligibilityRules, exclusionReason } from './eligibility.ts';
 import { rootDiskInfo } from './libraries.ts';
 import { libraryQuery } from './libraryQuery.ts';
 import { createMediaEngine, type RulesContext } from './mediaEngine.ts';
@@ -33,13 +33,18 @@ async function presenceOf(path: string): Promise<Presence> {
 }
 
 /**
- * Pure: may a stored row the walk did not yield be deleted? Only when its path is gone, or when it still exists but the
+ * Pure: may a stored row the walk did not yield be deleted? Only when its path is gone, or when it still exists and the
  * settings now exclude it, unless it carries state a re-add would lose (the user's ignore flag, a disc's conversion).
+ * A present file that is not excluded stays: the walk only skipped it (a failed stat on a flaky network mount).
  */
-export function removable(row: { kind: MediaFileKind; status: MediaFileStatus }, presence: Presence): boolean {
+export function removable(
+  row: { kind: MediaFileKind; status: MediaFileStatus },
+  presence: Presence,
+  excluded: boolean,
+): boolean {
   if (presence === 'missing') return true;
   if (presence === 'unknown') return false;
-  return row.status !== 'ignored' && row.kind === 'file';
+  return excluded && row.status !== 'ignored' && row.kind === 'file';
 }
 
 function emptyStats(): ScanStats {
@@ -112,11 +117,8 @@ export function createScanService(ctx: AppContext): ScanService {
     const backlog: { id: number; kind: string; path: string }[] = [];
     const storedAt = (path: string) => storedEntryQuery(ctx.db, { rootId: root.id, path }) ?? null;
 
-    const entries = walkRoot(
-      root.path,
-      { ...eligibilityRules(ctx.settings.get(), library), signal: options.signal },
-      report,
-    );
+    const eligibility = eligibilityRules(ctx.settings.get(), library);
+    const entries = walkRoot(root.path, { ...eligibility, signal: options.signal }, report);
     for await (const entry of entries) {
       if (options.signal.aborted) break;
       scan.stats.filesSeen += 1;
@@ -170,8 +172,10 @@ export function createScanService(ctx: AppContext): ScanService {
         const removed: number[] = [];
         for (const row of page) {
           const presence = await presenceOf(row.path);
-          if (presence === 'unknown') unchecked += 1;
-          if (removable(row, presence)) removed.push(row.id);
+          const excluded =
+            presence === 'present' && exclusionReason(root.path, row.path, row.kind, eligibility) !== null;
+          if (presence === 'unknown' || (presence === 'present' && !excluded)) unchecked += 1;
+          if (removable(row, presence, excluded)) removed.push(row.id);
         }
         engine.deleteRows(removed);
         scan.stats.filesRemoved += removed.length;
