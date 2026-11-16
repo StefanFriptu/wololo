@@ -378,6 +378,7 @@ Decisions that narrow or settle SPEC.md for v1:
 - **Video re-encode:** not in v1. Video codecs outside a profile make the plan `blocked`; the opt-in VC-1/MPEG-2 -> H.264 rule is v1.1.
 - **qBittorrent:** read-only seeding checks, removal of replaced files' torrents (opt-in `removeWhenGoalMet`) and the BDMV delete-source offer ship in v1 as optional integrations (SPEC lists qBittorrent both as v1.1 and as part of Feature 2).
 - **ISO input:** listed and extracted with 7z (UDF 2.50); ffprobe/ffmpeg read it through libbluray.
+- **BDMV verification:** the duration tolerance is 0.5 s, not SPEC's 100 ms, because the `bluray:` playlist duration and the MKV container duration can differ by more than 100 ms. The video check is the output's `ffprobe -count_packets` equal to the playlist's video packet count, not a stream hash, because mkvmerge repacketises video. Audio jobs keep 100 ms and the stream hash. Bit-identical BDMV video is proven by the e2e test (decoded md5, CI only, needs tsMuxeR and mkvmerge), not at run time.
 - **Forced subtitles (BDMV):** detected by scanning PGS compositions only where a language has several subtitle tracks.
 - **Dry run per profile:** totals and groups use each library's effective (strictest) profile; `byProfile` re-evaluates stored probes per assigned profile.
 - **UI authentication:** API key, no username/password login in v1; the key is only handed to local clients by default.
