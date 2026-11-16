@@ -11,9 +11,19 @@ function upsert(items: readonly JobSummary[], job: JobSummary): JobSummary[] {
   return [...rest, job].sort(compareQueue);
 }
 
-export function applyQueueEvent(items: readonly JobSummary[], event: ServerEvent): readonly JobSummary[] {
+/** `truncated`: items is only the head of the queue, so a queued job that sorts after the last item is not shown. */
+export function applyQueueEvent(
+  items: readonly JobSummary[],
+  event: ServerEvent,
+  truncated = false,
+): readonly JobSummary[] {
   switch (event.name) {
-    case 'job.queued':
+    case 'job.queued': {
+      const last = items.at(-1);
+      const beyondHead = truncated && last !== undefined && compareQueue(last, event.payload.job) < 0;
+      const known = items.some((item) => item.id === event.payload.job.id);
+      return beyondHead && !known ? items : upsert(items, event.payload.job);
+    }
     case 'job.started':
       return upsert(items, event.payload.job);
     case 'job.finished':

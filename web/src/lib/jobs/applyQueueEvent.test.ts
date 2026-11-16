@@ -48,3 +48,20 @@ test('applyQueueEvent - equal priority keeps id order', () => {
   const next = applyQueueEvent(items, { name: 'job.queued', payload: { job: jobFixture({ id: 4 }) } });
   expect(ids(next)).toEqual([4, 5]);
 });
+
+test('applyQueueEvent - truncated list ignores a queued job that sorts after its last item', () => {
+  const items = [jobFixture({ id: 1, state: 'running' }), jobFixture({ id: 2 })];
+  const event = { name: 'job.queued', payload: { job: jobFixture({ id: 3 }) } } as const;
+  expect(applyQueueEvent(items, event, true)).toBe(items);
+  expect(ids(applyQueueEvent(items, event, false))).toEqual([1, 2, 3]);
+});
+
+test('applyQueueEvent - truncated list still takes a queued job that sorts inside it', () => {
+  const items = [jobFixture({ id: 1, state: 'running' }), jobFixture({ id: 2 })];
+  const next = applyQueueEvent(
+    items,
+    { name: 'job.queued', payload: { job: jobFixture({ id: 3, priority: 5 }) } },
+    true,
+  );
+  expect(ids(next)).toEqual([1, 3, 2]);
+});

@@ -16,6 +16,7 @@
   import { formatDuration } from '#lib/format/formatDuration.ts';
   import { formatSpeed } from '#lib/format/formatSpeed.ts';
   import { attemptNumber } from '#lib/jobs/attemptNumber.ts';
+  import { isRemovable } from '#lib/jobs/isRemovable.ts';
   import { patchJob } from '#lib/jobs/patchJob.ts';
   import { syncJobLog } from '#lib/jobs/syncJobLog.svelte.ts';
   import {
@@ -131,7 +132,7 @@
         {#if data.state === 'failed' || data.state === 'cancelled'}
           <button class="primary" onclick={retry} disabled={busy}><Icon name="refresh" size={16} /> Retry</button>
         {/if}
-        {#if data.state !== 'running'}
+        {#if isRemovable(data.state)}
           <button onclick={remove} disabled={busy}><Icon name="trash" size={16} /> Remove</button>
         {/if}
       {/snippet}

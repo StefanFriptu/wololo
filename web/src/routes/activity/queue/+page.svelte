@@ -15,9 +15,8 @@
   import { JOB_STATE_LABELS, JOB_STATE_TONES, JOB_STEP_LABELS, JOB_TRIGGER_LABELS, PAUSE_REASON_LABELS } from '#lib/labels.ts';
   import { href } from '#lib/paths.ts';
   import { Resource } from '#lib/resource.svelte.ts';
-  import type { JobSummary } from '#lib/shared.ts';
+  import type { JobSummary, QueueResponse } from '#lib/shared.ts';
   import { attempt } from '#lib/attempt.ts';
-  import { toasts } from '#lib/toast.svelte.ts';
 
   const queue = new Resource((signal) => api('GET /api/v1/queue', { signal }));
   const settings = new Resource((signal) => api('GET /api/v1/settings', { signal }));
@@ -36,8 +35,12 @@
     return () => clearInterval(timer);
   });
 
-  $effect(() =>
-    live.on((event) => {
+  const REFILL_DELAY_MS = 1000;
+  const truncated = (view: QueueResponse): boolean => view.items.length < view.state.running + view.state.queued;
+
+  $effect(() => {
+    let refill: ReturnType<typeof setTimeout> | undefined;
+    const stop = live.on((event) => {
       if (event.name === 'settings.changed' && event.payload.sections.includes('processing')) settings.load({ silent: true });
       const current = queue.data;
       if (!current) return;
@@ -45,10 +48,21 @@
         queue.set({ ...current, state: event.payload });
         return;
       }
-      const items = applyQueueEvent(current.items, event);
+      const items = applyQueueEvent(current.items, event, truncated(current));
       if (items !== current.items) queue.set({ ...current, items: [...items] });
-    }),
-  );
+      const leaves = event.name === 'job.finished' || event.name === 'job.removed' || event.name === 'job.started';
+      if (leaves && truncated(current) && refill === undefined) {
+        refill = setTimeout(() => {
+          refill = undefined;
+          queue.load({ silent: true });
+        }, REFILL_DELAY_MS);
+      }
+    });
+    return () => {
+      clearTimeout(refill);
+      stop();
+    };
+  });
   $effect(() => live.onReconnect(() => queue.load({ silent: true })));
 
   async function togglePause(paused: boolean): Promise<void> {
@@ -61,16 +75,6 @@
   async function cancel(job: JobSummary): Promise<void> {
     if (job.state === 'running' && !confirm(`Stop "${job.title}"? The original file stays untouched.`)) return;
     await attempt(() => api('POST /api/v1/jobs/:id/cancel', { params: { id: job.id } }), 'Job cancelled');
-  }
-
-  async function remove(job: JobSummary): Promise<void> {
-    try {
-      await api('DELETE /api/v1/jobs/:id', { params: { id: job.id } });
-      toasts.success('Job removed');
-      if (queue.data) queue.set({ ...queue.data, items: queue.data.items.filter((item) => item.id !== job.id) });
-    } catch (error) {
-      toasts.error(error);
-    }
   }
 </script>
 
@@ -99,6 +103,9 @@
   {#snippet children(data)}
     <p class="state muted" role="status">
       {data.state.running} running of {data.state.concurrency} · {data.state.queued} queued
+      {#if truncated(data)}
+        <span>· showing the first {data.items.length} of {data.state.running + data.state.queued} jobs</span>
+      {/if}
       {#each data.state.pauseReasons as reason (reason)}
         <Badge tone="warning" label={PAUSE_REASON_LABELS[reason]} />
       {/each}
@@ -146,11 +153,6 @@
                     <button class="small" onclick={() => cancel(job)} aria-label="Cancel {job.title}" title="Cancel">
                       <Icon name="close" size={14} />
                     </button>
-                    {#if job.state === 'queued'}
-                      <button class="small" onclick={() => remove(job)} aria-label="Remove {job.title}" title="Remove">
-                        <Icon name="trash" size={14} />
-                      </button>
-                    {/if}
                   </td>
                 </tr>
               {/each}
