@@ -181,6 +181,8 @@ export interface LibraryInput {
   fillMissingLanguage?: FillMissingLanguage;
   arrInstanceId?: number | null;
   bdmvEnabled?: boolean;
+  /** Default false; true needs bdmvEnabled. */
+  discsOnly?: boolean;
 }
 
 export interface FilesystemQuery {

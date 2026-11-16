@@ -1,0 +1,1 @@
+ALTER TABLE `libraries` ADD `discs_only` integer DEFAULT false NOT NULL;

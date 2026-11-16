@@ -26,6 +26,9 @@ test.each<[string, MediaFileKind, Partial<EligibilityRules>, string | null]>([
   ['/r/Movie/notes.txt', 'file', {}, 'not a media file extension'],
   ['/r/Disc', 'bdmv', { discs: false }, 'disc handling is disabled'],
   ['/r/Image/Movie.iso', 'iso', { discs: false }, 'disc handling is disabled'],
+  ['/r/Movie/Movie.mkv', 'file', { discsOnly: true }, 'library only converts discs'],
+  ['/r/Disc', 'bdmv', { discsOnly: true }, null],
+  ['/r/Image/Movie.iso', 'iso', { discsOnly: true }, null],
   ['/other/Movie.mkv', 'file', {}, 'outside the library root'],
 ])('exclusionReason - %s (%s) -> %p', (path, kind, overrides, expected) => {
   expect(exclusionReason('/r', path, kind, { ...RULES, ...overrides })).toBe(expected);

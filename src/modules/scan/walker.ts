@@ -70,7 +70,8 @@ export async function* walkRoot(
         continue;
       }
       if (!hasMediaExtension(dirent.name, extensions)) continue;
-      if (extname(dirent.name).toLowerCase() === '.iso' && !options.discs) continue;
+      const isIso = extname(dirent.name).toLowerCase() === '.iso';
+      if (isIso ? !options.discs : options.discsOnly) continue;
       files.push(full);
     }
 

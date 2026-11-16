@@ -304,6 +304,7 @@ export function setup(
     profileIds: [],
     arrInstanceId: null,
     bdmvEnabled: true,
+    discsOnly: false,
     mode: 'replace',
     keepLanguages: [],
     keepOriginalLanguage: true,

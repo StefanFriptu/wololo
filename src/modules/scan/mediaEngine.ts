@@ -285,6 +285,8 @@ export function createMediaEngine(ctx: AppContext) {
     }
     if (entry.kind !== 'file' && !(library.bdmvEnabled && ctx.settings.section('bdmv').enabled))
       return { probed: false, result: outcome('ignored', existing ?? null, 'disc handling is disabled') };
+    if (entry.kind === 'file' && library.discsOnly)
+      return { probed: false, result: outcome('ignored', existing ?? null, 'library only converts discs') };
     if (options.screen) {
       const excluded = library.enabled
         ? exclusionReason(rootPath, path, entry.kind, eligibilityRules(ctx.settings.get(), library))

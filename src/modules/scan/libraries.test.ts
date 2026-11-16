@@ -69,6 +69,7 @@ test('libraries.create - stores defaults, normalises roots and languages, report
     fillMissingLanguage: 'fre',
     arrInstanceId: null,
     bdmvEnabled: true,
+    discsOnly: false,
   });
   const [movies, missing] = library.roots;
   expect(movies?.path).toBe(join(t.dir, 'movies'));
@@ -87,6 +88,18 @@ test.each<[string, Partial<LibraryInput>, ErrorCode]>([
   ['unknown arr instance', { arrInstanceId: 42 }, 'validation'],
 ])('libraries.create - rejects %s', async (_label, overrides, code) => {
   expect((await errorOf(t.ctx.services.libraries.create(input(overrides)))).code).toBe(code);
+});
+
+test('libraries.create - discs only is stored, and refused without Blu-ray conversion', async () => {
+  expect(await errorOf(t.ctx.services.libraries.create(input({ discsOnly: true, bdmvEnabled: false })))).toMatchObject({
+    code: 'validation',
+    message: expect.stringContaining('needs Blu-ray conversion'),
+  });
+  expect(await t.ctx.services.libraries.list()).toHaveLength(0);
+  expect(await t.ctx.services.libraries.create(input({ discsOnly: true }))).toMatchObject({
+    bdmvEnabled: true,
+    discsOnly: true,
+  });
 });
 
 test('libraries.create - duplicate names and roots overlapping another library are conflicts', async () => {

@@ -69,6 +69,7 @@ interface ResolvedInput extends LibraryRuleSettings {
   profileIds: number[];
   arrInstanceId: number | null;
   bdmvEnabled: boolean;
+  discsOnly: boolean;
 }
 
 function resolveInput(input: LibraryInput, existing: Library | null): ResolvedInput {
@@ -85,10 +86,13 @@ function resolveInput(input: LibraryInput, existing: Library | null): ResolvedIn
     fillMissingLanguage: normalizeFillLanguage(input.fillMissingLanguage ?? existing?.fillMissingLanguage ?? 'off'),
     arrInstanceId: input.arrInstanceId === undefined ? (existing?.arrInstanceId ?? null) : input.arrInstanceId,
     bdmvEnabled: input.bdmvEnabled ?? existing?.bdmvEnabled ?? true,
+    discsOnly: input.discsOnly ?? existing?.discsOnly ?? false,
   };
 }
 
 function assertReferences(db: Db, input: ResolvedInput, libraryId: number | null): void {
+  if (input.discsOnly && !input.bdmvEnabled)
+    throw new AppError('validation', 'a library that only converts discs needs Blu-ray conversion turned on');
   const sameName = db.select({ id: libraries.id }).from(libraries).where(eq(libraries.name, input.name)).get();
   if (sameName && sameName.id !== libraryId) throw new AppError('conflict', `a library named "${input.name}" exists`);
 
@@ -139,6 +143,7 @@ function libraryValues(input: ResolvedInput) {
     fillMissingLanguage: input.fillMissingLanguage,
     arrInstanceId: input.arrInstanceId,
     bdmvEnabled: input.bdmvEnabled,
+    discsOnly: input.discsOnly,
   };
 }
 

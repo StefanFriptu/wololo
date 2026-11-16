@@ -12,6 +12,8 @@ export interface EligibilityRules {
   ignorePatterns: readonly string[];
   /** Disc folders and .iso images are indexed. */
   discs: boolean;
+  /** Only disc folders and .iso images are indexed, never plain media files (a seeding download folder). */
+  discsOnly?: boolean;
   /** Absolute paths never entered (e.g. a recycle bin inside the root). */
   skipPaths?: readonly string[];
 }
@@ -43,11 +45,15 @@ export function skipPathsFor(settings: Pick<Settings, 'recycleBin'>): string[] {
   return normalized ? [normalized] : [];
 }
 
-export function eligibilityRules(settings: Settings, library: { bdmvEnabled: boolean }): EligibilityRules {
+export function eligibilityRules(
+  settings: Settings,
+  library: { bdmvEnabled: boolean; discsOnly: boolean },
+): EligibilityRules {
   return {
     extensions: settings.media.extensions,
     ignorePatterns: settings.media.ignorePatterns,
     discs: settings.bdmv.enabled && library.bdmvEnabled,
+    discsOnly: library.discsOnly,
     skipPaths: skipPathsFor(settings),
   };
 }
@@ -72,6 +78,7 @@ export function exclusionReason(
   }
   if (kind !== 'bdmv' && isIgnored(segments.join('/'), false, globs)) return 'matches an ignore pattern';
   if (kind !== 'file' && !rules.discs) return 'disc handling is disabled';
+  if (kind === 'file' && rules.discsOnly) return 'library only converts discs';
   if (kind !== 'bdmv' && !hasMediaExtension(path, new Set(rules.extensions.map((ext) => ext.toLowerCase()))))
     return 'not a media file extension';
   return null;

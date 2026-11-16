@@ -187,6 +187,26 @@ test.skipIf(process.getuid?.() === 0)(
   },
 );
 
+test('scan - a discs-only library indexes disc folders and images, never the seeding files beside them', async () => {
+  fakeProbe();
+  const seeding = file('Movie.2020.1080p.DTS/Movie.2020.mkv');
+  const disc = file('Disc/BDMV/index.bdmv').replace('/BDMV/index.bdmv', '');
+  const image = file('Image/Movie.iso');
+  insertMediaFile(t.ctx.db, seeded(), { path: seeding, status: 'needs_work' });
+  await t.ctx.services.libraries.update(library.id, {
+    ...library,
+    roots: library.roots.map((r) => r.path),
+    discsOnly: true,
+  });
+
+  const finished = await runScan();
+  expect(finished.error).toBeNull();
+  expect(rowOf(disc)?.kind).toBe('bdmv');
+  expect(rowOf(image)?.kind).toBe('iso');
+  expect(rowOf(seeding)).toBeUndefined();
+  expect(jobs.calls.some((call) => JSON.stringify(call).includes(seeding))).toBe(false);
+});
+
 test('scan - a probe failure is retried by the next scan', async () => {
   let failures = 1;
   fakeProbe(async () => {

@@ -37,6 +37,7 @@ export const LibraryInputSchema = z.object({
   fillMissingLanguage: z.string().trim().min(1).optional(),
   arrInstanceId: z.number().int().positive().nullable().optional(),
   bdmvEnabled: z.boolean().optional(),
+  discsOnly: z.boolean().optional(),
 }) satisfies z.ZodType<LibraryInput>;
 
 export const FilesystemQuerySchema = z.object({

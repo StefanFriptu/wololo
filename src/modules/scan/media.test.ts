@@ -193,6 +193,31 @@ test('media.checkPath - files of a disabled library are not checked', async () =
   expect(jobs.calls).toEqual([]);
 });
 
+test('media.checkPath - plain files of a discs-only library are never checked, discs still are', async () => {
+  library = await t.ctx.services.libraries.update(library.id, {
+    ...library,
+    roots: library.roots.map((r) => r.path),
+    discsOnly: true,
+  });
+  t.ctx.settings.update({ processing: { enabled: true } });
+  const path = join(root, 'Movie', 'Movie.mkv');
+  mkdirSync(join(path, '..'), { recursive: true });
+  writeFileSync(path, 'x');
+  const disc = join(root, 'Disc');
+  mkdirSync(join(disc, 'BDMV'), { recursive: true });
+  writeFileSync(join(disc, 'BDMV', 'index.bdmv'), 'x');
+
+  for (const trigger of ['webhook', 'manual'] as const)
+    expect(await media().checkPath(path, { trigger })).toMatchObject({
+      action: 'ignored',
+      message: 'library only converts discs',
+    });
+  expect(rowOf(path)).toBeUndefined();
+  expect(probeCalls).toEqual([]);
+  expect((await media().checkPath(disc, { trigger: 'scan' })).action).not.toBe('ignored');
+  expect(rowOf(disc)).toBeDefined();
+});
+
 test('media.checkPath - an unexpected error is reported as failed instead of thrown', async () => {
   t.ctx.services.libraries = {
     ...t.ctx.services.libraries,

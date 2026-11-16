@@ -29,6 +29,13 @@
       "when": 1794826093240,
       "tag": "0003_jobs_finished_index",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1794828727785,
+      "tag": "0004_library_discs_only",
+      "breakpoints": true
     }
   ]
 }

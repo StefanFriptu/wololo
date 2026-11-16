@@ -39,6 +39,7 @@ export function libraryQuery(db: Db, filter: { id?: number } = {}): Library[] {
     fillMissingLanguage: row.fillMissingLanguage,
     arrInstanceId: row.arrInstanceId,
     bdmvEnabled: row.bdmvEnabled,
+    discsOnly: row.discsOnly,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }));

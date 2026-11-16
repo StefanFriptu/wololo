@@ -284,6 +284,7 @@ const LIBRARY: Library = {
   profileIds: [],
   arrInstanceId: null,
   bdmvEnabled: true,
+  discsOnly: false,
   mode: 'replace',
   keepLanguages: [],
   keepOriginalLanguage: true,

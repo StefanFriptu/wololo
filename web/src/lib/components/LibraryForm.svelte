@@ -55,6 +55,7 @@
       fillMissingLanguage: 'off',
       arrInstanceId: null,
       bdmvEnabled: true,
+      discsOnly: false,
     };
   }
 
@@ -73,6 +74,7 @@
           fillMissingLanguage: source.fillMissingLanguage,
           arrInstanceId: source.arrInstanceId,
           bdmvEnabled: source.bdmvEnabled,
+          discsOnly: source.discsOnly,
         }
       : blank();
     languages = (form.keepLanguages ?? []).join(', ');
@@ -110,6 +112,7 @@
       roots,
       keepLanguages: parseList(languages),
       fillMissingLanguage: fill === 'fixed' ? fillCode.trim().toLowerCase() || 'off' : fill,
+      discsOnly: form.bdmvEnabled === true && form.discsOnly === true,
     };
     busy = true;
     try {
@@ -242,6 +245,10 @@
       <span class="label">Blu-ray</span>
       <div class="control">
         <label class="check"><input type="checkbox" bind:checked={form.bdmvEnabled} /> Convert Blu-ray folders and ISOs found here</label>
+        {#if form.bdmvEnabled}
+          <label class="check"><input type="checkbox" bind:checked={form.discsOnly} /> Only convert discs (use for the download folder)</label>
+          <span class="hint">Other files here are never indexed or changed, so seeding torrents stay intact.</span>
+        {/if}
       </div>
     </div>
   </form>

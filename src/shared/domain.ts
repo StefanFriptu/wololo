@@ -211,6 +211,8 @@ export interface Library extends LibraryRuleSettings {
   /** Radarr/Sonarr instance that owns this library (for rescans and original language). */
   arrInstanceId: number | null;
   bdmvEnabled: boolean;
+  /** Index only disc folders and .iso images, never plain files (a seeding download folder). Needs bdmvEnabled. */
+  discsOnly: boolean;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
 }

@@ -83,6 +83,11 @@ test('walkRoot - discs disabled skips disc folders and images', async () => {
   expect(entries.length).toBeGreaterThan(0);
 });
 
+test('walkRoot - discs only yields disc folders and images, never plain media files', async () => {
+  const { relative } = await walk({ discsOnly: true });
+  expect(relative.sort()).toEqual(['Disc Movie', 'Image/Movie.iso']);
+});
+
 test('walkRoot - extensions filter', async () => {
   const { relative } = await walk({ extensions: ['.mp4'], discs: false });
   expect(relative).toEqual(['Other/Clip.MP4']);

@@ -77,6 +77,7 @@ export const libraries = sqliteTable('libraries', {
     onDelete: 'set null',
   }),
   bdmvEnabled: bool('bdmv_enabled').notNull().default(true),
+  discsOnly: bool('discs_only').notNull().default(false),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });

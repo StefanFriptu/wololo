@@ -86,6 +86,7 @@ The image bundles ffmpeg (with libbluray), MKVToolNix and 7-Zip. It drops root o
 2. From your home network the UI opens straight away. From anywhere else, it asks for the API key.
 3. Find the API key under **Settings > General**, or in `/config/config.json`. Radarr and Sonarr need it for the webhook.
 4. Add a library under **Settings > Media**: one entry per media folder, e.g. `/data/media/movies`, using the path inside the container.
+   - To find Blu-ray downloads, add the download folder (e.g. `/data/torrents/movies`) as its own library and tick **Only convert discs**. Wololo then indexes only disc folders and `.iso` images there, so the files your torrents are seeding are never touched.
 5. Look at **System > Status**. It lists the bundled tools and any health warnings (missing tools, unreachable folders, low disk space).
 
 ## Connect Radarr and Sonarr
