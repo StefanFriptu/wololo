@@ -40,7 +40,7 @@ export const settingsSchema = z.object({
       minMinutes: z.number().min(0).max(600),
     }),
     deleteSourceWhenSeeded: z.boolean(),
-    rootFolderPath: z.string().min(1).nullable(),
+    rootFolderPath: z.string().min(1).refine(isAbsolute, 'must be an absolute path').nullable(),
     qualityProfileId: z.number().int().positive().nullable(),
   }),
   notifications: z.object({

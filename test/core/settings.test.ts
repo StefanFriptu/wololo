@@ -36,6 +36,17 @@ describe('SettingsStore', () => {
     expect(t.ctx.settings.section('processing').concurrency).toBe(1);
   });
 
+  test('rejects a relative bdmv root folder path', () => {
+    t = createTestContext();
+    const settings = t.ctx.settings;
+    for (const rootFolderPath of ['movies', '.', '..', './movies']) {
+      expect(() => settings.update({ bdmv: { rootFolderPath } })).toThrow(AppError);
+    }
+    expect(settings.section('bdmv').rootFolderPath).toBeNull();
+    expect(settings.update({ bdmv: { rootFolderPath: '/data/movies' } }).bdmv.rootFolderPath).toBe('/data/movies');
+    expect(settings.update({ bdmv: { rootFolderPath: null } }).bdmv.rootFolderPath).toBeNull();
+  });
+
   test('deepMerge replaces arrays and merges objects', () => {
     expect(deepMerge({ a: { b: 1, c: [1, 2] } }, { a: { c: [3] } })).toEqual({
       a: { b: 1, c: [3] },
