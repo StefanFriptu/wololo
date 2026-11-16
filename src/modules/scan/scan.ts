@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import type { AppContext } from '../../app/context.ts';
 import type { ScanService } from '../../contracts/probe-scan.ts';
 import { errorMessage, notFound } from '../../core/errors.ts';
+import { yieldToEventLoop } from '../../core/yieldToEventLoop.ts';
 import { mediaFiles } from '../../db/schema.ts';
 import type { ScanRequest, ScanStatus } from '../../shared/api-types.ts';
 import type { Library, LibraryRoot, MediaFileKind, MediaFileStatus } from '../../shared/domain.ts';
@@ -18,6 +19,7 @@ import { isWithin } from './paths.ts';
 import { walkRoot } from './walker.ts';
 
 const PROGRESS_INTERVAL_MS = 1000;
+const ENQUEUE_SLICE = 50;
 
 type Presence = 'missing' | 'present' | 'unknown';
 
@@ -77,7 +79,9 @@ export function createScanService(ctx: AppContext): ScanService {
       ctx.db,
       rows.map((row) => row.id),
     );
-    for (const row of rows.filter((candidate) => !active.has(candidate.id))) {
+    const pending = rows.filter((candidate) => !active.has(candidate.id));
+    for (const [position, row] of pending.entries()) {
+      if (position > 0 && position % ENQUEUE_SLICE === 0) await yieldToEventLoop();
       try {
         await ctx.services.jobs.enqueue({
           type: row.kind === 'file' ? 'audio' : 'bdmv',

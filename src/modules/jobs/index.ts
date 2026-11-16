@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { AppContext } from '../../app/context.ts';
 import type { JobsService, NewJob } from '../../contracts/jobs.ts';
 import { AppError, errorMessage, notFound } from '../../core/errors.ts';
+import { yieldToEventLoop } from '../../core/yieldToEventLoop.ts';
 import type { JobRow } from '../../db/schema.ts';
 import type { EnqueueRequest, EnqueueResponse, MediaFileSummary, PageQuery } from '../../shared/api-types.ts';
 import { JOB_STATES, type JobState, type JobSummary } from '../../shared/domain.ts';
@@ -32,6 +33,7 @@ import { sweepOrphanedTempPaths } from './sweepOrphanedTempPaths.ts';
 import { createWorker } from './worker.ts';
 
 const ENQUEUE_PAGE_SIZE = 500;
+const ENQUEUE_SLICE = 50;
 const QUEUE_ITEMS_LIMIT = 500;
 const JOB_LOG_RETENTION_DAYS = 30;
 const JOB_LOG_NAME = /^(\d+)\.txt$/;
@@ -150,6 +152,11 @@ export function createJobsService(ctx: AppContext): JobsService {
         'processing is disabled (dry-run mode); turn it on before queueing jobs',
       );
     const response: EnqueueResponse = { jobs: [], skipped: [] };
+    let handled = 0;
+    const pace = async () => {
+      handled += 1;
+      if (handled % ENQUEUE_SLICE === 0) await yieldToEventLoop();
+    };
     const consider = async (media: MediaFileSummary, plan: NewJob['plan']) => {
       try {
         const result = await enqueueOne(media, request, plan);
@@ -163,6 +170,7 @@ export function createJobsService(ctx: AppContext): JobsService {
 
     if (request.mediaFileIds) {
       for (const id of request.mediaFileIds) {
+        await pace();
         try {
           const detail = await ctx.services.media.get(id);
           await consider(detail, detail.plan);
@@ -191,7 +199,10 @@ export function createJobsService(ctx: AppContext): JobsService {
       for (const item of result.items) matches.set(item.id, item);
       if (result.items.length === 0 || page * ENQUEUE_PAGE_SIZE >= result.total) break;
     }
-    for (const item of matches.values()) await consider(item, null);
+    for (const item of matches.values()) {
+      await pace();
+      await consider(item, null);
+    }
     return response;
   };
 

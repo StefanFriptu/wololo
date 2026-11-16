@@ -7,6 +7,7 @@ import { ensureFixtureCopy, FIXTURES, ffmpegAvailable } from '../../../test/help
 import { audioStream, probeResult, videoStream } from '../../../test/helpers/probe.ts';
 import { insertMediaFile } from '../../../test/helpers/seed.ts';
 import { stubService } from '../../../test/helpers/stubs.ts';
+import type { JobsService } from '../../contracts/jobs.ts';
 import type { ProbeService } from '../../contracts/probe-scan.ts';
 import type { RulesService } from '../../contracts/rules-ffmpeg.ts';
 import { AppError } from '../../core/errors.ts';
@@ -238,6 +239,29 @@ test('scan - cancelling during a probe leaves the row for the next scan', async 
   const next = await runScan();
   expect(next.stats).toMatchObject({ filesChanged: 1, filesProbed: 1, probeErrors: 0 });
   expect(rowOf(path)).toMatchObject({ status: 'compatible', sizeBytes: 1 });
+});
+
+test('scan - queueing a large backlog lets the event loop run between slices', async () => {
+  const paths = Array.from({ length: 120 }, (_, i) => file(`Movie ${i} (2020).mkv`));
+  t.ctx.services.probe = {
+    probe: async (path) => probeResult([videoStream(), audioStream({ codec: 'dts' })], { path, sizeBytes: 1 }),
+  } satisfies ProbeService;
+  await runScan();
+  expect(paths.map(statusOf).every((status) => status === 'needs_work')).toBe(true);
+  t.ctx.settings.update({ processing: { enabled: true } });
+  const queue = jobs.service.enqueue;
+  let queuedBeforeYield: number | null = null;
+  t.ctx.services.jobs = stubService<JobsService>('jobs', {
+    enqueue: async (job) => {
+      if (jobs.calls.length === 0) setImmediate(() => (queuedBeforeYield = jobs.calls.length));
+      return queue(job);
+    },
+  });
+
+  const finished = await runScan();
+
+  expect(finished.stats.jobsQueued).toBe(120);
+  expect(queuedBeforeYield).toBeLessThan(120);
 });
 
 describe.skipIf(!ffmpegAvailable())('scans over fixture files', () => {

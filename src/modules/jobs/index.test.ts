@@ -220,6 +220,21 @@ test('enqueueMany - a filter queues every row while the worker is running and ro
   expect(result.jobs.map((job) => job.mediaFileId ?? 0).sort((a, b) => a - b)).toEqual(ids);
 });
 
+test('enqueueMany - lets the event loop run while queueing a large backlog', async () => {
+  const s = setup();
+  t = s.t;
+  for (let i = 0; i < 300; i++) s.addFile('needs_work', 'file');
+  let ranDuringQueueing = false;
+  setImmediate(() => {
+    ranDuringQueueing = true;
+  });
+
+  const response = await t.ctx.services.jobs.enqueueMany({ filter: {} });
+
+  expect(ranDuringQueueing).toBe(true);
+  expect(response.jobs).toHaveLength(300);
+});
+
 test('worker - runs one job at a time by default, highest priority first', async () => {
   const s = setup();
   t = s.t;
