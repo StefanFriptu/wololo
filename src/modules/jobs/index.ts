@@ -7,7 +7,7 @@ import { yieldToEventLoop } from '../../core/yieldToEventLoop.ts';
 import type { JobRow } from '../../db/schema.ts';
 import type { EnqueueRequest, EnqueueResponse, MediaFileSummary, PageQuery } from '../../shared/api-types.ts';
 import { JOB_STATES, type JobState, type JobSummary } from '../../shared/domain.ts';
-import { checkRecycleBinLocation } from '../recycle-bin/checkRecycleBinLocation.ts';
+import { checkRecycleBinLocation, NODE_BIN_TRIAL_FS } from '../recycle-bin/checkRecycleBinLocation.ts';
 import { createAudioExecutor } from './audioExecutor.ts';
 import {
   deleteHistoryRows,
@@ -77,6 +77,7 @@ export function createJobsService(ctx: AppContext): JobsService {
           configuredPath: ctx.settings.section('recycleBin').path,
           findRootForPath: (target) => ctx.services.libraries.findRootForPath(target),
           warn: (message, context) => log.warn(message, context),
+          trialFs: NODE_BIN_TRIAL_FS,
         },
         path,
       );
