@@ -15,6 +15,7 @@
   import { formatDateTime } from '#lib/format/formatDateTime.ts';
   import { formatDuration } from '#lib/format/formatDuration.ts';
   import { formatSpeed } from '#lib/format/formatSpeed.ts';
+  import { attemptNumber } from '#lib/jobs/attemptNumber.ts';
   import { patchJob } from '#lib/jobs/patchJob.ts';
   import { syncJobLog } from '#lib/jobs/syncJobLog.svelte.ts';
   import {
@@ -159,7 +160,7 @@
           <dd class="break">{data.outputPath}</dd>
         {/if}
         <dt>Trigger</dt>
-        <dd>{JOB_TRIGGER_LABELS[data.trigger]}{data.attempts > 0 ? ` · ${data.attempts} earlier attempt(s)` : ''}</dd>
+        <dd>{JOB_TRIGGER_LABELS[data.trigger]}{attemptNumber(data) > 1 ? ` · attempt ${attemptNumber(data)}` : ''}</dd>
         <dt>Added</dt>
         <dd>{formatDateTime(data.createdAt)}</dd>
         <dt>Started</dt>

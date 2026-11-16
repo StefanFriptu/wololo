@@ -11,6 +11,7 @@
   import { formatRelativeTime } from '#lib/format/formatRelativeTime.ts';
   import { formatSpeed } from '#lib/format/formatSpeed.ts';
   import { applyQueueEvent } from '#lib/jobs/applyQueueEvent.ts';
+  import { attemptNumber } from '#lib/jobs/attemptNumber.ts';
   import { JOB_STATE_LABELS, JOB_STATE_TONES, JOB_STEP_LABELS, JOB_TRIGGER_LABELS, PAUSE_REASON_LABELS } from '#lib/labels.ts';
   import { href } from '#lib/paths.ts';
   import { Resource } from '#lib/resource.svelte.ts';
@@ -128,7 +129,7 @@
                 <tr>
                   <td class="title">
                     <a href={href(`/activity/jobs/${job.id}`)}>{job.title}</a>
-                    <div class="muted small">{job.type === 'bdmv' ? 'Blu-ray' : 'Audio'}{job.attempts > 0 ? ` · attempt ${job.attempts + 1}` : ''}</div>
+                    <div class="muted small">{job.type === 'bdmv' ? 'Blu-ray' : 'Audio'}{attemptNumber(job) > 1 ? ` · attempt ${attemptNumber(job)}` : ''}</div>
                   </td>
                   <td>
                     <Badge tone={JOB_STATE_TONES[job.state]} label={JOB_STATE_LABELS[job.state]} />
