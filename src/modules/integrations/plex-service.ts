@@ -7,6 +7,7 @@ import type { PlexConnection, PlexSection, PlexServer } from '../../shared/domai
 import type { IntegrationDeps } from './arr-service.ts';
 import { createPlexServerClient, createPlexTvClient, PLEX_PRODUCT, type PlexResource } from './plex-client.ts';
 import { findSectionForPath, isPublishedConnection, pickConnection, toSession } from './plex-select.ts';
+import { redactUrl } from './redact-url.ts';
 import { ensurePlexRow, type PlexRowPatch, updatePlexRow } from './store.ts';
 import { upstreamStatus } from './upstream.ts';
 
@@ -156,7 +157,9 @@ export function createPlexService(ctx: AppContext, deps: PlexDeps = {}): PlexSer
       if (server && isPublishedConnection(serverUrl, server.connections ?? [])) return { serverUrl };
     }
     if (!serverToken)
-      log.info('Plex URL is not listed by plex.tv for the selected server; it is used without a token', { serverUrl });
+      log.info('Plex URL is not listed by plex.tv for the selected server; it is used without a token', {
+        serverUrl: redactUrl(serverUrl),
+      });
     return { serverUrl, serverToken: serverToken ?? null, serverMachineId: null, serverName: null };
   };
 
@@ -177,7 +180,7 @@ export function createPlexService(ctx: AppContext, deps: PlexDeps = {}): PlexSer
       if (changes.enabled && !serverUrl) throw new AppError('precondition_failed', 'select a Plex server first');
       const updated = updatePlexRow(ctx.db, changes);
       log.info('Plex connection updated', {
-        server: updated.serverName ?? updated.serverUrl,
+        server: updated.serverName ?? (updated.serverUrl && redactUrl(updated.serverUrl)),
         enabled: updated.enabled,
       });
       ctx.services.jobs.resume('plex_streaming');

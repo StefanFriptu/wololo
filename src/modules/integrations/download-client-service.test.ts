@@ -176,6 +176,15 @@ test('downloadClient.test - auth bypass answers login with 204 and no cookie', a
   expect(result).toEqual({ ok: true, message: 'Connected to qBittorrent v5.3.0', version: 'v5.3.0' });
 });
 
+test('downloadClient.save - credentials in the URL never reach the log', async () => {
+  const url = qbit.url.replace('http://', 'http://admin:hunter2@');
+  await t.ctx.services.downloadClient.save(input({ url }));
+  const saved = t.ctx.logs
+    .entries({ module: 'downloadclient' })
+    .find((entry) => entry.message === 'download client saved');
+  expect(saved?.data?.url).toBe(`${qbit.url.replace('http://', 'http://***:***@')}/`);
+});
+
 test('downloadClient.test - sends Referer and a form login', async () => {
   await t.ctx.services.downloadClient.test(input());
   const login = qbit.requestsTo('POST /api/v2/auth/login')[0];

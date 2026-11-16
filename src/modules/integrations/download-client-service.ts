@@ -9,6 +9,7 @@ import { createArrClient } from './arr-client.ts';
 import type { IntegrationDeps } from './arr-service.ts';
 import { isSameOrInside, joinRemotePath } from './path-map.ts';
 import { createQbittorrentClient, type QbittorrentClient } from './qbittorrent-client.ts';
+import { redactUrl } from './redact-url.ts';
 import { maskSecret, resolveSecret } from './secrets.ts';
 import {
   mediaFilesWithCompletedJob,
@@ -132,7 +133,7 @@ export function createDownloadClientService(ctx: AppContext, deps: IntegrationDe
     save: async (input) => {
       const saved = saveDownloadClient(ctx.db, resolveInput(input));
       cached = null;
-      log.info('download client saved', { url: saved.url, enabled: saved.enabled });
+      log.info('download client saved', { url: redactUrl(saved.url), enabled: saved.enabled });
       return masked(saved);
     },
     remove: async () => {
