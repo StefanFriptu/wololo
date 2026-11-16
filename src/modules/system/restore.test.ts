@@ -150,6 +150,60 @@ test('scrubRestoredDatabase - drops job file pointers and retires recycle rows o
   check.close();
 });
 
+test('scrubRestoredDatabase - fails interrupted jobs and dismisses open or confirmed delete_source decisions', () => {
+  const path = join(dir, DATABASE_FILE);
+  migratedDatabase(path);
+  const seed = new Database(path, { strict: true });
+  seed.run("INSERT INTO libraries (id, name) VALUES (1, 'Movies')");
+  seed.run("INSERT INTO library_roots (id, library_id, path) VALUES (1, 1, '/m')");
+  const insertMedia = seed.query(
+    'INSERT INTO media_files (id, library_id, root_id, path, kind, size_bytes, mtime_ms, status) VALUES ($id, 1, 1, $path, $kind, 1, 1, $status)',
+  );
+  insertMedia.run({ id: 1, path: '/m/a.mkv', kind: 'file', status: 'processing' });
+  insertMedia.run({ id: 2, path: '/m/other-library', kind: 'bdmv', status: 'compatible' });
+  const insertJob = seed.query(
+    "INSERT INTO jobs (id, type, state, step, trigger, title, source_path, media_file_id) VALUES ($id, $type, $state, $step, 'manual', 'J', $source, $media)",
+  );
+  insertJob.run({ id: 1, type: 'audio', state: 'running', step: 'replacing', source: '/config/config.json', media: 1 });
+  insertJob.run({ id: 2, type: 'bdmv', state: 'completed', step: 'done', source: '/m/other-library', media: 2 });
+  insertJob.run({ id: 3, type: 'audio', state: 'queued', step: 'waiting', source: '/m/a.mkv', media: 1 });
+  const insertDecision = seed.query(
+    "INSERT INTO bdmv_decisions (id, media_file_id, kind, state, message, choice, resolved_at) VALUES ($id, 2, $kind, $state, 'm', $choice, $resolvedAt)",
+  );
+  insertDecision.run({ id: 1, kind: 'delete_source', state: 'pending', choice: null, resolvedAt: null });
+  const confirmed = '{"kind":"delete_source","confirm":true}';
+  insertDecision.run({ id: 2, kind: 'delete_source', state: 'resolved', choice: confirmed, resolvedAt: '2026-01-01' });
+  const kept = '{"kind":"delete_source","confirm":false}';
+  insertDecision.run({ id: 3, kind: 'delete_source', state: 'resolved', choice: kept, resolvedAt: '2026-01-02' });
+  insertDecision.run({ id: 4, kind: 'main_title', state: 'pending', choice: null, resolvedAt: null });
+  seed.close();
+
+  expect(scrubRestoredDatabase(path, new Date('2026-11-16T00:00:00.000Z'))).toEqual({ ok: true });
+
+  const check = new Database(path, { readonly: true });
+  expect(check.query('SELECT id, state, error, finished_at FROM jobs ORDER BY id').all()).toEqual([
+    {
+      id: 1,
+      state: 'failed',
+      error: 'interrupted before this backup was restored',
+      finished_at: '2026-11-16T00:00:00.000Z',
+    },
+    { id: 2, state: 'completed', error: null, finished_at: null },
+    { id: 3, state: 'queued', error: null, finished_at: null },
+  ]);
+  expect(check.query('SELECT id, status FROM media_files ORDER BY id').all()).toEqual([
+    { id: 1, status: 'failed' },
+    { id: 2, status: 'compatible' },
+  ]);
+  expect(check.query('SELECT id, state, resolved_at FROM bdmv_decisions ORDER BY id').all()).toEqual([
+    { id: 1, state: 'dismissed', resolved_at: '2026-11-16T00:00:00.000Z' },
+    { id: 2, state: 'dismissed', resolved_at: '2026-01-01' },
+    { id: 3, state: 'resolved', resolved_at: '2026-01-02' },
+    { id: 4, state: 'pending', resolved_at: null },
+  ]);
+  check.close();
+});
+
 test('scrubRestoredDatabase - rejects a database without Wololo tables', () => {
   const path = join(dir, DATABASE_FILE);
   const db = new Database(path);

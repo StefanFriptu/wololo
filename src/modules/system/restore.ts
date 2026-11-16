@@ -81,6 +81,8 @@ export function validateRestoreFiles(dir: string, latestMigrationMillis: number)
 /**
  * Backups carry data, not filesystem pointers: job log and temp paths are dropped (both are derived again at runtime),
  * and recycle-bin entries that do not point into a recycle stamp folder are marked purged without touching any file.
+ * Nothing restored may start a destructive step on its own: interrupted jobs fail instead of running crash recovery on
+ * their stored paths, and delete_source decisions (open or confirmed) are dismissed.
  */
 export function scrubRestoredDatabase(path: string, now: Date): RestoreValidation {
   let sqlite: Database | null = null;
@@ -92,11 +94,22 @@ export function scrubRestoredDatabase(path: string, now: Date): RestoreValidatio
       'SELECT id, recycle_path AS recyclePath, original_path AS originalPath FROM recycle_bin WHERE restored_at IS NULL AND purged_at IS NULL',
     );
     const purge = db.query('UPDATE recycle_bin SET purged_at = $purgedAt WHERE id = $id');
+    const reason = 'interrupted before this backup was restored';
+    const at = now.toISOString();
     db.transaction(() => {
       db.run('UPDATE jobs SET log_path = NULL, temp_path = NULL');
+      db.query(
+        "UPDATE media_files SET status = 'failed', status_reason = $reason WHERE id IN (SELECT media_file_id FROM jobs WHERE state = 'running')",
+      ).run({ reason });
+      db.query(
+        "UPDATE jobs SET state = 'failed', error = $reason, speed = NULL, eta_sec = NULL, finished_at = $now WHERE state = 'running'",
+      ).run({ reason, now: at });
+      db.query(
+        "UPDATE bdmv_decisions SET state = 'dismissed', resolved_at = COALESCE(resolved_at, $now) WHERE kind = 'delete_source' AND (state = 'pending' OR json_extract(choice, '$.confirm') = 1)",
+      ).run({ now: at });
       for (const row of active.all()) {
         if (isRecyclePath(row.recyclePath) && isNormalizedAbsolutePath(row.originalPath)) continue;
-        purge.run({ purgedAt: now.toISOString(), id: row.id });
+        purge.run({ purgedAt: at, id: row.id });
       }
     })();
     return { ok: true };
