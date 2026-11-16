@@ -13,6 +13,7 @@ import {
   jobsForMediaQuery,
   listMediaQuery,
   type MediaSummaryRow,
+  mediaAfterPathQuery,
   mediaDetailQuery,
   mediaStatsQuery,
   toSummary,
@@ -33,6 +34,8 @@ export function createMediaService(ctx: AppContext): MediaService {
       const { total, rows } = listMediaQuery(ctx.db, query);
       return { page: query.page ?? 1, pageSize: query.pageSize ?? 50, total, items: rows.map(toSummary) };
     },
+
+    listAfterPath: async (query, cursor) => mediaAfterPathQuery(ctx.db, query, cursor).map(toSummary),
 
     get: async (id): Promise<MediaFileDetail> => {
       const row = mediaDetailQuery(ctx.db, { id });

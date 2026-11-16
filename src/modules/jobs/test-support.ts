@@ -215,7 +215,7 @@ export function mediaDetail(id: number, path: string, overrides: Partial<MediaFi
   };
 }
 
-/** A media service that serves the given rows (list honours status and paging), applies and records every write. */
+/** A media service that serves the given rows (lists honour status and paging), applies and records every write. */
 export function recordingMediaService(files: MediaFileDetail[]): { service: MediaService; recorder: MediaRecorder } {
   const recorder: MediaRecorder = {
     files: new Map(files.map((file) => [file.id, file])),
@@ -240,6 +240,16 @@ export function recordingMediaService(files: MediaFileDetail[]): { service: Medi
       );
       return { page, pageSize, total: matches.length, items: matches.slice((page - 1) * pageSize, page * pageSize) };
     },
+    listAfterPath: async (query, cursor) =>
+      [...recorder.files.values()]
+        .filter(
+          (file) =>
+            (!query.status || file.status === query.status) &&
+            (query.libraryId === undefined || file.libraryId === query.libraryId) &&
+            (cursor.afterPath === null || file.path > cursor.afterPath),
+        )
+        .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+        .slice(0, cursor.limit),
     setStatus: async (id, status, reason) => {
       recorder.statuses.push({ id, status, reason });
       const file = recorder.files.get(id);

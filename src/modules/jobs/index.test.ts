@@ -236,6 +236,36 @@ test('enqueueMany - lets the event loop run while queueing a large backlog', asy
   expect(response.jobs).toHaveLength(300);
 });
 
+test('enqueueMany - a filter lets the event loop run between pages', async () => {
+  const s = setup();
+  t = s.t;
+  t.ctx.settings.update({ processing: { enabled: false } });
+  for (let i = 0; i < 1001; i++) s.addFile('needs_work', 'file');
+  t.ctx.settings.update({ processing: { enabled: true } });
+  await t.ctx.services.jobs.pause('user');
+  let ticks = 0;
+  const timer = setInterval(() => {
+    ticks += 1;
+  }, 0);
+  const ticksAtPage: number[] = [];
+  const media = t.ctx.services.media;
+  const listAfterPath = media.listAfterPath;
+  media.listAfterPath = (query, cursor) => {
+    ticksAtPage.push(ticks);
+    return listAfterPath(query, cursor);
+  };
+  try {
+    const result = await t.ctx.services.jobs.enqueueMany({ filter: {} });
+
+    expect(result.jobs).toHaveLength(1001);
+    expect(ticksAtPage).toHaveLength(3);
+    expect(ticksAtPage[2] ?? 0).toBeGreaterThan(ticksAtPage[1] ?? 0);
+    expect(ticksAtPage[1] ?? 0).toBeGreaterThan(ticksAtPage[0] ?? 0);
+  } finally {
+    clearInterval(timer);
+  }
+});
+
 test('worker - runs one job at a time by default, highest priority first', async () => {
   const s = setup();
   t = s.t;

@@ -110,8 +110,19 @@ export interface JobResultUpdate {
   probe?: ProbeResult | null;
 }
 
+/** The filters of MediaQuery without its paging and sort fields. */
+export type MediaFilterQuery = Omit<MediaQuery, 'page' | 'pageSize' | 'sortKey' | 'sortDir'>;
+
 export interface MediaService {
   list(query: MediaQuery): Promise<Paginated<MediaFileSummary>>;
+  /**
+   * Keyset page for bulk work: up to limit matching rows with a path after afterPath (null: from the start), by path
+   * ascending, without a total. Rows that stop matching meanwhile never shift the next page.
+   */
+  listAfterPath(
+    query: MediaFilterQuery,
+    cursor: { afterPath: string | null; limit: number },
+  ): Promise<MediaFileSummary[]>;
   get(id: number): Promise<MediaFileDetail>;
   stats(libraryId?: number): Promise<MediaStats>;
   findByPath(path: string): Promise<MediaFileSummary | null>;

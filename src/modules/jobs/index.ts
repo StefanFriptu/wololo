@@ -194,28 +194,27 @@ export function createJobsService(ctx: AppContext): JobsService {
       return response;
     }
     const filter = request.filter ?? {};
-    const matches = new Map<number, MediaFileSummary>();
-    for (let page = 1; ; page++) {
-      const result = await ctx.services.media.list({
-        libraryId: filter.libraryId,
-        status: filter.status ?? 'needs_work',
-        failingCodec: filter.failingCodec,
-        kind: filter.kind,
-        profileId: filter.profileId,
-        search: filter.search,
-        codec: filter.codec,
-        page,
-        pageSize: ENQUEUE_PAGE_SIZE,
-        sortDir: 'asc',
-      });
-      for (const item of result.items) matches.set(item.id, item);
-      if (result.items.length === 0 || page * ENQUEUE_PAGE_SIZE >= result.total) break;
+    const query = {
+      libraryId: filter.libraryId,
+      status: filter.status ?? 'needs_work',
+      failingCodec: filter.failingCodec,
+      kind: filter.kind,
+      profileId: filter.profileId,
+      search: filter.search,
+      codec: filter.codec,
+    };
+    let afterPath: string | null = null;
+    while (true) {
+      const page = await ctx.services.media.listAfterPath(query, { afterPath, limit: ENQUEUE_PAGE_SIZE });
+      for (const item of page) {
+        await pace();
+        await consider(item, null);
+      }
+      const last = page.at(-1);
+      if (!last || page.length < ENQUEUE_PAGE_SIZE) return response;
+      afterPath = last.path;
+      await yieldToEventLoop();
     }
-    for (const item of matches.values()) {
-      await pace();
-      await consider(item, null);
-    }
-    return response;
   };
 
   const deleteIdleTempPaths = (): number => {

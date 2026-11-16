@@ -156,6 +156,23 @@ export function listMediaQuery(db: Db, query: MediaQuery): { total: number; rows
   return { total, rows };
 }
 
+export function mediaAfterPathQuery(
+  db: Db,
+  query: MediaQuery,
+  cursor: { afterPath: string | null; limit: number },
+): MediaSummaryRow[] {
+  const conditions = mediaConditions(db, query);
+  if (cursor.afterPath !== null) conditions.push(gt(mediaFiles.path, cursor.afterPath));
+  return db
+    .select(SUMMARY_COLUMNS)
+    .from(mediaFiles)
+    .leftJoin(libraryRoots, eq(libraryRoots.id, mediaFiles.rootId))
+    .where(and(...conditions))
+    .orderBy(asc(mediaFiles.path))
+    .limit(cursor.limit)
+    .all();
+}
+
 export function mediaDetailQuery(db: Db, where: { id: number } | { path: string }) {
   return db
     .select(DETAIL_COLUMNS)

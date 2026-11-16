@@ -495,6 +495,41 @@ describe('media rows without files', () => {
     expect(await list({ codec: '*' })).toEqual(['Ac3.mkv', 'Lookalike.mkv', 'Pcm.mkv']);
   });
 
+  test('media.listAfterPath - pages by path and skips no row when earlier rows leave the filter', async () => {
+    for (const name of ['E', 'A', 'D', 'B', 'C'])
+      insertMediaFile(t.ctx.db, seeded(), { path: join(root, `${name}.mkv`), status: 'needs_work' });
+    insertMediaFile(t.ctx.db, seeded(), { path: join(root, 'Done.mkv'), status: 'compatible' });
+    const names = (rows: { path: string }[]) => rows.map((row) => row.path.slice(root.length + 1));
+
+    const first = await t.ctx.services.media.listAfterPath({ status: 'needs_work' }, { afterPath: null, limit: 2 });
+    expect(names(first)).toEqual(['A.mkv', 'B.mkv']);
+    t.ctx.db.update(mediaFiles).set({ status: 'processing' }).run();
+    t.ctx.db
+      .update(mediaFiles)
+      .set({ status: 'needs_work' })
+      .where(eq(mediaFiles.path, join(root, 'C.mkv')))
+      .run();
+    t.ctx.db
+      .update(mediaFiles)
+      .set({ status: 'needs_work' })
+      .where(eq(mediaFiles.path, join(root, 'D.mkv')))
+      .run();
+    t.ctx.db
+      .update(mediaFiles)
+      .set({ status: 'needs_work' })
+      .where(eq(mediaFiles.path, join(root, 'E.mkv')))
+      .run();
+
+    const cursor = { afterPath: first.at(-1)?.path ?? null, limit: 2 };
+    const second = await t.ctx.services.media.listAfterPath({ status: 'needs_work' }, cursor);
+    expect(names(second)).toEqual(['C.mkv', 'D.mkv']);
+    const third = await t.ctx.services.media.listAfterPath(
+      { status: 'needs_work' },
+      { afterPath: second.at(-1)?.path ?? null, limit: 2 },
+    );
+    expect(names(third)).toEqual(['E.mkv']);
+  });
+
   test('media.list - profile filter covers assigned libraries and, for the builtin default, unassigned ones', async () => {
     const builtin = insertProfile(t.ctx.db, TEST_DEFINITION, { builtin: true });
     const custom = insertProfile(t.ctx.db, TEST_DEFINITION);
