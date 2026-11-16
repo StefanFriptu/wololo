@@ -311,6 +311,10 @@
     align-items: center;
     padding: 0.35rem 0;
   }
+  .checks li .muted {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
   .titles {
     margin-top: 0.75rem;
   }

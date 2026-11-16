@@ -307,7 +307,7 @@
             {#each data.items as entry (entry.id)}
               <li>
                 <Badge tone={HISTORY_EVENT_TONES[entry.event]} label={HISTORY_EVENT_LABELS[entry.event]} />
-                <span>{entry.message}</span>
+                <span class="message">{entry.message}</span>
                 <span class="muted nowrap">{formatDateTime(entry.createdAt)}</span>
               </li>
             {/each}
@@ -329,6 +329,10 @@
     align-items: baseline;
     padding: 0.4rem 0;
     border-bottom: 1px solid var(--border);
+  }
+  .events .message {
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
   .events li:last-child {
     border-bottom: none;
