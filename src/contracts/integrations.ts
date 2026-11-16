@@ -158,7 +158,7 @@ export interface NotifierService {
    * replaced: arr.rescan(ref) (ref = event.arr, else arr.findByPath(localPath); still unresolved -> warning, no rescan),
    * then plex.refreshPath(folder). created (BDMV output, already imported by bdmv): plex.refreshPath only.
    * Honours settings.notifications.rescanArr; plex.refreshPath honours PlexConnection.partialScan. Errors are logged,
-   * never thrown.
+   * never thrown; transient upstream failures (network, 429, 5xx) are retried in the background after it resolves.
    */
   fileChanged(event: FileChangedEvent): Promise<void>;
 }

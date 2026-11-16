@@ -158,3 +158,11 @@ export function upstreamStatus(error: unknown): number | null {
   const details = error.details as Partial<UpstreamFailure> | undefined;
   return typeof details?.status === 'number' ? details.status : null;
 }
+
+/** Network errors, timeouts, 429 and 5xx: worth another attempt later. Bad credentials, URLs or answers are not. */
+export function isTransientUpstreamError(error: unknown): boolean {
+  if (!(error instanceof AppError) || error.code !== 'upstream') return false;
+  const status = (error.details as Partial<UpstreamFailure> | undefined)?.status;
+  if (status === null) return true;
+  return typeof status === 'number' && (status === 429 || status >= 500);
+}
