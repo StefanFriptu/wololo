@@ -564,6 +564,29 @@ test('bdmv.deleteSource - refuses to delete a library root or an unconverted dis
   expect(existsSync(disc)).toBe(true);
 });
 
+test('bdmv.resolveDecision - a confirmed delete_source on a row that is not a disc on disk deletes nothing', async () => {
+  const s = setup({ settings: { bdmv: { deleteSourceWhenSeeded: true } } });
+  converted(s);
+  const plain = join(s.root, 'other-library');
+  const keep = join(plain, 'precious', 'family-video.mkv');
+  mkdirSync(dirname(keep), { recursive: true });
+  writeFileSync(keep, 'matroska');
+  s.t.ctx.dbHandle.sqlite.run('update media_files set path = ? where id = ?', [plain, s.mediaFileId]);
+  const offer = await s.t.ctx.services.bdmv.offerSourceDeletion(s.mediaFileId, TORRENT);
+  const confirm = () =>
+    s.t.ctx.services.bdmv.resolveDecision(offer?.id as number, { kind: 'delete_source', confirm: true });
+
+  await expect(confirm()).rejects.toThrow(`refusing to delete ${plain}: it is not a Blu-ray disc folder`);
+  s.t.ctx.dbHandle.sqlite.run('update media_files set path = ? where id = ?', [join(s.disc, 'BDMV'), s.mediaFileId]);
+  await expect(confirm()).rejects.toThrow('it is not a Blu-ray disc folder');
+  s.t.ctx.dbHandle.sqlite.run(`update media_files set kind = 'iso', path = ? where id = ?`, [keep, s.mediaFileId]);
+  await expect(confirm()).rejects.toThrow(`refusing to delete ${keep}: it is not a Blu-ray .iso file`);
+
+  expect(existsSync(keep)).toBe(true);
+  expect(existsSync(join(s.disc, 'BDMV'))).toBe(true);
+  expect(s.calls.addHistory).toBeUndefined();
+});
+
 test('routes - list, get, resolve validation, dismiss and disc analysis', async () => {
   const { t, mediaFileId } = setup({
     playlists: { '00800.mpls': feature('00001', 6000), '00801.mpls': feature('00002', 5800) },

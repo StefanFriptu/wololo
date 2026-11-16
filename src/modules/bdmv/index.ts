@@ -108,6 +108,12 @@ export function createBdmvService(ctx: AppContext): BdmvService {
     const path = resolve(disc.row.path);
     if (path === resolve(disc.rootPath) || path === resolve('/'))
       throw new AppError('precondition_failed', `refusing to delete ${path}: it is a library root`);
+    const onDisk = await detectDisc(path, async () => true);
+    if (onDisk?.kind !== disc.kind || onDisk.discRoot !== path)
+      throw new AppError(
+        'precondition_failed',
+        `refusing to delete ${path}: it is not a Blu-ray ${disc.kind === 'bdmv' ? 'disc folder' : '.iso file'}`,
+      );
     await requireConvertedOutput(mediaFileId, path);
 
     const torrent = await ctx.services.downloadClient.findTorrentByPath(path);
