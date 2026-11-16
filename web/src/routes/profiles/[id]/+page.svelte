@@ -9,6 +9,7 @@
   import Icon from '#lib/components/Icon.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { href } from '#lib/paths.ts';
+  import { audioProblems, maxBitrate } from '#lib/profiles/audioLimits.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import { DOLBY_VISION_MODES, type DeviceProfileDefinition, type ProfileInput, type TargetAudioCodec } from '#lib/shared.ts';
   import { toasts } from '#lib/toast.svelte.ts';
@@ -51,6 +52,8 @@
   let saved = $state('');
   let busy = $state(false);
   const dirty = $derived(form !== null && JSON.stringify(form) !== saved);
+  const problems = $derived(form ? audioProblems(form.definition.audio) : []);
+  const bitrateMax = $derived(form ? maxBitrate(form.definition.audio.targetCodec) : 1536);
 
   $effect(() => {
     void rawId;
@@ -180,11 +183,16 @@
           <div class="field" role="group" aria-labelledby="bit-rate-kbps-label">
             <span class="label" id="bit-rate-kbps-label">Bit rate (kbps)</span>
             <div class="control bitrates">
-              <label>Surround <input type="number" min="32" max="6144" step="1" bind:value={form.definition.audio.bitrates.surround} required /></label>
-              <label>Stereo <input type="number" min="32" max="6144" step="1" bind:value={form.definition.audio.bitrates.stereo} required /></label>
-              <label>Mono <input type="number" min="32" max="6144" step="1" bind:value={form.definition.audio.bitrates.mono} required /></label>
+              <label>Surround <input type="number" min="32" max={bitrateMax} step="1" bind:value={form.definition.audio.bitrates.surround} required /></label>
+              <label>Stereo <input type="number" min="32" max={bitrateMax} step="1" bind:value={form.definition.audio.bitrates.stereo} required /></label>
+              <label>Mono <input type="number" min="32" max={bitrateMax} step="1" bind:value={form.definition.audio.bitrates.mono} required /></label>
             </div>
           </div>
+          {#if problems.length > 0}
+            <div class="alert tone-danger" role="alert">
+              {#each problems as problem (problem)}<p>{problem}</p>{/each}
+            </div>
+          {/if}
         </section>
 
         <section class="card">
@@ -222,7 +230,7 @@
           <a class="button" href={href('/profiles')}>Back</a>
           <span class="spacer"></span>
           {#if dirty}<span class="muted">Unsaved changes</span>{/if}
-          <button class="primary" type="submit" disabled={busy || !dirty}>{isNew ? 'Create profile' : 'Save'}</button>
+          <button class="primary" type="submit" disabled={busy || !dirty || problems.length > 0}>{isNew ? 'Create profile' : 'Save'}</button>
         </div>
       </form>
     {/if}
