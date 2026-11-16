@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
 import { ensureFixture, FIXTURES, ffmpegAvailable } from '../../../test/helpers/fixtures.ts';
@@ -29,6 +29,68 @@ test('probe - missing ffprobe binary is an upstream error', async () => {
     expect((error as AppError).code).toBe('upstream');
   } finally {
     broken.cleanup();
+  }
+});
+
+function countingFfprobe(dir: string): { env: Record<string, string>; counts: () => number[] } {
+  const script = join(dir, 'fake-ffprobe.sh');
+  const log = join(dir, 'probe-counts');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    script,
+    [
+      '#!/bin/sh',
+      `mkdir -p '${dir}/running' && touch '${dir}/running/'$$`,
+      `ls '${dir}/running' | wc -l >> '${log}'`,
+      'sleep 0.2',
+      `rm '${dir}/running/'$$`,
+      "echo '{}'",
+    ].join('\n'),
+  );
+  chmodSync(script, 0o755);
+  return {
+    env: { WOLOLO__FFPROBE: script },
+    counts: () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split(/\s+/).map(Number) : []),
+  };
+}
+
+test('probe - runs at most 2 ffprobe processes at once', async () => {
+  const fake = countingFfprobe(t.dir);
+  const limited = createTestContext({ env: fake.env });
+  try {
+    const file = join(limited.dir, 'a.mkv');
+    writeFileSync(file, 'x');
+
+    const results = await Promise.all(Array.from({ length: 6 }, () => limited.ctx.services.probe.probe(file)));
+
+    expect(results).toHaveLength(6);
+    expect(fake.counts()).toHaveLength(6);
+    expect(Math.max(...fake.counts())).toBeLessThanOrEqual(2);
+  } finally {
+    limited.cleanup();
+  }
+});
+
+test('probe - aborted while queued never spawns ffprobe', async () => {
+  const fake = countingFfprobe(join(t.dir, 'abort'));
+  const limited = createTestContext({ env: fake.env });
+  try {
+    const file = join(limited.dir, 'a.mkv');
+    writeFileSync(file, 'x');
+    const busy = [limited.ctx.services.probe.probe(file), limited.ctx.services.probe.probe(file)];
+    const controller = new AbortController();
+    const queued = limited.ctx.services.probe.probe(file, { signal: controller.signal });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    controller.abort();
+
+    const error = await queued.catch((caught: unknown) => caught);
+    expect((error as AppError).message).toContain('ffprobe aborted');
+    await Promise.all(busy);
+    expect(await limited.ctx.services.probe.probe(file)).toMatchObject({ path: file });
+    expect(fake.counts()).toHaveLength(3);
+  } finally {
+    limited.cleanup();
   }
 });
 
