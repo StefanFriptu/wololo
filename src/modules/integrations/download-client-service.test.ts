@@ -157,6 +157,25 @@ test('downloadClient.test - wrong password is not ok and does not throw', async 
   expect(result).toEqual({ ok: false, message: 'qBittorrent rejected the username or password', version: null });
 });
 
+test('downloadClient.test - qBittorrent 5.2+ answers login with 204 and no body', async () => {
+  qbit.on('POST /api/v2/auth/login', (request) => {
+    const form = new URLSearchParams(request.body);
+    if (form.get('password') !== 'secret') return new Response(null, { status: 401 });
+    return new Response(null, { status: 204, headers: { 'Set-Cookie': `${SID}; HttpOnly; path=/` } });
+  });
+  const result = await t.ctx.services.downloadClient.test(input());
+  expect(result).toEqual({ ok: true, message: 'Connected to qBittorrent v5.0.4', version: 'v5.0.4' });
+  const wrong = await t.ctx.services.downloadClient.test(input({ password: 'nope' }));
+  expect(wrong).toMatchObject({ ok: false, message: expect.stringContaining('HTTP 401') });
+});
+
+test('downloadClient.test - auth bypass answers login with 204 and no cookie', async () => {
+  qbit.on('POST /api/v2/auth/login', () => new Response(null, { status: 204 }));
+  qbit.on('GET /api/v2/app/version', () => new Response('v5.3.0'));
+  const result = await t.ctx.services.downloadClient.test(input());
+  expect(result).toEqual({ ok: true, message: 'Connected to qBittorrent v5.3.0', version: 'v5.3.0' });
+});
+
 test('downloadClient.test - sends Referer and a form login', async () => {
   await t.ctx.services.downloadClient.test(input());
   const login = qbit.requestsTo('POST /api/v2/auth/login')[0];
