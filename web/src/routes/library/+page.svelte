@@ -105,12 +105,19 @@
   $effect(() => live.onReconnect(refreshSoon));
   $effect(() => () => clearTimeout(refreshTimer));
 
-  syncSearchText({ urlSearch: () => filters.search, read: () => searchText, write: (text) => (searchText = text) });
+  const searchSync = syncSearchText({
+    urlSearch: () => filters.search,
+    read: () => searchText,
+    write: (text) => (searchText = text),
+  });
 
   $effect(() => {
     const text = searchText.trim();
     if (text === (untrack(() => filters.search) ?? '')) return;
-    const timer = setTimeout(() => update({ search: text || undefined }), 350);
+    const timer = setTimeout(() => {
+      searchSync.markPushed(text);
+      update({ search: text || undefined });
+    }, 350);
     return () => clearTimeout(timer);
   });
 

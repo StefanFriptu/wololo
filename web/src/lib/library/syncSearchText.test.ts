@@ -16,18 +16,20 @@ function setup(initialUrl: string | undefined, initialText: string) {
   const url = new Resource<string | undefined>(async () => undefined);
   url.set(initialUrl);
   const box = { text: initialText, writes: 0 };
-  const scope = effectScope(() =>
-    syncSearchText({
+  let push: { markPushed: (text: string) => void } | undefined;
+  const scope = effectScope(() => {
+    push = syncSearchText({
       urlSearch: () => url.data,
       read: () => box.text,
       write: (text) => {
         box.text = text;
         box.writes += 1;
       },
-    }),
-  );
+    });
+  });
   stops.push(scope.stop);
-  return { url, box, flush: scope.flush };
+  const markPushed = (text: string) => push?.markPushed(text);
+  return { url, box, flush: scope.flush, markPushed };
 }
 
 test('syncSearchText - clearing the URL search empties the input', () => {
@@ -52,4 +54,38 @@ test('syncSearchText - the URL catching up with typed text leaves the input alon
   flush();
   expect(box.text).toBe('Movie B ');
   expect(box.writes).toBe(0);
+});
+
+test('syncSearchText - typing on while a pushed search is in flight keeps the newer text', () => {
+  const { url, box, flush, markPushed } = setup(undefined, '');
+  box.text = 'a';
+  markPushed('a');
+  box.text = 'ab';
+  url.set('a');
+  flush();
+  expect(box.text).toBe('ab');
+  expect(box.writes).toBe(0);
+});
+
+test('syncSearchText - a later outside navigation to the pushed search still fills the input', () => {
+  const { url, box, flush, markPushed } = setup(undefined, '');
+  box.text = 'a';
+  markPushed('a');
+  url.set('a');
+  flush();
+  box.text = '';
+  url.set(undefined);
+  flush();
+  url.set('a');
+  flush();
+  expect(box.text).toBe('a');
+});
+
+test('syncSearchText - an outside navigation that lands instead of the pushed search still fills the input', () => {
+  const { url, box, flush, markPushed } = setup(undefined, '');
+  box.text = 'a';
+  markPushed('a');
+  url.set('Movie C');
+  flush();
+  expect(box.text).toBe('Movie C');
 });
