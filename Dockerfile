@@ -41,7 +41,7 @@ RUN bun --version \
 
 WORKDIR /app
 COPY --from=deps /app/node_modules node_modules
-COPY package.json ./
+COPY package.json LICENSE ./
 COPY drizzle drizzle
 COPY src src
 COPY --from=web /app/web/build web/build

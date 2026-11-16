@@ -44,6 +44,16 @@ test('Dockerfile - the per-ref version comes after every RUN, so the apt and too
   expect(runtimeStage).toMatch(/^ENV WOLOLO_VERSION=\$\{VERSION\}$/m);
 });
 
+test('Dockerfile - the runtime image ships the license text and .dockerignore keeps it in the context', () => {
+  const runtimeStage =
+    read('Dockerfile')
+      .split(/^FROM /m)
+      .at(-1) ?? '';
+  expect(runtimeStage).toMatch(/^COPY (?:\S+ )*LICENSE (?:\S+ )*\.\/$/m);
+  expect(read('.dockerignore').split('\n')).not.toContain('LICENSE');
+  expect(read('LICENSE')).toContain('GNU GENERAL PUBLIC LICENSE');
+});
+
 test('ci.yml - image labels and build arg share one version', () => {
   const steps = workflow('ci.yml').jobs.image?.steps ?? [];
   const builds = steps.filter((step) => step.uses?.startsWith('docker/build-push-action'));
