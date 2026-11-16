@@ -17,11 +17,16 @@ It ships as one Docker image (amd64 and arm64) and is built to run on a Raspberr
 - [Path mappings](#path-mappings)
 - [Sign in to Plex](#sign-in-to-plex)
 - [First run: dry run, then process](#first-run-dry-run-then-process)
+- [Safety model](#safety-model)
+- [Recycle bin](#recycle-bin)
 - [Backup and restore](#backup-and-restore)
 - [Updating](#updating)
+- [Configuration reference](#configuration-reference)
 - [API](#api)
 - [Troubleshooting](#troubleshooting)
+- [Known limitations and roadmap](#known-limitations-and-roadmap)
 - [Development](#development)
+- [CI and image publishing](#ci-and-image-publishing)
 
 ## Install with Docker Compose
 
@@ -35,7 +40,7 @@ services:
     environment:
       - PUID=1000
       - PGID=1000
-      - TZ=Europe/Bucharest
+      - TZ=Etc/UTC
       - UMASK=002
     volumes:
       - ./wololo/config:/config
@@ -48,7 +53,7 @@ services:
 
 Replace `OWNER` with the GitHub account that publishes the image. Then run `docker compose up -d wololo`.
 
-- **Image tags:** `latest` and `X.Y.Z` are releases. `main` follows the main branch. Until the first release is tagged, only `main` exists, so use `ghcr.io/OWNER/wololo:main`.
+- **Image tags:** `latest` (newest release), `X.Y.Z` and `X.Y` (releases), `main` (follows the main branch), `sha-<commit>`. Until the first release is tagged, only `main` exists, so use `ghcr.io/OWNER/wololo:main`. Image names are lowercase.
 - **Keep `restart: unless-stopped`** (or `always`). The **Restart** button stops the process and relies on Docker to start it again. You need it to apply a restore or a URL base change. Without a restart policy, the container stays down.
 - **In Docker, keep Port `8585` and Bind address `*`** in **Settings > General**. To use another host port, change the left side of `ports:` instead. A different port or a host IP makes the UI unreachable after the restart.
 
@@ -57,26 +62,13 @@ Replace `OWNER` with the GitHub account that publishes the image. Then run `dock
 | Setting        | What it does                                                                                          |
 | -------------- | ----------------------------------------------------------------------------------------------------- |
 | `PUID`, `PGID` | User and group Wololo runs as. Use the same IDs as Radarr/Sonarr so converted files keep their owner. |
-| `TZ`           | Time zone, e.g. `Europe/Bucharest`. Used for the processing window and backup names.                  |
+| `TZ`           | Time zone, e.g. `America/New_York`. Used for the processing window and backup names.                  |
 | `UMASK`        | Permission mask for new files, e.g. `002` (group-writable) or `022`.                                  |
 | `/config`      | Database, `config.json` (API key, port), logs and backups. Back this up.                              |
 | `/data`        | Your media, same path as in Radarr/Sonarr.                                                            |
 | `8585`         | Web UI, API and webhooks on one port.                                                                 |
 
-Optional environment variables (they lock the matching setting in the UI):
-
-| Variable                                                              | Default                        | Purpose                                                                                                                               |
-| --------------------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `WOLOLO__PORT`                                                        | `8585`                         | Listen port. In Docker keep `8585` and change the host side of `ports:` instead                                                       |
-| `WOLOLO__BIND_ADDRESS`                                                | `*`                            | `*` or one IP address of this machine. In Docker keep `*`                                                                             |
-| `WOLOLO__URL_BASE`                                                    | empty                          | e.g. `/wololo` behind a reverse proxy                                                                                                 |
-| `WOLOLO__API_KEY`                                                     | generated                      | Fix the API key: 16-128 characters from `A-Z a-z 0-9 . _ ~ -`; any other value is ignored and a key is generated                      |
-| `WOLOLO__LOG_LEVEL`                                                   | `info`                         | `trace`, `debug`, `info`, `warn`, `error`                                                                                             |
-| `WOLOLO__INSTANCE_NAME`                                               | `Wololo`                       | Name shown in the UI                                                                                                                  |
-| `WOLOLO__AUTHENTICATION`                                              | `disabled_for_local_addresses` | Who gets the API key in the web UI: local addresses only, `required` (always ask) or `disabled` (only behind an authenticating proxy) |
-| `WOLOLO__FFMPEG`, `WOLOLO__FFPROBE`, `WOLOLO__MKVMERGE`, `WOLOLO__7Z` | from `PATH`                    | Tool paths, for custom builds                                                                                                         |
-
-Image tags: `latest` (newest release), `X.Y.Z` and `X.Y` (releases), `main` (development builds), `sha-<commit>`.
+Every other setting is optional; see [Configuration reference](#configuration-reference).
 
 The image bundles ffmpeg (with libbluray), MKVToolNix and 7-Zip. It drops root on start and runs as `PUID:PGID`, and Docker's health check calls `/health`.
 
@@ -143,7 +135,7 @@ A webhook for a path outside every library root is logged as `unknown_path`. Tha
 ## Sign in to Plex
 
 1. Go to **Settings > Plex > Sign in with Plex**.
-2. Wololo shows a PIN. Approve it at [plex.tv/link](https://plex.tv/link), or in the window that opens.
+2. Wololo shows a sign-in code. Press **Open plex.tv**, sign in there and approve Wololo. The page picks up the approval by itself.
 3. Pick your server from the list. Wololo matches each library section by its folder paths, so add a `plex` path mapping if Plex sees the media elsewhere.
 4. Press **Test**.
 
@@ -157,10 +149,35 @@ Wololo starts with **processing off**. In this dry-run mode it checks files and 
 2. Open the dry-run report under **Library > Dry run**. It lists files per failing codec, with estimated time and disk space for the conversion. Files marked **Blocked** need work Wololo cannot do (for example a video codec your TVs cannot play); they are never queued.
 3. Check the device profile under **Profiles**. "Samsung Tizen" is the default; clone and edit it if your TVs decode more.
 4. Tick **Convert files** in **Settings > Media**. Jobs can only be queued from then on.
-5. Try one file first. Open it in **Library > Files**, check the planned changes, and queue it. Watch **Activity > Queue**, then play the result on the TV.
+5. Try one file first. Open it in **Library > Files**, check the planned changes, and press **Process now**. Watch **Activity > Queue**, then play the result on the TV.
 6. Press **Process all needs-work** on the **Library > Dry run** page, or wait for the next scan.
 
-The target on a Raspberry Pi 4 is under 20 minutes per 2-hour movie, so a big backlog takes days. One job at a time, at low CPU and disk priority, is the default. **Replaced originals stay in the recycle bin for 7 days** (`<root>/.wololo-recycle`). Restore one under **Activity > Recycle bin** if a rule was wrong; the restored file is then marked **Ignored** so the next scan leaves it alone.
+The target on a Raspberry Pi 4 is under 20 minutes per 2-hour movie, so a big backlog takes days. One job at a time, at low CPU and disk priority, is the default (**Settings > Media**: Jobs at once, CPU priority, Disk priority).
+
+## Safety model
+
+Wololo touches your library only when you let it, and never leaves you without a playable file.
+
+```
+check free space -> write temp file next to the original -> verify -> link original into the recycle bin
+  -> atomic rename of the temp file over the original -> tell Radarr/Sonarr/Plex
+```
+
+- **Dry run first.** With **Convert files** off, scans and webhooks only report. The API refuses to queue jobs.
+- **Copy, don't re-encode.** Only failing audio tracks are converted. Video, subtitles and chapters are copied bit for bit.
+- **Verify before replacing.** The new file must match the original's duration within 100 ms, have the expected streams, the same video stream hash, the same chapters and languages, and its audio must decode end to end. On any failure the temp file is deleted, the original stays as it was, and the job is marked failed.
+- **Atomic swap.** The temp file (`<name>.wololo-tmp-<job id>.mkv`) sits in the same folder, so the final rename is atomic. Owner and permissions are copied first.
+- **Undo.** The original is hard-linked into the [recycle bin](#recycle-bin) before the swap.
+- **Crash safe.** After a crash or power cut, Wololo looks at which files exist on start, finishes or rolls back the swap, deletes leftover temp files and re-queues the job.
+- **Disk space.** Before writing, a job checks for room for the output plus a 5% margin. If it is short, the queue holds for 15 minutes and retries.
+- **Blu-ray sources** are never deleted on their own. With qBittorrent connected and **Offer to delete a converted disc once its torrent met its seeding goal** on (**Settings > Media**), Wololo asks under **Library > Decisions**, and deletes only after you accept.
+
+## Recycle bin
+
+- **Where:** `<library folder>/.wololo-recycle/<time>/...`, on the same disk as the library. A custom absolute folder can be set in **Settings > Media > Recycle bin**. Keep it on the same filesystem: each job first proves it can link or move a file there, and fails before encoding if it cannot.
+- **How long:** 7 days by default (**Keep for (days)**). An hourly task purges expired entries.
+- **Restore:** **Activity > Recycle bin > Restore** puts the original back, marks the file **Ignored** so scans leave it alone, and tells Radarr, Sonarr and Plex.
+- **Turned off:** replaced originals are gone for good. Keep it on until you trust your profile.
 
 ## Backup and restore
 
@@ -174,7 +191,7 @@ To restore:
 
 1. In **System > Backup**, press **Restore** on a backup, or upload a `.zip`.
 2. Wololo checks the archive and saves a `pre_restore` backup of the current state. Then it stages the restore.
-3. Press **Restart** (needs the container restart policy, see [Install](#install-with-docker-compose)), or run `docker restart wololo`. The restore is applied before the database opens.
+3. Press **Restart now** (needs the container restart policy, see [Install](#install-with-docker-compose)), or run `docker restart wololo`. The restore is applied before the database opens.
 
 Backups from a newer Wololo version are refused; update first. The API key and port come back with the backup, so update Radarr/Sonarr webhooks if they changed.
 
@@ -194,6 +211,32 @@ docker compose pull wololo && docker compose up -d wololo
 ```
 
 Migrations run automatically on start, with a backup first. Running jobs stop cleanly and are re-queued after the restart. That is why the example sets `stop_grace_period: 30s`.
+
+## Configuration reference
+
+Most settings live in the UI and the database. The few needed before the database opens live in `/config/config.json`. Each of those can be fixed with an environment variable, which then locks it in the UI.
+
+| Variable                 | `config.json` key | Default                        | Purpose                                                                                                                                         |
+| ------------------------ | ----------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WOLOLO__PORT`           | `port`            | `8585`                         | Listen port. In Docker keep `8585` and change the host side of `ports:` instead                                                                 |
+| `WOLOLO__BIND_ADDRESS`   | `bindAddress`     | `*`                            | `*` or one IP address of this machine. In Docker keep `*`                                                                                       |
+| `WOLOLO__URL_BASE`       | `urlBase`         | empty                          | e.g. `/wololo` behind a reverse proxy                                                                                                           |
+| `WOLOLO__API_KEY`        | `apiKey`          | generated on first start       | Fix the API key: 16-128 characters from `A-Z a-z 0-9 . _ ~ -`. Any other value is ignored with a warning                                        |
+| `WOLOLO__LOG_LEVEL`      | `logLevel`        | `info`                         | `trace`, `debug`, `info`, `warn`, `error`                                                                                                       |
+| `WOLOLO__INSTANCE_NAME`  | `instanceName`    | `Wololo`                       | Name shown in the UI                                                                                                                            |
+| `WOLOLO__AUTHENTICATION` | `authentication`  | `disabled_for_local_addresses` | Who gets the API key in the web UI: local addresses only (default), `required` (always ask) or `disabled` (only behind an authenticating proxy) |
+
+Other variables:
+
+| Variable                                                              | Default                                    | Purpose                                                                          |
+| --------------------------------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------- |
+| `PUID`, `PGID`, `UMASK`, `TZ`                                         | `1000`, `1000`, `002`, `Etc/UTC`           | Image only, see [Install](#install-with-docker-compose)                          |
+| `WOLOLO__FFMPEG`, `WOLOLO__FFPROBE`, `WOLOLO__MKVMERGE`, `WOLOLO__7Z` | from `PATH`                                | Tool paths, for custom builds                                                    |
+| `WOLOLO_CONFIG_DIR`                                                   | `/config` in the image, else `./config`    | Folder for the database, `config.json`, logs and backups                         |
+| `WOLOLO_WEB_DIR`                                                      | `/app/web/build` in the image, `web/build` | Built web UI to serve                                                            |
+| `NODE_EXTRA_CA_CERTS`                                                 | unset                                      | PEM file of extra CAs for HTTPS connections to Radarr, Sonarr, qBittorrent, Plex |
+
+The image also sets `WOLOLO_DOCKER=1` and `WOLOLO_VERSION` (from the release tag); leave them alone.
 
 ## API
 
@@ -224,6 +267,33 @@ Start with **System > Status** (health warnings) and **System > Logs**. Log file
 
 To report a bug, attach the status page, the relevant log lines and the job log, with API keys removed.
 
+## Known limitations and roadmap
+
+Limits of v1:
+
+- **No video re-encoding.** A file whose video codec the profile rejects is shown as **Blocked** and never queued.
+- **Decrypted discs only.** Blu-ray input must be a decrypted BDMV folder or `.iso`; Wololo does not remove AACS/BD+.
+- **Dolby Vision on Blu-ray:** the profile 7 enhancement layer is dropped and the HDR10 base layer kept. Audio jobs copy any video untouched, Dolby Vision included.
+- **Blu-ray verification is looser than for audio jobs:** duration within 0.5 s and the same video packet count, because mkvmerge repackages the video stream.
+- **Plex only** as media server. One machine, no GPU or remote workers.
+- **API key only:** no user accounts or login page.
+- **Pausing the queue** stops a running job and re-queues it from the start; it does not suspend ffmpeg.
+- **One ffmpeg pass per failing track**, so a file with several failing tracks takes longer.
+- **IPv4 only:** bind address `*` listens on all IPv4 addresses.
+
+Planned for v1.1:
+
+- PGS/VobSub subtitles to SRT with OCR (Tesseract), keeping the picture track as a fallback.
+- Plex playback insights: list the files Plex transcoded, and why, and queue them first.
+- Container normalisation (MP4, AVI, TS, M2TS to MKV) for files that need no audio work, and timestamp fixes.
+- Integrity check: a full decode test, and on failure ask Radarr/Sonarr to blocklist and search again.
+- Dolby Vision profile 5 alert (no HDR10 fallback) with a new search.
+- Opt-in VC-1/MPEG-2 to H.264 rule, and keeping or converting Dolby Vision (profile 8.1) on Blu-ray.
+- Notifications (ntfy, Discord, Telegram) on failure or as a daily summary.
+- Real pause of running jobs, and one ffmpeg pass for all failing tracks.
+
+Later: Jellyfin support and remote workers.
+
 ## Development
 
 Requirements: [Bun](https://bun.sh) 1.4, ffmpeg/ffprobe for media tests. mkvmerge, 7-Zip and tsMuxeR are optional locally; tests that need them skip.
@@ -234,6 +304,8 @@ bun run build                      # web UI into web/build
 WOLOLO_CONFIG_DIR=./config bun run dev   # backend with reload on http://localhost:8585
 cd web && VITE_WOLOLO_API_KEY=<key> bun run dev   # optional: UI dev server, proxies /api
 ```
+
+The UI dev server proxies `/api` to `http://localhost:8585`; set `WOLOLO_BACKEND=<url>` for another backend.
 
 Checks (CI runs the same):
 
@@ -259,12 +331,21 @@ Code map:
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md): code conventions.
 - [docs/SPEC.md](docs/SPEC.md): requirements.
 
-Commits use Conventional Commits (`feat(jobs): ...`). Pull requests must pass CI. CI runs:
+Commits use Conventional Commits (`feat(jobs): ...`). Pull requests must pass CI.
 
-1. lint, typecheck and tests (with ffmpeg, MKVToolNix, 7-Zip and tsMuxeR).
-2. the web build.
-3. a native amd64 and arm64 image build with the smoke test (`ubuntu-24.04-arm` runners).
-4. on `main` and `v*` tags only: the multi-arch push to `ghcr.io/<owner>/wololo`.
+## CI and image publishing
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on pull requests (drafts skipped), pushes to `main`, `v*` tags and by hand:
+
+1. **commit hygiene** (pull requests): fails on `fixup!`, `squash!` or `amend!` commits.
+2. **lint, typecheck, tests** with ffmpeg, MKVToolNix, 7-Zip and a pinned, checksummed tsMuxeR. `WOLOLO_REQUIRE_BDMV_E2E=1` and `WOLOLO_REQUIRE_WEB_BUILD=1` make the Blu-ray end-to-end and real web build tests fail instead of skip.
+3. **web check and build** (`svelte-check`, `vite build`).
+4. **image** (amd64 on `ubuntu-24.04`, arm64 on `ubuntu-24.04-arm`, native, no emulation): build, then `docker/smoke-test.sh`.
+5. On pushes to `main` and `v*` tags only: each architecture is pushed by digest, then **publish multi-arch image** writes the manifest list to `ghcr.io/<owner>/wololo` with the tags `main`, `X.Y.Z`, `X.Y`, `latest` and `sha-<commit>`.
+
+To release: push a tag `vX.Y.Z` on `main`. The image reports `X.Y.Z` as its version; branch builds report `<branch>-<sha>`. Publishing uses the workflow's `GITHUB_TOKEN`; no secret is needed. A new GHCR package usually starts private: make it public in its package settings so `docker pull` works without a login.
+
+[`.github/workflows/supply-chain.yml`](.github/workflows/supply-chain.yml) checks registry signatures (`npm audit signatures`) and known high or critical vulnerabilities (`bun audit`) for both lockfiles. A pull request that adds `trustedDependencies` (packages allowed to run install scripts) fails until it carries the `dependencies-reviewed` label.
 
 ## License
 

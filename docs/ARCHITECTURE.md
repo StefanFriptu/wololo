@@ -125,7 +125,7 @@ worker picks queued job (gates = QueueState.pauseReasons: user pause, dry_run, p
                          Plex auto-pause via plex.connection().pauseWhileStreaming, low_disk_space hold)
   -> media.setStatus(processing) -> re-probe source -> rules.plan() (skip/blocked -> recordJobResult, no write)
   -> ffmpeg.buildAudioConversionArgs()
-  -> ensureFreeSpace(dir, estimate * 1.05) -> setTempPath("<stem>.wololo-tmp.mkv") -> run ffmpeg (nice/ionice)
+  -> ensureFreeSpace(dir, estimate * 1.05) -> setTempPath("<stem>.wololo-tmp-<jobId>.mkv") -> run ffmpeg (nice/ionice)
   -> progress events (ffmpeg.createProgressParser)
   -> verify (duration +-100 ms, stream count, video streamhash md5, full audio decode, chapters, languages)
   -> step 'replacing': recycleBin.recycleForReplace(original) (hard link into the bin, original stays in place)

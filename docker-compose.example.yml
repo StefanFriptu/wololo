@@ -12,7 +12,7 @@ services:
     environment:
       - PUID=1000 # same user as Radarr/Sonarr, so converted files keep their owner
       - PGID=1000
-      - TZ=Etc/UTC # e.g. Europe/Bucharest; used for the processing window and backup names
+      - TZ=Etc/UTC # e.g. America/New_York; used for the processing window and backup names
       - UMASK=002
     volumes:
       - ./wololo/config:/config # database, config.json (API key), logs, backups
