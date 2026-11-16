@@ -155,6 +155,8 @@ export type SettingsUpdate = DeepPartial<Settings>;
 
 export interface GeneralConfigView extends GeneralConfig {
   restartRequired: boolean;
+  /** Port the server listens on until the next restart; `port` is the saved value it uses after one. */
+  runningPort: number;
   /** Fields pinned by WOLOLO__* environment variables; PUT answers 409 for them. */
   envOverrides: (keyof GeneralConfig)[];
 }

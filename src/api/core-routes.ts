@@ -47,6 +47,7 @@ export function registerCoreRoutes(app: ApiApp, ctx: AppContext): void {
       instanceName: config.instanceName,
       authentication: config.authentication,
       restartRequired: RESTART_KEYS.some((key) => config[key] !== bootConfig[key]),
+      runningPort: bootConfig.port,
       envOverrides: [...config.envOverrides],
     };
   };

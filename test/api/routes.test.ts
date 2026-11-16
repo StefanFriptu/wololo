@@ -145,10 +145,29 @@ describe('core routes', () => {
   test('general settings expose the API key and refuse env-locked changes', async () => {
     const general = (await (await t.request('/api/v1/settings/general')).json()) as GeneralConfigView;
     expect(general.apiKey).toBe(TEST_API_KEY);
+    expect(general.runningPort).toBe(general.port);
     const regenerate = await t.request('/api/v1/settings/general/apikey', {
       method: 'POST',
     });
     expect(regenerate.status).toBe(409);
+  });
+
+  test('general settings - runningPort keeps the boot port after a port change', async () => {
+    const before = (await (await t.request('/api/v1/settings/general')).json()) as GeneralConfigView;
+    const put = (port: number) =>
+      t.request('/api/v1/settings/general', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ port }),
+      });
+    try {
+      const changed = (await (await put(before.port + 1)).json()) as GeneralConfigView;
+      expect(changed.port).toBe(before.port + 1);
+      expect(changed.runningPort).toBe(before.port);
+      expect(changed.restartRequired).toBe(true);
+    } finally {
+      await put(before.port);
+    }
   });
 
   test('logs endpoint returns ring buffer entries', async () => {
