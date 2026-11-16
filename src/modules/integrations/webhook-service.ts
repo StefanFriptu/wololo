@@ -2,6 +2,7 @@ import { posix } from 'node:path';
 import { z } from 'zod';
 import type { AppContext } from '../../app/context.ts';
 import type { WebhookService } from '../../contracts/integrations.ts';
+import type { MediaRefs } from '../../contracts/probe-scan.ts';
 import { errorMessage } from '../../core/errors.ts';
 import type { WebhookResponse } from '../../shared/api-types.ts';
 import type { ArrKind } from '../../shared/domain.ts';
@@ -28,12 +29,39 @@ interface ParsedWebhook {
   isUpgrade?: boolean;
 }
 
+interface FileOutcome {
+  action: WebhookResponse['action'];
+  mediaFileId: number | null;
+  message: string;
+}
+
+export interface WebhookDeps {
+  /** How long a reply waits for the import checks; Radarr/Sonarr block their import thread on it. */
+  replyBudgetMs?: number;
+}
+
+const DEFAULT_REPLY_BUDGET_MS = 10_000;
+
 function reply(action: WebhookResponse['action'], message: string, mediaFileIds: number[] = []): WebhookResponse {
   return { accepted: action !== 'error', action, mediaFileIds, message };
 }
 
-export function createWebhookService(ctx: AppContext): WebhookService {
+export function createWebhookService(ctx: AppContext, deps: WebhookDeps = {}): WebhookService {
   const log = ctx.logs.logger('webhook');
+  const replyBudgetMs = deps.replyBudgetMs ?? DEFAULT_REPLY_BUDGET_MS;
+  const inFlight = new Map<string, Promise<FileOutcome>>();
+
+  const withinBudget = async (work: Promise<WebhookResponse>): Promise<WebhookResponse> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<WebhookResponse>((resolve) => {
+      timer = setTimeout(() => resolve(reply('accepted', 'the check continues in the background')), replyBudgetMs);
+    });
+    try {
+      return await Promise.race([work, late]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
 
   const handleImport = async (
     kind: ArrKind,
@@ -62,40 +90,61 @@ export function createWebhookService(ctx: AppContext): WebhookService {
     }
 
     const originalLanguage = normalizeLanguage(imported.originalLanguage);
-    const actions: WebhookResponse['action'][] = [];
-    const mediaFileIds: number[] = [];
-    const messages: string[] = [];
-    for (const file of imported.files) {
-      let localPath = file.remotePath;
+    const checkPath = async (localPath: string, refs: MediaRefs): Promise<FileOutcome> => {
+      const result = await ctx.services.media.checkPath(localPath, refs);
+      log.info('import checked', {
+        instance: instance.name,
+        path: localPath,
+        upgrade: payload.isUpgrade ?? false,
+        action: result.action,
+      });
+      return {
+        action: webhookActionFor(result.action),
+        mediaFileId: result.mediaFile?.id ?? null,
+        message: result.message,
+      };
+    };
+    const checkFile = async (file: WebhookImport['files'][number]): Promise<FileOutcome> => {
       if (hasParentSegment(file.remotePath)) {
         log.warn('import path with a ".." segment rejected', { instance: instance.name, path: file.remotePath });
-        actions.push('error');
-        messages.push(`${file.remotePath}: paths with ".." segments are not accepted`);
-        continue;
+        return {
+          action: 'error',
+          mediaFileId: null,
+          message: `${file.remotePath}: paths with ".." segments are not accepted`,
+        };
       }
+      let localPath = file.remotePath;
       try {
         localPath = posix.normalize(await ctx.services.pathMappings.toLocal(kind, file.remotePath, instance.id));
-        const result = await ctx.services.media.checkPath(localPath, {
+        const pending = inFlight.get(localPath);
+        if (pending) return await pending;
+        const check = checkPath(localPath, {
           trigger: 'webhook',
           arr: { instanceId: instance.id, kind, itemId: imported.itemId, fileId: file.fileId },
           originalLanguage,
         });
-        actions.push(webhookActionFor(result.action));
-        if (result.mediaFile) mediaFileIds.push(result.mediaFile.id);
-        messages.push(result.message);
-        log.info('import checked', {
-          instance: instance.name,
-          path: localPath,
-          upgrade: payload.isUpgrade ?? false,
-          action: result.action,
-        });
+        inFlight.set(localPath, check);
+        try {
+          return await check;
+        } finally {
+          inFlight.delete(localPath);
+        }
       } catch (error) {
         log.error('import check failed', { instance: instance.name, path: localPath, error });
-        actions.push('error');
-        messages.push(`${localPath}: ${errorMessage(error)}`);
+        return { action: 'error', mediaFileId: null, message: `${localPath}: ${errorMessage(error)}` };
       }
-    }
-    return reply(combineWebhookActions(actions), messages.join('; '), mediaFileIds);
+    };
+
+    const work = (async () => {
+      const outcomes: FileOutcome[] = [];
+      for (const file of imported.files) outcomes.push(await checkFile(file));
+      return reply(
+        combineWebhookActions(outcomes.map((outcome) => outcome.action)),
+        outcomes.map((outcome) => outcome.message).join('; '),
+        outcomes.flatMap((outcome) => (outcome.mediaFileId == null ? [] : [outcome.mediaFileId])),
+      );
+    })();
+    return withinBudget(work);
   };
 
   const handle = async <T extends ParsedWebhook>(

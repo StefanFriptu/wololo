@@ -529,6 +529,7 @@ export interface WebhookResponse {
   action:
     | 'test'
     | 'ignored'
+    | 'accepted'
     | 'compatible'
     | 'queued'
     | 'dry_run'

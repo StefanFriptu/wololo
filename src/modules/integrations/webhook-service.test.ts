@@ -1,10 +1,12 @@
 import { afterEach, expect, test } from 'bun:test';
 import { createTestContext, TEST_API_KEY, type TestContext } from '../../../test/helpers/context.ts';
 import { insertArrInstance } from '../../../test/helpers/seed.ts';
+import { eventually } from '../../../test/helpers/server.ts';
 import { stubService } from '../../../test/helpers/stubs.ts';
 import type { CheckAction, CheckResult, MediaRefs, MediaService } from '../../contracts/probe-scan.ts';
 import type { MediaFileSummary, WebhookResponse } from '../../shared/api-types.ts';
 import type { DeepPartial, Settings } from '../../shared/settings.ts';
+import { createWebhookService } from './webhook-service.ts';
 
 interface CheckCall {
   path: string;
@@ -350,4 +352,54 @@ test('webhook route - invalid instance query is a validation error', async () =>
     body: '{"eventType":"Test"}',
   });
   expect(response.status).toBe(400);
+});
+
+function checkedLogs() {
+  return t.ctx.logs.entries({ module: 'webhook' }).filter((entry) => entry.message === 'import checked');
+}
+
+function gatedMedia(): { release: () => void; checked: string[] } {
+  const checked: string[] = [];
+  const gate = Promise.withResolvers<void>();
+  const checkPath = async (path: string): Promise<CheckResult> => {
+    checked.push(path);
+    await gate.promise;
+    return { action: 'queued', mediaFile: summary(1, path), jobId: 1, message: `queued: ${path}` };
+  };
+  t = createTestContext({ overrides: { media: stubService<MediaService>('media', { checkPath }) } });
+  insertArrInstance(t.ctx.db, { name: 'Radarr' });
+  return { release: () => gate.resolve(), checked };
+}
+
+test('webhook radarr - a slow check answers accepted within the budget and keeps running', async () => {
+  const media = gatedMedia();
+  const webhooks = createWebhookService(t.ctx, { replyBudgetMs: 20 });
+  const reply = await webhooks.handleRadarr(RADARR_DOWNLOAD, null);
+  expect(reply).toEqual({
+    accepted: true,
+    action: 'accepted',
+    mediaFileIds: [],
+    message: 'the check continues in the background',
+  });
+  expect(checkedLogs()).toHaveLength(0);
+  media.release();
+  const logged = await eventually(
+    'import checked logged',
+    async () => checkedLogs(),
+    (logs) => logs.length > 0,
+    2_000,
+  );
+  expect(logged[0]?.data).toMatchObject({ path: '/vault/movies/Heat (1995)/Heat.mkv', action: 'queued' });
+});
+
+test('webhook radarr - repeated webhooks for one file share the running check', async () => {
+  const media = gatedMedia();
+  const webhooks = createWebhookService(t.ctx, { replyBudgetMs: 60_000 });
+  const first = webhooks.handleRadarr(RADARR_DOWNLOAD, null);
+  const second = webhooks.handleRadarr(RADARR_DOWNLOAD, null);
+  await Bun.sleep(5);
+  media.release();
+  expect(await first).toMatchObject({ action: 'queued', mediaFileIds: [1] });
+  expect(await second).toMatchObject({ action: 'queued', mediaFileIds: [1] });
+  expect(media.checked).toEqual(['/vault/movies/Heat (1995)/Heat.mkv']);
 });
