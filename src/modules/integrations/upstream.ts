@@ -31,6 +31,21 @@ interface Sent {
   fail: (error: unknown, phase: 'request' | 'body') => AppError;
 }
 
+const UNTRUSTED_CERT_CODES: ReadonlySet<string> = new Set([
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'UNABLE_TO_GET_ISSUER_CERT',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+]);
+
+function untrustedCertHint(error: unknown): string {
+  const code = error instanceof Error && 'code' in error ? error.code : null;
+  return typeof code === 'string' && UNTRUSTED_CERT_CODES.has(code)
+    ? '; to trust a self-signed or private CA certificate, set NODE_EXTRA_CA_CERTS (see README)'
+    : '';
+}
+
 function describe(request: UpstreamRequest): string {
   const url = new URL(request.url);
   return `${request.service} ${request.method ?? 'GET'} ${url.pathname}`;
@@ -66,7 +81,9 @@ async function send(request: UpstreamRequest): Promise<Sent> {
   const fetchImpl = request.fetch ?? fetch;
   const fail = (error: unknown, phase: 'request' | 'body') => {
     const lost = phase === 'request' ? 'unreachable' : 'response interrupted';
-    const reason = timeout.aborted ? `timed out after ${timeoutMs / 1000} s` : `${lost} (${errorMessage(error)})`;
+    const reason = timeout.aborted
+      ? `timed out after ${timeoutMs / 1000} s`
+      : `${lost} (${errorMessage(error)})${untrustedCertHint(error)}`;
     return new AppError('upstream', `${describe(request)}: ${reason}`, { status: null } satisfies UpstreamFailure);
   };
   let response: Response;
