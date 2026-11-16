@@ -756,7 +756,22 @@ test('planConversion - attached pictures never block the plan', () => {
     videoStream({ codec: 'mjpeg', attachedPicture: true }),
   ]);
   expect(result.action).toBe('skip');
-  expect(result.streams).toHaveLength(3);
+  expect(result.lostFeatures).toEqual([]);
+});
+
+test('planConversion - attached pictures are dropped with a recorded loss when the file is rewritten', () => {
+  const result = plan([
+    videoStream(),
+    audioStream({ codec: 'dts' }),
+    videoStream({ index: 2, codec: 'mjpeg', attachedPicture: true }),
+  ]);
+  expect(result.action).toBe('convert');
+  expect(result.streams.map((stream) => stream.codec)).toEqual(['h264', 'ac3']);
+  expect(result.dropped).toEqual([
+    { sourceIndex: 1, kind: 'audio', codec: 'dts', language: 'eng', reason: 'incompatible_replaced' },
+    { sourceIndex: 2, kind: 'video', codec: 'mjpeg', language: null, reason: 'unsupported' },
+  ]);
+  expect(result.lostFeatures).toContain('cover art dropped');
 });
 
 test('planConversion - data streams are dropped without forcing a rewrite', () => {

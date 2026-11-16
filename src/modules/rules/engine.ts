@@ -394,6 +394,8 @@ function audioOutcome(decision: AudioDecision, mode: LibraryRuleSettings['mode']
 function otherOutcome(track: Track, library: LibraryRuleSettings, original: Iso639_2 | null): StreamOutcome {
   const { stream } = track;
   if (stream.kind === 'data') return outcome({ drops: [dropped(track, 'unsupported')] });
+  if (stream.kind === 'video' && stream.attachedPicture)
+    return outcome({ drops: [dropped(track, 'unsupported')], losses: ['cover art dropped'] });
   if (stream.kind === 'subtitle' && !languageKept(track.language, library, original)) {
     return outcome({
       drops: [dropped(track, 'language_filter')],
@@ -513,7 +515,7 @@ export const planConversion: PlanConversion = (input) => {
     failingCodecs: action === 'skip' ? [] : unique([...failingAudio, ...videoCodecs.map((codec) => `video:${codec}`)]),
     streams,
     dropped: drops,
-    lostFeatures: unique(lostFeatures),
+    lostFeatures: action === 'skip' ? [] : unique(lostFeatures),
     videoNotes: unique(dolbyVisionNotes(probe.streams)),
     estimatedOutputBytes:
       action === 'convert' || action === 'remux' ? estimateOutputBytes(input, streams, drops) : null,

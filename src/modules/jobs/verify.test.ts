@@ -5,6 +5,11 @@ import { join } from 'node:path';
 import { ensureFixture, FIXTURES, ffmpegAvailable } from '../../../test/helpers/fixtures.ts';
 import type { VerifyRequest } from '../../contracts/jobs.ts';
 import { runProcess } from '../../core/process.ts';
+import { buildAudioConversionArgs } from '../ffmpeg/args.ts';
+import { buildProbeArgs } from '../probe/args.ts';
+import { parseFfprobeOutput } from '../probe/parse.ts';
+import { samsungTizenDefinition } from '../profiles/defaults.ts';
+import { planConversion, resolveEffectiveProfile } from '../rules/engine.ts';
 import { createVerifier } from './verify.ts';
 
 const verify = createVerifier({
@@ -158,4 +163,65 @@ describe.skipIf(!ffmpegAvailable())('createVerifier on real files', () => {
     const result = await verify(request({ decodeAudioStreams: [7] }));
     expect(result.checks.find((check) => check.name === 'audio_decode')?.passed).toBe(false);
   });
+
+  test('verify - an mp4 with cover art converted through the plan passes every check and keeps no picture', async () => {
+    const mp4 = join(dir, 'cover.mp4');
+    const cover = join(dir, 'cover.jpg');
+    await ffmpeg(['-f', 'lavfi', '-i', 'color=c=red:s=64x64', '-frames:v', '1', cover]);
+    await ffmpeg([
+      ...['-f', 'lavfi', '-i', 'testsrc=size=160x120:rate=24:duration=2'],
+      ...['-f', 'lavfi', '-i', 'sine=frequency=440:duration=2', '-i', cover],
+      ...['-map', '0', '-map', '1', '-map', '2', '-c:v:0', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p'],
+      ...['-c:v:1', 'mjpeg', '-disposition:v:1', 'attached_pic', '-c:a', 'aac', mp4],
+    ]);
+    const probeRun = await runProcess({ command: 'ffprobe', args: buildProbeArgs(mp4) });
+    const probe = parseFfprobeOutput(JSON.parse(probeRun.stdout), mp4, statSync(mp4).size, new Date().toISOString());
+    const base = samsungTizenDefinition();
+    const definition = { ...base, audio: { ...base.audio, allowedCodecs: ['ac3'], targetCodec: 'ac3' as const } };
+    const plan = planConversion({
+      probe,
+      profile: resolveEffectiveProfile([
+        {
+          id: 1,
+          name: 'ac3 only',
+          description: '',
+          version: 1,
+          builtin: false,
+          definition,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ]),
+      library: {
+        mode: 'replace',
+        keepLanguages: [],
+        keepOriginalLanguage: true,
+        keepUndetermined: true,
+        fillMissingLanguage: 'off',
+      },
+      originalLanguage: null,
+    });
+    expect(plan.action).toBe('convert');
+    const output = join(dir, 'cover.wololo-tmp.mkv');
+    const args = buildAudioConversionArgs({ inputPath: mp4, outputPath: output, probe, plan });
+    expect((await runProcess({ command: 'ffmpeg', args })).exitCode).toBe(0);
+
+    const result = await verify({
+      sourcePath: mp4,
+      outputPath: output,
+      expectedDurationSec: probe.durationSec,
+      expectedStreamCount: plan.streams.length,
+      compareVideoHash: true,
+      decodeAudioStreams: [1],
+      expectedChapterCount: probe.chapterCount,
+      expectedLanguages: plan.streams.map((stream) => ({ kind: stream.kind, language: stream.language })),
+    });
+
+    expect(result.checks.filter((check) => !check.passed)).toEqual([]);
+    const after = await runProcess({
+      command: 'ffprobe',
+      args: ['-v', 'error', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', output],
+    });
+    expect(after.stdout.trim().split('\n')).toEqual(['h264', 'ac3']);
+  }, 60_000);
 });
