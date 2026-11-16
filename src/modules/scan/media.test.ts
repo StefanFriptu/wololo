@@ -447,6 +447,29 @@ describe('media rows without files', () => {
     expect(await list({ libraryId: library.id + 1 })).toEqual([]);
   });
 
+  test('media.list - a trailing * in codec and failing codec matches as a prefix with _ taken literally', async () => {
+    insertMediaFile(t.ctx.db, seeded(), {
+      path: join(root, 'Pcm.mkv'),
+      streamCodecs: ['h264', 'pcm_s24le'],
+      failingCodecs: ['pcm_s24le'],
+    });
+    insertMediaFile(t.ctx.db, seeded(), { path: join(root, 'Ac3.mkv'), streamCodecs: ['h264', 'ac3'] });
+    insertMediaFile(t.ctx.db, seeded(), {
+      path: join(root, 'Lookalike.mkv'),
+      streamCodecs: ['pcmxs24le'],
+      failingCodecs: ['pcmxs24le'],
+    });
+
+    const list = async (query: MediaQuery) => (await media().list(query)).items.map((item) => item.relativePath);
+    expect(await list({ codec: 'pcmxs24le' })).toEqual(['Lookalike.mkv']);
+    expect(await list({ codec: 'pcm_*' })).toEqual(['Pcm.mkv']);
+    expect(await list({ codec: 'PCM_*' })).toEqual(['Pcm.mkv']);
+    expect(await list({ failingCodec: 'pcm_*' })).toEqual(['Pcm.mkv']);
+    expect(await list({ codec: 'pcm_s24le' })).toEqual(['Pcm.mkv']);
+    expect(await list({ codec: 'pcm_s2' })).toEqual([]);
+    expect(await list({ codec: '*' })).toEqual(['Ac3.mkv', 'Lookalike.mkv', 'Pcm.mkv']);
+  });
+
   test('media.list - profile filter covers assigned libraries and, for the builtin default, unassigned ones', async () => {
     const builtin = insertProfile(t.ctx.db, TEST_DEFINITION, { builtin: true });
     const custom = insertProfile(t.ctx.db, TEST_DEFINITION);

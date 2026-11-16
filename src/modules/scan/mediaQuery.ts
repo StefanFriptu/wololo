@@ -113,13 +113,14 @@ function profileCondition(db: Db, profileId: number): SQL {
   return or(assigned, unassigned) as SQL;
 }
 
-function codecCondition(codec: string): SQL {
+function codecListCondition(
+  column: typeof mediaFiles.streamCodecs | typeof mediaFiles.failingCodecs,
+  codec: string,
+): SQL {
   const value = codec.toLowerCase();
-  return sql`EXISTS (SELECT 1 FROM json_each(${mediaFiles.streamCodecs}) WHERE value = ${value})`;
-}
-
-function failingCodecCondition(codec: string): SQL {
-  return sql`EXISTS (SELECT 1 FROM json_each(${mediaFiles.failingCodecs}) WHERE value = ${codec.toLowerCase()})`;
+  if (!value.endsWith('*')) return sql`EXISTS (SELECT 1 FROM json_each(${column}) WHERE value = ${value})`;
+  const prefix = value.slice(0, -1).replace(/[\\%_]/g, (char) => `\\${char}`);
+  return sql`EXISTS (SELECT 1 FROM json_each(${column}) WHERE value LIKE ${`${prefix}%`} ESCAPE '\\')`;
 }
 
 export function mediaConditions(db: Db, query: MediaQuery): SQL[] {
@@ -128,8 +129,8 @@ export function mediaConditions(db: Db, query: MediaQuery): SQL[] {
   if (statuses.length > 0) conditions.push(inArray(mediaFiles.status, statuses));
   if (query.libraryId !== undefined) conditions.push(eq(mediaFiles.libraryId, query.libraryId));
   if (query.profileId !== undefined) conditions.push(profileCondition(db, query.profileId));
-  if (query.codec) conditions.push(codecCondition(query.codec));
-  if (query.failingCodec) conditions.push(failingCodecCondition(query.failingCodec));
+  if (query.codec) conditions.push(codecListCondition(mediaFiles.streamCodecs, query.codec));
+  if (query.failingCodec) conditions.push(codecListCondition(mediaFiles.failingCodecs, query.failingCodec));
   const kinds = parseKindList(query.kind);
   if (kinds.length > 0) conditions.push(inArray(mediaFiles.kind, kinds));
   if (query.search) conditions.push(sql`instr(lower(${mediaFiles.path}), ${query.search.toLowerCase()}) > 0`);
