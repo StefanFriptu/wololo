@@ -279,6 +279,13 @@
               <span class="hint">Multiple of real time used by the dry run (a Raspberry Pi 4 manages about 7.7x).</span>
             </div>
           </div>
+          <div class="field">
+            <label for="job-retention">Keep job history (days)</label>
+            <div class="control">
+              <input id="job-retention" type="number" min="0" max="3650" step="1" bind:value={form.processing.jobRetentionDays} required />
+              <span class="hint">Finished jobs, their logs and history older than this are deleted. 0 keeps everything.</span>
+            </div>
+          </div>
         </section>
 
         <section class="card">
