@@ -8,8 +8,9 @@ import type { BdmvService } from '../../contracts/bdmv.ts';
 import type { PlexService } from '../../contracts/integrations.ts';
 import type { JobExecutor, JobOutcome } from '../../contracts/jobs.ts';
 import { AppError, type ErrorCode } from '../../core/errors.ts';
+import { jobHistory, recycleBin } from '../../db/schema.ts';
 import type { MediaFileDetail } from '../../shared/api-types.ts';
-import type { BdmvJobPlan, ConversionPlan, MediaFileStatus, QueueState } from '../../shared/domain.ts';
+import type { BdmvJobPlan, ConversionPlan, JobState, MediaFileStatus, QueueState } from '../../shared/domain.ts';
 import type { DeepPartial, Settings } from '../../shared/settings.ts';
 import { createJobsService } from './index.ts';
 import { getJobRow, updateJobRow } from './jobQueries.ts';
@@ -678,13 +679,50 @@ test('housekeeping - removes orphaned and expired job logs and stale temp files'
   writeFileSync(temp, 'partial');
   insertJob(t.ctx.db, { sourcePath: join(t.dir, 'x.mkv'), state: 'failed', tempPath: temp });
 
-  expect(await t.ctx.services.jobs.housekeeping()).toBe('deleted 1 temp file(s) and 2 job log(s)');
+  expect(await t.ctx.services.jobs.housekeeping()).toBe(
+    'deleted 1 temp file(s), 1 old job(s), 0 history entr(ies) and 2 job log(s)',
+  );
 
   expect(existsSync(join(logDir, `${recent.id}.txt`))).toBe(true);
   expect(existsSync(join(logDir, `${old.id}.txt`))).toBe(false);
   expect(existsSync(join(logDir, '9999.txt'))).toBe(false);
   expect(existsSync(join(logDir, 'notes.txt'))).toBe(true);
   expect(existsSync(temp)).toBe(false);
+});
+
+test('housekeeping - prunes finished jobs and history past the retention window, keeps active, recent and referenced ones', async () => {
+  const s = setup();
+  t = s.t;
+  const { db } = t.ctx;
+  const old = '2020-01-01T00:00:00.000Z';
+  const job = (state: JobState, finishedAt: string | null) =>
+    insertJob(db, { sourcePath: '/m/a.mkv', state, finishedAt }).id;
+  const expired = [job('completed', old), job('failed', old), job('cancelled', old)];
+  const kept = [job('queued', null), job('running', null), job('completed', new Date().toISOString())];
+  const binned = job('completed', old);
+  db.insert(recycleBin)
+    .values({
+      originalPath: '/m/a.mkv',
+      recyclePath: '/m/.wololo-recycle/a.mkv',
+      sizeBytes: 1,
+      expiresAt: old,
+      jobId: binned,
+    })
+    .run();
+  const lastJob = job('completed', old);
+  const library = insertLibrary(db, { roots: ['/m'] });
+  insertMediaFile(db, library, { path: '/m/a.mkv', lastJobId: lastJob });
+  db.insert(jobHistory).values({ event: 'completed', path: '/m/a.mkv', message: 'old', createdAt: old }).run();
+  db.insert(jobHistory).values({ event: 'completed', path: '/m/a.mkv', message: 'new' }).run();
+
+  t.ctx.settings.update({ processing: { jobRetentionDays: 0 } });
+  expect(await t.ctx.services.jobs.housekeeping()).toContain('0 old job(s), 0 history entr(ies)');
+  t.ctx.settings.update({ processing: { jobRetentionDays: 30 } });
+  expect(await t.ctx.services.jobs.housekeeping()).toContain('3 old job(s), 1 history entr(ies)');
+
+  for (const id of expired) expect(getJobRow(db, id)).toBeUndefined();
+  for (const id of [...kept, binned, lastJob]) expect(getJobRow(db, id)).toBeDefined();
+  expect(db.select({ message: jobHistory.message }).from(jobHistory).all()).toEqual([{ message: 'new' }]);
 });
 
 test('worker - a file ignored after its job was queued is never processed and stays ignored', async () => {

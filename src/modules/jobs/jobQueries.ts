@@ -1,6 +1,14 @@
-import { and, asc, count, desc, eq, inArray, isNotNull, lt, ne, notInArray, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNotNull, lt, ne, notExists, notInArray, type SQL } from 'drizzle-orm';
 import type { Db } from '../../db/client.ts';
-import { type JobHistoryRow, type JobRow, jobHistory, jobs, type NewJobRow } from '../../db/schema.ts';
+import {
+  type JobHistoryRow,
+  type JobRow,
+  jobHistory,
+  jobs,
+  mediaFiles,
+  type NewJobRow,
+  recycleBin,
+} from '../../db/schema.ts';
 import type { HistoryEventType, JobState, JobType } from '../../shared/domain.ts';
 
 const ACTIVE_STATES: JobState[] = ['queued', 'running'];
@@ -130,6 +138,40 @@ export function finishedJobIdsBefore(db: Db, ids: number[], beforeIso: string): 
       .all()
       .map((row) => row.id),
   );
+}
+
+/** Finished jobs older than beforeIso that no recycle bin entry and no media file (as its last job) points at. */
+export function prunableJobIdsQuery(db: Db, options: { beforeIso: string; limit: number }) {
+  return db
+    .select({ id: jobs.id })
+    .from(jobs)
+    .where(
+      and(
+        notInArray(jobs.state, ACTIVE_STATES),
+        lt(jobs.finishedAt, options.beforeIso),
+        notExists(db.select({ id: recycleBin.id }).from(recycleBin).where(eq(recycleBin.jobId, jobs.id))),
+        notExists(db.select({ id: mediaFiles.id }).from(mediaFiles).where(eq(mediaFiles.lastJobId, jobs.id))),
+      ),
+    )
+    .limit(options.limit);
+}
+
+export function deleteJobRows(db: Db, ids: number[]): number {
+  if (ids.length === 0) return 0;
+  return db.delete(jobs).where(inArray(jobs.id, ids)).returning({ id: jobs.id }).all().length;
+}
+
+export function expiredHistoryIdsQuery(db: Db, options: { beforeIso: string; limit: number }) {
+  return db
+    .select({ id: jobHistory.id })
+    .from(jobHistory)
+    .where(lt(jobHistory.createdAt, options.beforeIso))
+    .limit(options.limit);
+}
+
+export function deleteHistoryRows(db: Db, ids: number[]): number {
+  if (ids.length === 0) return 0;
+  return db.delete(jobHistory).where(inArray(jobHistory.id, ids)).returning({ id: jobHistory.id }).all().length;
 }
 
 export function tempPathReferencedQuery(db: Db, path: string) {

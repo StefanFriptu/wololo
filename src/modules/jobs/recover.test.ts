@@ -457,7 +457,9 @@ describe('crash recovery decisions on seeded state', () => {
     expect(existsSync(orphanDir)).toBe(false);
     expect(existsSync(nested)).toBe(true);
 
-    expect(await t.ctx.services.jobs.housekeeping()).toBe('deleted 1 temp file(s) and 0 job log(s)');
+    expect(await t.ctx.services.jobs.housekeeping()).toBe(
+      'deleted 1 temp file(s), 0 old job(s), 0 history entr(ies) and 0 job log(s)',
+    );
     expect(existsSync(nested)).toBe(false);
     expect(readFileSync(kept, 'utf8')).toBe('original');
   });
@@ -470,7 +472,9 @@ describe('crash recovery decisions on seeded state', () => {
     s.seedJob(source, { step: 'encoding', tempPath: temp });
     const binned = write(join(s.root, '.wololo-recycle', '20261115T000000Z', 'x.wololo-tmp.mkv'), 'odd but binned');
 
-    expect(await t.ctx.services.jobs.housekeeping()).toBe('deleted 0 temp file(s) and 0 job log(s)');
+    expect(await t.ctx.services.jobs.housekeeping()).toBe(
+      'deleted 0 temp file(s), 0 old job(s), 0 history entr(ies) and 0 job log(s)',
+    );
 
     expect(existsSync(temp)).toBe(true);
     expect(existsSync(binned)).toBe(true);

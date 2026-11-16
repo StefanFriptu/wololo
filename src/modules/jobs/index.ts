@@ -10,8 +10,11 @@ import { JOB_STATES, type JobState, type JobSummary } from '../../shared/domain.
 import { checkRecycleBinLocation } from '../recycle-bin/checkRecycleBinLocation.ts';
 import { createAudioExecutor } from './audioExecutor.ts';
 import {
+  deleteHistoryRows,
   deleteJobRow,
+  deleteJobRows,
   existingJobIds,
+  expiredHistoryIdsQuery,
   findActiveJobForMedia,
   finishedJobIdsBefore,
   getJobRow,
@@ -22,6 +25,7 @@ import {
   listHistoryRows,
   listJobRows,
   type PageWindow,
+  prunableJobIdsQuery,
   queueRows,
   updateJobRow,
 } from './jobQueries.ts';
@@ -36,6 +40,8 @@ const ENQUEUE_PAGE_SIZE = 500;
 const ENQUEUE_SLICE = 50;
 const QUEUE_ITEMS_LIMIT = 500;
 const JOB_LOG_RETENTION_DAYS = 30;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const PRUNE_BATCH = 500;
 const JOB_LOG_NAME = /^(\d+)\.txt$/;
 
 function pageWindow(query: PageQuery): PageWindow {
@@ -272,8 +278,36 @@ export function createJobsService(ctx: AppContext): JobsService {
     return counts;
   };
 
+  const pruneInBatches = (select: () => { id: number }[], remove: (ids: number[]) => number) => {
+    let removed = 0;
+    while (true) {
+      const ids = select().map((row) => row.id);
+      if (ids.length === 0) return removed;
+      removed += remove(ids);
+      if (ids.length < PRUNE_BATCH) return removed;
+    }
+  };
+
+  const pruneOldJobs = (): { jobs: number; history: number } => {
+    const days = ctx.settings.section('processing').jobRetentionDays;
+    if (days === 0) return { jobs: 0, history: 0 };
+    const beforeIso = new Date(Date.now() - days * DAY_MS).toISOString();
+    const window = { beforeIso, limit: PRUNE_BATCH };
+    return {
+      jobs: pruneInBatches(
+        () => prunableJobIdsQuery(db, window).all(),
+        (ids) => deleteJobRows(db, ids),
+      ),
+      history: pruneInBatches(
+        () => expiredHistoryIdsQuery(db, window).all(),
+        (ids) => deleteHistoryRows(db, ids),
+      ),
+    };
+  };
+
   const housekeeping = async (): Promise<string> => {
     const temps = deleteIdleTempPaths() + (await sweepOrphans(true));
+    const pruned = pruneOldJobs();
     const logDir = ctx.config.get().jobLogDir;
     const files = existsSync(logDir) ? readdirSync(logDir) : [];
     const byId = new Map<number, string>();
@@ -281,7 +315,7 @@ export function createJobsService(ctx: AppContext): JobsService {
       const match = JOB_LOG_NAME.exec(name);
       if (match) byId.set(Number(match[1]), name);
     }
-    const cutoff = new Date(Date.now() - JOB_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const cutoff = new Date(Date.now() - JOB_LOG_RETENTION_DAYS * DAY_MS).toISOString();
     let logs = 0;
     for (const ids of chunks([...byId.keys()], 500)) {
       const existing = existingJobIds(db, ids);
@@ -297,7 +331,7 @@ export function createJobsService(ctx: AppContext): JobsService {
         }
       }
     }
-    return `deleted ${temps} temp file(s) and ${logs} job log(s)`;
+    return `deleted ${temps} temp file(s), ${pruned.jobs} old job(s), ${pruned.history} history entr(ies) and ${logs} job log(s)`;
   };
 
   return {

@@ -48,6 +48,11 @@ export interface Settings {
     /** Extra free space required on top of the estimated output size, in percent. Default 5. */
     freeSpaceMarginPercent: number;
     maxAttempts: number;
+    /**
+     * Housekeeping deletes finished jobs and history entries older than this many days; 0 keeps them forever. Jobs a
+     * recycle bin entry or a media file's last job still points at are kept. Default 365.
+     */
+    jobRetentionDays: number;
   };
   media: {
     /** Lower-case extensions (with dot) the scanner considers. */
@@ -106,6 +111,7 @@ export const DEFAULT_SETTINGS: Settings = {
     estimatedSpeedFactor: 7.7,
     freeSpaceMarginPercent: 5,
     maxAttempts: 3,
+    jobRetentionDays: 365,
   },
   media: {
     extensions: ['.mkv', '.mp4', '.m4v', '.avi', '.ts', '.m2ts', '.mov', '.iso'],

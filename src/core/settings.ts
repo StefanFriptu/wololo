@@ -20,6 +20,7 @@ export const settingsSchema = z.object({
     estimatedSpeedFactor: z.number().positive().max(1000),
     freeSpaceMarginPercent: z.number().min(0).max(100),
     maxAttempts: z.number().int().min(1).max(10),
+    jobRetentionDays: z.number().int().min(0).max(3650),
   }),
   media: z.object({
     extensions: z.array(z.string().regex(/^\.[a-z0-9]+$/)),

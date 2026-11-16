@@ -1,0 +1,1 @@
+CREATE INDEX `jobs_finished_idx` ON `jobs` (`state`,`finished_at`);

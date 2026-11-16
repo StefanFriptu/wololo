@@ -191,7 +191,11 @@ export const jobs = sqliteTable(
     finishedAt: text('finished_at'),
     updatedAt: updatedAt(),
   },
-  (t) => [index('jobs_state_idx').on(t.state, t.priority, t.id), index('jobs_media_file_idx').on(t.mediaFileId)],
+  (t) => [
+    index('jobs_state_idx').on(t.state, t.priority, t.id),
+    index('jobs_media_file_idx').on(t.mediaFileId),
+    index('jobs_finished_idx').on(t.state, t.finishedAt),
+  ],
 );
 
 export const jobHistory = sqliteTable(
