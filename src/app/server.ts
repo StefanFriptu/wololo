@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../api/http.ts';
-import { apiKeyAuth, apiNotFound, errorHandler } from '../api/middleware.ts';
+import { apiKeyAuth, apiNotFound, errorHandler, securityHeaders } from '../api/middleware.ts';
 import { registerApiRoutes } from '../api/router.ts';
 import { spaHandler } from '../api/static.ts';
 import type { AppContext } from './context.ts';
@@ -13,6 +13,7 @@ export function createHttpApp(ctx: AppContext): Hono<AppEnv> {
 
   const app = new Hono<AppEnv>();
   app.onError(onError);
+  app.use('*', securityHeaders);
   app.use(
     '/api/*',
     apiKeyAuth(() => ctx.config.get().apiKey, urlBase),
@@ -40,6 +41,7 @@ export function createHttpApp(ctx: AppContext): Hono<AppEnv> {
   if (!urlBase) return app;
   const root = new Hono<AppEnv>();
   root.onError(onError);
+  root.use('*', securityHeaders);
   root.get('/', (c) => c.redirect(`${urlBase}/`));
   root.route(urlBase, app);
   return root;

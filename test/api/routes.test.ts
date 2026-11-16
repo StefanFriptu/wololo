@@ -242,6 +242,35 @@ describe('SPA', () => {
   });
 });
 
+describe('security headers', () => {
+  const expectSecurityHeaders = (response: Response) => {
+    expect(response.headers.get('x-frame-options')).toBe('DENY');
+    expect(response.headers.get('content-security-policy')).toBe("frame-ancestors 'none'");
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+  };
+
+  test('security headers - set on SPA and API responses', async () => {
+    for (const path of ['/', '/library/12', '/_app/immutable/app.js', '/_app/immutable/missing.js']) {
+      expectSecurityHeaders(await t.app.request(path));
+    }
+    expectSecurityHeaders(await t.request('/api/v1/system/status'));
+    expectSecurityHeaders(await t.request('/api/v1/nope'));
+    expectSecurityHeaders(await t.app.request('/api/v1/system/status'));
+  });
+
+  test('security headers - set under a URL base and on its root redirect', async () => {
+    const based = urlBaseContext(SVELTEKIT_INDEX);
+    try {
+      for (const path of ['/', '/wololo/', '/wololo/_app/immutable/entry/start.js', '/wololo/health', '/elsewhere']) {
+        expectSecurityHeaders(await based.app.request(path));
+      }
+    } finally {
+      based.cleanup();
+    }
+  });
+});
+
 describe('URL base', () => {
   test('prefixes asset URLs and the SvelteKit base, serves assets under the base', async () => {
     const based = urlBaseContext(SVELTEKIT_INDEX);

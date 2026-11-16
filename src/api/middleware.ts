@@ -42,6 +42,19 @@ export function apiKeyAuth(getApiKey: () => string, apiPrefix: string): Middlewa
   };
 }
 
+const SECURITY_HEADERS = {
+  'x-frame-options': 'DENY',
+  'content-security-policy': "frame-ancestors 'none'",
+  'x-content-type-options': 'nosniff',
+  'referrer-policy': 'no-referrer',
+} as const;
+
+/** Stops other sites from framing the UI, which local browsers open already holding the API key. */
+export const securityHeaders: MiddlewareHandler<AppEnv> = async (c, next) => {
+  await next();
+  for (const [name, value] of Object.entries(SECURITY_HEADERS)) c.res.headers.set(name, value);
+};
+
 export function errorHandler(log: Logger): ErrorHandler<AppEnv> {
   return (error, c) => {
     if (error instanceof AppError) {
