@@ -19,6 +19,7 @@
   import { PAGE_SIZES } from '#lib/library/pageSizes.ts';
   import { parseMediaFilters } from '#lib/library/parseMediaFilters.ts';
   import { needsWorkScope } from '#lib/library/needsWorkScope.ts';
+  import { syncSearchText } from '#lib/library/syncSearchText.svelte.ts';
   import { serializeMediaFilters } from '#lib/library/serializeMediaFilters.ts';
   import { pageInRange } from '#lib/pageInRange.ts';
   import { href } from '#lib/paths.ts';
@@ -103,6 +104,8 @@
 
   $effect(() => live.onReconnect(refreshSoon));
   $effect(() => () => clearTimeout(refreshTimer));
+
+  syncSearchText({ urlSearch: () => filters.search, read: () => searchText, write: (text) => (searchText = text) });
 
   $effect(() => {
     const text = searchText.trim();
