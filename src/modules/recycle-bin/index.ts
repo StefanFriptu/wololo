@@ -9,7 +9,7 @@ import { isLinkUnsupported } from '../jobs/isLinkUnsupported.ts';
 import { toRecycleBinEntry } from '../jobs/mappers.ts';
 import { checkRecycleBinLocation } from './checkRecycleBinLocation.ts';
 import { removeEmptyRecycleDirs } from './cleanup.ts';
-import { expiresAtFor, recyclePathFor, recycleStamp } from './paths.ts';
+import { expiresAtFor, isNormalizedAbsolutePath, isRecyclePath, recyclePathFor, recycleStamp } from './paths.ts';
 import {
   getRecycleRow,
   insertRecycleRow,
@@ -99,7 +99,13 @@ export function createRecycleBinService(ctx: AppContext, options: RecycleBinOpti
     return row;
   };
 
+  const assertStoredPaths = (row: RecycleBinRow) => {
+    if (isRecyclePath(row.recyclePath) && isNormalizedAbsolutePath(row.originalPath)) return;
+    throw new AppError('conflict', `recycle bin entry ${row.id} does not point into a recycle bin folder`);
+  };
+
   const deleteFile = (row: RecycleBinRow): boolean => {
+    assertStoredPaths(row);
     if (!existsSync(row.recyclePath)) return false;
     unlinkSync(row.recyclePath);
     removeEmptyRecycleDirs(row.recyclePath);
@@ -176,6 +182,7 @@ export function createRecycleBinService(ctx: AppContext, options: RecycleBinOpti
 
     restore: async (id) => {
       const row = mustGetActive(id);
+      assertStoredPaths(row);
       if (!existsSync(row.recyclePath))
         throw new AppError('conflict', `the recycled file is missing: ${row.recyclePath}`);
       const refs = { jobId: row.jobId, mediaFileId: row.mediaFileId };

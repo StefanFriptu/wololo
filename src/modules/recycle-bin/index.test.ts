@@ -11,12 +11,14 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { eq } from 'drizzle-orm';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
 import { insertJob, insertLibrary, insertMediaFile } from '../../../test/helpers/seed.ts';
 import { stubService } from '../../../test/helpers/stubs.ts';
 import type { FileChangedEvent, NotifierService } from '../../contracts/integrations.ts';
 import type { LibraryService, MediaService } from '../../contracts/probe-scan.ts';
 import { AppError, type ErrorCode } from '../../core/errors.ts';
+import { recycleBin } from '../../db/schema.ts';
 import { getJobRow } from '../jobs/jobQueries.ts';
 import { type MediaRecorder, mediaDetail, recordingMediaService } from '../jobs/test-support.ts';
 import { createRecycleBinService } from './index.ts';
@@ -284,6 +286,38 @@ test('restore - fails cleanly when the recycled file is gone', async () => {
   unlinkSync(entry.recyclePath);
   await expectAppError(t.ctx.services.recycleBin.restore(entry.id), 'conflict');
   await expectAppError(t.ctx.services.recycleBin.restore(999), 'not_found');
+});
+
+test('recycle bin - rejects a stored row whose recyclePath is outside a recycle stamp folder', async () => {
+  const s = setup();
+  t = s.t;
+  const entry = await t.ctx.services.recycleBin.recycle(s.source, {});
+  const outside = join(t.dir, 'secret.txt');
+  writeFileSync(outside, 'secret');
+  t.ctx.db.update(recycleBin).set({ recyclePath: outside }).where(eq(recycleBin.id, entry.id)).run();
+  expect(existsSync(outside)).toBe(true);
+
+  await expectAppError(t.ctx.services.recycleBin.restore(entry.id), 'conflict');
+  await expectAppError(t.ctx.services.recycleBin.remove(entry.id), 'conflict');
+  await t.ctx.services.recycleBin.purge({ all: true });
+
+  expect(readFileSync(outside, 'utf8')).toBe('secret');
+  expect(existsSync(s.source)).toBe(false);
+});
+
+test('restore - rejects a stored originalPath that is not absolute and normalized', async () => {
+  const s = setup();
+  t = s.t;
+  const entry = await t.ctx.services.recycleBin.recycle(s.source, {});
+  t.ctx.db
+    .update(recycleBin)
+    .set({ originalPath: `${s.root}/x/../escaped.mkv` })
+    .where(eq(recycleBin.id, entry.id))
+    .run();
+
+  await expectAppError(t.ctx.services.recycleBin.restore(entry.id), 'conflict');
+
+  expect(existsSync(entry.recyclePath)).toBe(true);
 });
 
 test('remove - deletes the file and its empty folders, keeps the bin root', async () => {

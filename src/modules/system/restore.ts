@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { existsSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { isNormalizedAbsolutePath, isRecyclePath } from '../recycle-bin/paths.ts';
 
 export const DATABASE_FILE = 'wololo.db';
 export const CONFIG_FILE = 'config.json';
@@ -75,4 +76,33 @@ export function validateRestoreFiles(dir: string, latestMigrationMillis: number)
   const config = validateConfig(join(dir, CONFIG_FILE));
   if (!config.ok) return config;
   return validateDatabase(join(dir, DATABASE_FILE), latestMigrationMillis);
+}
+
+/**
+ * Backups carry data, not filesystem pointers: job log and temp paths are dropped (both are derived again at runtime),
+ * and recycle-bin entries that do not point into a recycle stamp folder are marked purged without touching any file.
+ */
+export function scrubRestoredDatabase(path: string, now: Date): RestoreValidation {
+  let sqlite: Database | null = null;
+  try {
+    sqlite = new Database(path, { strict: true });
+    const db = sqlite;
+    db.run('PRAGMA journal_mode = DELETE');
+    const active = db.query<{ id: number; recyclePath: string; originalPath: string }, []>(
+      'SELECT id, recycle_path AS recyclePath, original_path AS originalPath FROM recycle_bin WHERE restored_at IS NULL AND purged_at IS NULL',
+    );
+    const purge = db.query('UPDATE recycle_bin SET purged_at = $purgedAt WHERE id = $id');
+    db.transaction(() => {
+      db.run('UPDATE jobs SET log_path = NULL, temp_path = NULL');
+      for (const row of active.all()) {
+        if (isRecyclePath(row.recyclePath) && isNormalizedAbsolutePath(row.originalPath)) continue;
+        purge.run({ purgedAt: now.toISOString(), id: row.id });
+      }
+    })();
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: `${DATABASE_FILE} is missing Wololo tables` };
+  } finally {
+    sqlite?.close();
+  }
 }

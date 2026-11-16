@@ -26,7 +26,7 @@ import {
 } from './jobQueries.ts';
 import { createJobLifecycle } from './lifecycle.ts';
 import { toHistoryEntry, toJobDetail, toJobSummary } from './mappers.ts';
-import { jobTitleFor } from './paths.ts';
+import { jobLogPathFor, jobTitleFor } from './paths.ts';
 import { deleteTempPath, resolveInterruptedJob } from './recover.ts';
 import { sweepOrphanedTempPaths } from './sweepOrphanedTempPaths.ts';
 import { createWorker } from './worker.ts';
@@ -95,6 +95,8 @@ export function createJobsService(ctx: AppContext): JobsService {
     if (!row) throw notFound(`job ${id}`);
     return row;
   };
+  const logPathOf = (row: JobRow): string | null =>
+    row.logPath === null ? null : jobLogPathFor(ctx.config.get().jobLogDir, row.id);
 
   const enqueue = async (job: NewJob): Promise<JobSummary> => {
     const existing = findActiveJobForMedia(db, job.mediaFileId);
@@ -303,13 +305,14 @@ export function createJobsService(ctx: AppContext): JobsService {
 
     get: async (id) => {
       const row = mustGet(id);
-      return toJobDetail(row, { hasLog: row.logPath !== null && existsSync(row.logPath), live: worker.live(id) });
+      const logPath = logPathOf(row);
+      return toJobDetail(row, { hasLog: logPath !== null && existsSync(logPath), live: worker.live(id) });
     },
 
     log: async (id) => {
-      const row = mustGet(id);
-      if (!row.logPath || !existsSync(row.logPath)) return null;
-      return readFileSync(row.logPath, 'utf8');
+      const logPath = logPathOf(mustGet(id));
+      if (logPath === null || !existsSync(logPath)) return null;
+      return readFileSync(logPath, 'utf8');
     },
 
     cancel: async (id) => {
@@ -357,7 +360,8 @@ export function createJobsService(ctx: AppContext): JobsService {
       const row = mustGet(id);
       if (row.state === 'queued' || row.state === 'running')
         throw new AppError('conflict', `job ${id} is ${row.state}; cancel it first`);
-      if (row.logPath) rmSync(row.logPath, { force: true });
+      const logPath = logPathOf(row);
+      if (logPath !== null) rmSync(logPath, { force: true });
       deleteJobRow(db, id);
       ctx.events.emit('job.removed', { jobId: id });
     },

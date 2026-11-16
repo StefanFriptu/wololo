@@ -7,7 +7,14 @@ import type { Logger } from '../../core/logger.ts';
 import type { BackupInfo, RestoreResult } from '../../shared/api-types.ts';
 import { extractZipEntries, writeZipArchive } from './backupArchive.ts';
 import { type BackupKind, formatBackupName, parseBackupKind, selectBackupsToPrune } from './backupNames.ts';
-import { CONFIG_FILE, DATABASE_FILE, RESTORE_DIR, RESTORE_STAGING_PREFIX, validateRestoreFiles } from './restore.ts';
+import {
+  CONFIG_FILE,
+  DATABASE_FILE,
+  RESTORE_DIR,
+  RESTORE_STAGING_PREFIX,
+  scrubRestoredDatabase,
+  validateRestoreFiles,
+} from './restore.ts';
 
 export interface BackupStoreDeps {
   backupDir: string;
@@ -121,6 +128,8 @@ export function createBackupStore(deps: BackupStoreDeps): BackupStore {
       }
       const validation = validateRestoreFiles(staging, deps.latestMigrationMillis());
       if (!validation.ok) throw new AppError('unprocessable', `cannot restore ${source}: ${validation.reason}`);
+      const scrubbed = scrubRestoredDatabase(join(staging, DATABASE_FILE), deps.now());
+      if (!scrubbed.ok) throw new AppError('unprocessable', `cannot restore ${source}: ${scrubbed.reason}`);
       await createUnlocked('pre_restore');
       const target = join(deps.configDir, RESTORE_DIR);
       rmSync(target, { recursive: true, force: true });

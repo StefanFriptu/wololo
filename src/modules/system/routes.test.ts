@@ -1,9 +1,10 @@
+import { Database } from 'bun:sqlite';
 import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
 import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { unzipSync } from 'fflate';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
-import { insertLibrary } from '../../../test/helpers/seed.ts';
+import { insertJob, insertLibrary } from '../../../test/helpers/seed.ts';
 import { routesOf, splitRouteKey } from '../../shared/api-routes.ts';
 import type { BackupInfo, HealthCheck, RestoreResult, SystemStatus } from '../../shared/api-types.ts';
 import { RESTART_DELAY_MS } from './index.ts';
@@ -141,6 +142,21 @@ test('backups - an uploaded backup is validated and staged', async () => {
   const bytes = new Uint8Array(await (await t.request(`/api/v1/system/backups/${created.name}`)).arrayBuffer());
   expect(await json<RestoreResult>(await upload(bytes))).toEqual({ restartRequired: true });
   expect(existsSync(join(t.dir, RESTORE_DIR, 'wololo.db'))).toBe(true);
+});
+
+test('backups - a restored database is staged without job log or temp paths', async () => {
+  const job = insertJob(t.ctx.db, { sourcePath: '/m/a.mkv', logPath: '/config/config.json', tempPath: '/etc/hosts' });
+  const created = await createBackup();
+  await json<RestoreResult>(await t.request(`/api/v1/system/backups/${created.name}/restore`, { method: 'POST' }));
+  const staged = new Database(join(t.dir, RESTORE_DIR, 'wololo.db'), { readonly: true });
+  try {
+    expect(staged.query('SELECT log_path, temp_path FROM jobs WHERE id = ?').get(job.id)).toEqual({
+      log_path: null,
+      temp_path: null,
+    });
+  } finally {
+    staged.close();
+  }
 });
 
 test.each([

@@ -10,6 +10,7 @@ import {
   DATABASE_FILE,
   RESTORE_DIR,
   RESTORE_STAGING_PREFIX,
+  scrubRestoredDatabase,
   validateRestoreFiles,
 } from './restore.ts';
 
@@ -119,5 +120,43 @@ test.each([['not json'], ['[1,2]'], ['null']])('validateRestoreFiles - rejects c
   expect(validateRestoreFiles(dir, Number.MAX_SAFE_INTEGER)).toEqual({
     ok: false,
     reason: 'config.json is not a JSON object',
+  });
+});
+
+test('scrubRestoredDatabase - drops job file pointers and retires recycle rows outside a recycle stamp folder', () => {
+  const path = join(dir, DATABASE_FILE);
+  migratedDatabase(path);
+  const seed = new Database(path, { strict: true });
+  seed.run(
+    "INSERT INTO jobs (id, type, trigger, title, source_path, log_path, temp_path) VALUES (1, 'audio', 'manual', 'A', '/m/a.mkv', '/config/config.json', '/proc/self/environ')",
+  );
+  const insertBin = seed.query(
+    "INSERT INTO recycle_bin (id, original_path, recycle_path, size_bytes, expires_at) VALUES ($id, $original, $recycle, 1, '2030-01-01T00:00:00.000Z')",
+  );
+  insertBin.run({ id: 1, original: '/m/a.mkv', recycle: '/m/.wololo-recycle/20261115T103005Z/a.mkv' });
+  insertBin.run({ id: 2, original: '/m/b.mkv', recycle: '/config/config.json' });
+  insertBin.run({ id: 3, original: '/m/x/../c.mkv', recycle: '/m/.wololo-recycle/20261115T103005Z/c.mkv' });
+  seed.close();
+
+  expect(scrubRestoredDatabase(path, new Date('2026-11-16T00:00:00.000Z'))).toEqual({ ok: true });
+
+  const check = new Database(path, { readonly: true });
+  expect(check.query('SELECT log_path, temp_path FROM jobs').all()).toEqual([{ log_path: null, temp_path: null }]);
+  expect(check.query('SELECT id, purged_at FROM recycle_bin ORDER BY id').all()).toEqual([
+    { id: 1, purged_at: null },
+    { id: 2, purged_at: '2026-11-16T00:00:00.000Z' },
+    { id: 3, purged_at: '2026-11-16T00:00:00.000Z' },
+  ]);
+  check.close();
+});
+
+test('scrubRestoredDatabase - rejects a database without Wololo tables', () => {
+  const path = join(dir, DATABASE_FILE);
+  const db = new Database(path);
+  db.run('CREATE TABLE __drizzle_migrations (id INTEGER, created_at INTEGER)');
+  db.close();
+  expect(scrubRestoredDatabase(path, new Date())).toEqual({
+    ok: false,
+    reason: expect.stringContaining('missing Wololo tables'),
   });
 });
