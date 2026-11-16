@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { eq } from 'drizzle-orm';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
 import { insertJob, insertLibrary, insertMediaFile } from '../../../test/helpers/seed.ts';
 import { stubService } from '../../../test/helpers/stubs.ts';
@@ -8,7 +9,7 @@ import type { BdmvService } from '../../contracts/bdmv.ts';
 import type { PlexService } from '../../contracts/integrations.ts';
 import type { JobExecutor, JobOutcome } from '../../contracts/jobs.ts';
 import { AppError, type ErrorCode } from '../../core/errors.ts';
-import { jobHistory, recycleBin } from '../../db/schema.ts';
+import { jobHistory, mediaFiles, recycleBin } from '../../db/schema.ts';
 import type { MediaFileDetail } from '../../shared/api-types.ts';
 import type { BdmvJobPlan, ConversionPlan, JobState, MediaFileStatus, QueueState } from '../../shared/domain.ts';
 import type { DeepPartial, Settings } from '../../shared/settings.ts';
@@ -594,6 +595,23 @@ test('remove - deletes a finished job and its log, refuses active ones', async (
   expect(await removed).toEqual({ jobId: job.id });
   expect(existsSync(logPath)).toBe(false);
   await expectAppError(t.ctx.services.jobs.get(job.id), 'not_found');
+});
+
+test('remove - clears the media file last job pointer', async () => {
+  const s = setup();
+  t = s.t;
+  const mediaFileId = s.addFile();
+  const job = await enqueueDisc(s, mediaFileId);
+  updateJobRow(t.ctx.db, job.id, { state: 'completed' });
+  t.ctx.db.update(mediaFiles).set({ lastJobId: job.id }).where(eq(mediaFiles.id, mediaFileId)).run();
+  const lastJobId = () =>
+    t?.ctx.db.select({ lastJobId: mediaFiles.lastJobId }).from(mediaFiles).where(eq(mediaFiles.id, mediaFileId)).get()
+      ?.lastJobId;
+  expect(lastJobId()).toBe(job.id);
+
+  await t.ctx.services.jobs.remove(job.id);
+
+  expect(lastJobId()).toBeNull();
 });
 
 test('log and remove - a stored log path outside the job log dir is never read or deleted', async () => {

@@ -38,8 +38,12 @@ export function updateJobRow(db: Db, id: number, patch: Partial<NewJobRow>): Job
     .get();
 }
 
+/** media_files.last_job_id has no foreign key, so the pointer is cleared here with the job. */
 export function deleteJobRow(db: Db, id: number): void {
-  db.delete(jobs).where(eq(jobs.id, id)).run();
+  db.transaction((tx) => {
+    tx.update(mediaFiles).set({ lastJobId: null }).where(eq(mediaFiles.lastJobId, id)).run();
+    tx.delete(jobs).where(eq(jobs.id, id)).run();
+  });
 }
 
 export function findActiveJobForMedia(db: Db, mediaFileId: number): JobRow | undefined {
