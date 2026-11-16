@@ -148,6 +148,7 @@ export const mediaFiles = sqliteTable(
     index('media_files_library_idx').on(t.libraryId),
     index('media_files_status_idx').on(t.status),
     index('media_files_rules_key_idx').on(t.rulesKey),
+    index('media_files_last_job_idx').on(t.lastJobId),
   ],
 );
 
@@ -243,7 +244,11 @@ export const recycleBin = sqliteTable(
     restoredAt: text('restored_at'),
     purgedAt: text('purged_at'),
   },
-  (t) => [index('recycle_bin_expires_idx').on(t.expiresAt)],
+  (t) => [
+    index('recycle_bin_expires_idx').on(t.expiresAt),
+    index('recycle_bin_job_idx').on(t.jobId),
+    index('recycle_bin_media_file_idx').on(t.mediaFileId),
+  ],
 );
 
 /** Singleton row (id = 1). */

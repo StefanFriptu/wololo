@@ -1,3 +1,4 @@
+import type { SQLQueryBindings } from 'bun:sqlite';
 import { afterEach, expect, test } from 'bun:test';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
 import { insertJob } from '../../../test/helpers/seed.ts';
@@ -5,6 +6,7 @@ import {
   finishedJobIdsBefore,
   finishedJobIdsBeforeQuery,
   isTempPathReferenced,
+  prunableJobIdsQuery,
   tempPathReferencedQuery,
 } from './jobQueries.ts';
 
@@ -54,4 +56,29 @@ test('isTempPathReferenced - true only for paths a job row holds', () => {
 
   expect(isTempPathReferenced(t.ctx.db, '/m/.wololo-tmp-3')).toBe(true);
   expect(isTempPathReferenced(t.ctx.db, '/m/.wololo-tmp-4')).toBe(false);
+});
+
+function queryPlan(context: TestContext, sql: string, params: readonly unknown[] = []): string[] {
+  return context.ctx.dbHandle.sqlite
+    .query<{ detail: string }, SQLQueryBindings[]>(`EXPLAIN QUERY PLAN ${sql}`)
+    .all(...(params as SQLQueryBindings[]))
+    .map((row) => row.detail);
+}
+
+test('prunableJobIdsQuery - finds media and recycle-bin references through their indexes', () => {
+  t = createTestContext();
+  const { sql, params } = prunableJobIdsQuery(t.ctx.db, { beforeIso: '2026-01-01T00:00:00.000Z', limit: 500 }).toSQL();
+
+  const plan = queryPlan(t, sql, params);
+
+  expect(plan.some((detail) => detail.includes('media_files_last_job_idx'))).toBe(true);
+  expect(plan.some((detail) => detail.includes('recycle_bin_job_idx'))).toBe(true);
+});
+
+test('recycle_bin - the media file foreign key action looks rows up by index', () => {
+  t = createTestContext();
+
+  const plan = queryPlan(t, 'SELECT 1 FROM recycle_bin WHERE media_file_id = ?', [1]);
+
+  expect(plan).toEqual([expect.stringContaining('recycle_bin_media_file_idx')]);
 });
