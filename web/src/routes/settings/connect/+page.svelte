@@ -126,7 +126,10 @@
         <summary>How to add the webhook</summary>
         <ol>
           <li>In Radarr or Sonarr open Settings > Connect and add a <strong>Webhook</strong>.</li>
-          <li>Tick <strong>On Import</strong> and <strong>On Upgrade</strong>.</li>
+          <li>
+            Tick <strong>On File Import</strong> (older versions: <strong>On Import</strong>) and
+            <strong>On File Upgrade</strong> (older versions: <strong>On Upgrade</strong>).
+          </li>
           <li>Paste the webhook URL above, method POST, and save. "Test" should succeed.</li>
         </ol>
       </details>

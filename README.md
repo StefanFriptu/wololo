@@ -96,7 +96,7 @@ Wololo needs two links: it calls Radarr/Sonarr (rescans, lookups), and they call
 - URL: `http://radarr:7878` (service name on the same Docker network) or `http://<host-ip>:7878`.
 - API key: from Radarr **Settings > General > Security**.
 
-Press **Test**, then save. Repeat for Sonarr (`http://sonarr:8989`). Wololo then shows the webhook URL for that instance. It looks like this:
+Press **Test**, then save. Repeat for Sonarr (`http://sonarr:8989`). Wololo then shows the webhook URL for that instance. The host part is the address your browser used to open Wololo, so check it. It looks like this when you open Wololo as `http://wololo:8585`:
 
 ```
 http://wololo:8585/api/v1/webhook/radarr?instance=1&apikey=<your Wololo API key>
@@ -104,13 +104,13 @@ http://wololo:8585/api/v1/webhook/radarr?instance=1&apikey=<your Wololo API key>
 
 **2. Add the webhook in Radarr.** Go to **Settings > Connect > + > Webhook** and enter:
 
-| Field                 | Value                                                                                                       |
-| --------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Name                  | `Wololo`                                                                                                    |
-| Notification Triggers | **On File Import** and **On File Upgrade** (older versions: _On Import_, _On Upgrade_). Leave the rest off. |
-| Webhook URL           | the URL Wololo showed for this instance                                                                     |
-| Method                | `POST`                                                                                                      |
-| Username / Password   | empty                                                                                                       |
+| Field                 | Value                                                                                                                                        |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Name                  | `Wololo`                                                                                                                                     |
+| Notification Triggers | **On File Import** and **On File Upgrade** (older versions: _On Import_, _On Upgrade_). Leave the rest off.                                  |
+| Webhook URL           | the URL Wololo showed, with the host replaced by one Radarr can reach (`wololo:8585` on a shared Docker network, otherwise `<host-ip>:8585`) |
+| Method                | `POST`                                                                                                                                       |
+| Username / Password   | empty                                                                                                                                        |
 
 Press **Test**. Radarr reports success when Wololo answered. Save.
 
@@ -131,7 +131,7 @@ Wololo stores local container paths. It needs a mapping when another app sees th
 
 - **No mapping needed** if Radarr, Sonarr and Wololo all mount the media at `/data`. This is the recommended layout.
 - **Mapping needed** if Radarr reports `/movies/Film (2020)/film.mkv` while Wololo sees `/data/media/movies/Film (2020)/film.mkv`. Add one under **Settings > Connect > Path mappings**:
-  - Scope: `radarr` (or `sonarr`, `plex`, `qbittorrent`). Instance: that one, or all.
+  - Application: Radarr (or Sonarr, Plex, qBittorrent). Instance: that one, or all.
   - Remote path: `/movies`. Local path: `/data/media/movies`.
 
 Plex often uses different paths, e.g. `/tv`, `/movies` or a NAS share. Add a `plex` mapping, or Plex's partial scan will look in the wrong folder.
@@ -145,7 +145,7 @@ A webhook for a path outside every library root is logged as `unknown_path`. Tha
 3. Pick your server from the list. Wololo matches each library section by its folder paths, so add a `plex` path mapping if Plex sees the media elsewhere.
 4. Press **Test**.
 
-From then on, every changed file triggers a partial scan of its folder only. Optional: **auto-pause while Plex is streaming** (under **Settings > Plex**) and a processing window, e.g. 01:00-08:00 (under **Settings > Media**).
+From then on, every changed file triggers a partial scan of its folder only. Optional: **Pause new jobs while someone is streaming** (under **Settings > Plex**) and a processing window, e.g. 01:00-08:00 (under **Settings > Media**).
 
 ## First run: dry run, then process
 
@@ -154,7 +154,7 @@ Wololo starts with **processing off**. In this dry-run mode it checks files and 
 1. Run a scan: **System > Tasks > Library scan > Run now**. The scheduled scan runs every 6 hours anyway.
 2. Open the dry-run report under **Library > Dry run**. It lists files per failing codec, with estimated time and disk space for the conversion. Files marked **Blocked** need work Wololo cannot do (for example a video codec your TVs cannot play); they are never queued.
 3. Check the device profile under **Profiles**. "Samsung Tizen" is the default; clone and edit it if your TVs decode more.
-4. Turn processing on in **Settings > Media**. Jobs can only be queued from then on.
+4. Tick **Convert files** in **Settings > Media**. Jobs can only be queued from then on.
 5. Try one file first. Open it in **Library > Files**, check the planned changes, and queue it. Watch **Activity > Queue**, then play the result on the TV.
 6. Press **Process all needs-work** on the **Library > Dry run** page, or wait for the next scan.
 
@@ -178,7 +178,7 @@ Backups from a newer Wololo version are refused; update first. The API key and p
 
 Manual backup without the UI: stop the container and copy the whole `/config` folder. To move Wololo to a new host, copy `/config`, keep the same `/data` layout, and start the container.
 
-Before a database upgrade, Wololo also writes `pre-migration-<time>.db` to `/config/backups`. It is a plain database file, not a backup zip, so it is not in the backup list. To roll back a failed upgrade with it:
+Before a database upgrade, Wololo also writes `pre-migration-<time>.db` to `/config/backups`. It is a plain database file, not a backup zip, so it is not in the backup list. Wololo keeps the newest two and deletes older ones after a successful upgrade. To roll back a failed upgrade with it:
 
 1. Stop the container: `docker compose stop wololo`.
 2. In the config folder on the host, delete `wololo.db-wal` and `wololo.db-shm` if they exist.
@@ -208,7 +208,7 @@ Start with **System > Status** (health warnings) and **System > Logs**. Log file
 | `Permission denied` writing media, or files end up owned by another user | `PUID`/`PGID` differ from the owner of your media. Use the same IDs as Radarr/Sonarr (`id <user>` on the host). Check `UMASK`.                                                                                                           |
 | Log says `could not chown /config`                                       | The config folder is on NFS/CIFS with root squash. Create it on the host with the right owner (`chown 1000:1000 ./wololo/config`).                                                                                                       |
 | Webhook test fails with 401                                              | The `apikey=` in the webhook URL is wrong, or the key was regenerated. Copy the URL again from **Settings > Connect**.                                                                                                                   |
-| Webhook test fails to connect                                            | Radarr cannot reach `wololo:8585`. Put both on one Docker network, or use the host IP.                                                                                                                                                   |
+| Webhook test fails to connect                                            | Radarr cannot reach the host in the webhook URL. The URL uses the address you opened Wololo with (`localhost` or a proxy name often fails from inside Radarr's container). Replace it with `wololo:8585` on a shared Docker network, or `<host-ip>:8585`.                                                                                                                                                   |
 | Imports show up as `unknown_path`                                        | No library covers the path, or a path mapping is missing. See [Path mappings](#path-mappings).                                                                                                                                           |
 | Job fails with `EXDEV` / cross-device                                    | Media is mounted as several separate volumes (e.g. `/movies` and `/downloads`), so the temp file and the original are on different mounts. Mount one parent folder (`/data`) instead.                                                    |
 | Test says `unreachable (self signed certificate)`                        | Radarr, Sonarr, qBittorrent or Plex uses HTTPS with its own certificate. Save the CA (or the self-signed cert) as PEM in `/config/ca.pem` and set `NODE_EXTRA_CA_CERTS=/config/ca.pem` in `environment:`. Verification stays on.         |
@@ -217,7 +217,7 @@ Start with **System > Status** (health warnings) and **System > Logs**. Log file
 | Health: library root "not reachable"                                     | The `/data` volume is not mounted, or the path in the library does not exist inside the container.                                                                                                                                       |
 | Uploading a backup fails for a very large database (zip over 128 MB)     | Copy the `.zip` into `/config/backups` on the host instead, then restore it from the list. Keep the original `wololo_backup_<kind>_<date>.zip` name (a renamed copy such as `... (1).zip` is not listed) and make it readable by `PUID`. |
 | Nothing happens after import                                             | Processing is still off (dry run). See [First run](#first-run-dry-run-then-process). Also check the processing window and "pause while Plex is streaming".                                                                               |
-| UI asks for an API key                                                   | You are not on a local address, or you are behind a reverse proxy. Enter the key from `/config/config.json` once; the browser remembers it.                                                                                              |
+| UI asks for an API key                                                   | You are off the LAN, opened Wololo by a custom domain, or are behind a reverse proxy. Enter the key from `/config/config.json` once; the browser remembers it.                                                                           |
 
 To report a bug, attach the status page, the relevant log lines and the job log, with API keys removed.
 
