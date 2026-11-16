@@ -18,7 +18,7 @@
   const AUTH_LABELS: Record<AuthenticationMode, { label: string; hint: string }> = {
     disabled_for_local_addresses: {
       label: 'Not needed on the local network',
-      hint: 'Browsers on your LAN open the UI directly; everyone else must enter the API key.',
+      hint: 'LAN browsers that open Wololo by IP, localhost, a bare name or a .lan/.local name get in directly; everyone else must enter the API key. Behind a reverse proxy, choose "Always ask".',
     },
     required: { label: 'Always ask for the API key', hint: 'Every browser must enter the key once.' },
     disabled: {

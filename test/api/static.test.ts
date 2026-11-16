@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { applyUrlBase, isLocalAddress, shouldExposeApiKey } from '../../src/api/static.ts';
+import { applyUrlBase, isLocalAddress, isLocalHostHeader, shouldExposeApiKey } from '../../src/api/static.ts';
 
 test.each([
   ['127.0.0.1', true],
@@ -22,14 +22,59 @@ test.each([
 });
 
 test.each([
-  ['disabled', '8.8.8.8', true, true],
-  ['required', '127.0.0.1', false, false],
-  ['disabled_for_local_addresses', '192.168.1.5', false, true],
-  ['disabled_for_local_addresses', '192.168.1.5', true, false],
-  ['disabled_for_local_addresses', '8.8.8.8', false, false],
-  ['disabled_for_local_addresses', null, false, false],
-] as const)('shouldExposeApiKey(%p, %p, proxied=%p) -> %p', (mode, address, proxied, expected) => {
-  expect(shouldExposeApiKey(mode, address, proxied)).toBe(expected);
+  ['disabled', '8.8.8.8', true, false, true],
+  ['required', '127.0.0.1', false, true, false],
+  ['disabled_for_local_addresses', '192.168.1.5', false, true, true],
+  ['disabled_for_local_addresses', '192.168.1.5', true, true, false],
+  ['disabled_for_local_addresses', '8.8.8.8', false, true, false],
+  ['disabled_for_local_addresses', null, false, true, false],
+] as const)(
+  'shouldExposeApiKey(%p, %p, proxied=%p, localHost=%p) -> %p',
+  (mode, address, proxied, localHost, expected) => {
+    expect(shouldExposeApiKey(mode, { remoteAddress: address, proxied, localHost })).toBe(expected);
+  },
+);
+
+test('shouldExposeApiKey - withholds key for public Host from loopback', () => {
+  expect(
+    shouldExposeApiKey('disabled_for_local_addresses', { remoteAddress: '127.0.0.1', proxied: false, localHost: true }),
+  ).toBe(true);
+  expect(
+    shouldExposeApiKey('disabled_for_local_addresses', {
+      remoteAddress: '127.0.0.1',
+      proxied: false,
+      localHost: false,
+    }),
+  ).toBe(false);
+});
+
+test.each([
+  ['localhost', true],
+  ['localhost:8585', true],
+  ['LOCALHOST.', true],
+  ['192.168.1.5:7878', true],
+  ['8.8.8.8', true],
+  ['[::1]:8585', true],
+  ['[fd00::5]', true],
+  ['wololo', true],
+  ['wololo_app_1:8585', true],
+  ['nas.lan', true],
+  ['nas.local:8585', true],
+  ['box.home.arpa', true],
+  ['host.docker.internal', true],
+  ['evil.example.com', false],
+  ['evil.example.com:8585', false],
+  ['lan.example.com', false],
+  ['localhost.example.com', false],
+  ['', false],
+  [undefined, false],
+  ['[::1', false],
+  ['[]:80', false],
+  ['host:port', false],
+  ['a:1:2', false],
+  ['bad host', false],
+] as const)('isLocalHostHeader(%p) -> %p', (host, expected) => {
+  expect(isLocalHostHeader(host)).toBe(expected);
 });
 
 test('applyUrlBase leaves the template alone without a base', () => {

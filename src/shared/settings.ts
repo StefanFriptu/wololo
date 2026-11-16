@@ -18,7 +18,11 @@ export interface GeneralConfig {
 
 /**
  * disabled_for_local_addresses (default): the UI gets the key only for requests from loopback/private addresses
- * (RFC 1918, CGNAT, link-local, IPv6 ULA) without X-Forwarded-For/Forwarded headers; everyone else is asked for it.
+ * (RFC 1918, CGNAT, link-local, IPv6 ULA) whose Host is an IP, localhost, a single-label name or a
+ * .local/.lan/.home.arpa/.internal name, and that carry no proxy header (X-Forwarded-*, Forwarded, X-Real-IP, Via,
+ * CF-Connecting-IP, True-Client-IP, X-Client-IP); everyone else is asked for it. A reverse proxy that passes the
+ * upstream Host and sets none of those headers looks local: use required behind it. Custom LAN names need disabled
+ * or the key typed in.
  * required: the UI always asks for the key (stored in the browser).
  * disabled: every client of the web port gets the key; only behind an authenticating reverse proxy.
  */

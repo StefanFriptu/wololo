@@ -195,6 +195,44 @@ describe('SPA', () => {
     }
   });
 
+  const fromLoopback = { server: { requestIP: () => ({ address: '127.0.0.1', family: 'IPv4', port: 50000 }) } };
+  const spaFrom = async (path: string, headers: Record<string, string>) =>
+    (await t.app.request(path, { headers }, fromLoopback)).text();
+
+  test('spa key exposure - local Host from loopback gets the key on the root and deep links', async () => {
+    for (const host of ['localhost:8585', '192.168.1.5:7878', 'wololo', 'nas.lan']) {
+      for (const path of ['/', '/settings/general']) {
+        expect(await spaFrom(path, { host })).toContain(TEST_API_KEY);
+      }
+    }
+  });
+
+  test('spa key exposure - public Host from loopback gets an empty key', async () => {
+    expect(await spaFrom('/', { host: 'localhost' })).toContain(TEST_API_KEY);
+    for (const path of ['/', '/settings/general']) {
+      const html = await spaFrom(path, { host: 'evil.example.com' });
+      expect(html).toContain('"apiKey":""');
+      expect(html).not.toContain(TEST_API_KEY);
+    }
+  });
+
+  test.each([
+    'x-forwarded-for',
+    'forwarded',
+    'x-real-ip',
+    'x-forwarded-host',
+    'x-forwarded-proto',
+    'x-forwarded-port',
+    'via',
+    'cf-connecting-ip',
+    'true-client-ip',
+    'x-client-ip',
+  ])('spa key exposure - %s header withholds the key', async (header) => {
+    expect(await spaFrom('/', { host: 'localhost' })).toContain(TEST_API_KEY);
+    const html = await spaFrom('/settings/general', { host: 'localhost', [header]: '1.2.3.4' });
+    expect(html).toContain('"apiKey":""');
+  });
+
   test('serves assets with immutable caching and 404s missing assets', async () => {
     const asset = await t.app.request('/_app/immutable/app.js');
     expect(asset.status).toBe(200);

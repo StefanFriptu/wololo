@@ -66,14 +66,61 @@ export function isLocalAddress(address: string): boolean {
   return lower === '::1' || /^f[cd][0-9a-f]{0,2}:/.test(lower) || /^fe[89ab][0-9a-f]?:/.test(lower);
 }
 
-/** Pure: may the SPA receive the API key for this request? Proxied requests never count as local. */
-export function shouldExposeApiKey(mode: AuthenticationMode, remoteAddress: string | null, proxied: boolean): boolean {
-  if (mode === 'disabled') return true;
-  if (mode === 'required') return false;
-  return !proxied && remoteAddress !== null && isLocalAddress(remoteAddress);
+const LOCAL_HOST_SUFFIXES = ['.local', '.lan', '.home.arpa', '.internal'] as const;
+
+function hostName(host: string): string | null {
+  const lower = host.trim().toLowerCase();
+  if (lower.startsWith('[')) {
+    const end = lower.indexOf(']');
+    const rest = lower.slice(end + 1);
+    if (end < 2 || (rest !== '' && !/^:\d+$/.test(rest))) return null;
+    return lower.slice(1, end);
+  }
+  const [name = '', port, ...extra] = lower.split(':');
+  if (extra.length > 0 || (port !== undefined && !/^\d+$/.test(port))) return null;
+  return name.replace(/\.$/, '');
 }
 
-const PROXY_HEADERS = ['x-forwarded-for', 'forwarded', 'x-real-ip'] as const;
+/**
+ * Pure: does the Host header name this machine on the LAN (IP literal, localhost, single-label name or a
+ * .local/.lan/.home.arpa/.internal name)? A public name means DNS rebinding or a proxy that forwards the Host.
+ */
+export function isLocalHostHeader(host: string | undefined): boolean {
+  if (host == null) return false;
+  const name = hostName(host);
+  if (!name) return false;
+  if (isIP(name) !== 0) return true;
+  if (!/^[a-z0-9_-]+(\.[a-z0-9_-]+)*$/.test(name)) return false;
+  return name === 'localhost' || !name.includes('.') || LOCAL_HOST_SUFFIXES.some((suffix) => name.endsWith(suffix));
+}
+
+interface KeyExposureRequest {
+  remoteAddress: string | null;
+  proxied: boolean;
+  localHost: boolean;
+}
+
+/** Pure: may the SPA receive the API key for this request? Proxied requests and public Host names never count as local. */
+export function shouldExposeApiKey(mode: AuthenticationMode, request: KeyExposureRequest): boolean {
+  if (mode === 'disabled') return true;
+  if (mode === 'required') return false;
+  return (
+    !request.proxied && request.localHost && request.remoteAddress !== null && isLocalAddress(request.remoteAddress)
+  );
+}
+
+const PROXY_HEADERS = [
+  'x-forwarded-for',
+  'forwarded',
+  'x-real-ip',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-forwarded-port',
+  'via',
+  'cf-connecting-ip',
+  'true-client-ip',
+  'x-client-ip',
+] as const;
 
 export function resolveStaticPath(webDir: string, requestPath: string): string | null {
   let decoded: string;
@@ -124,7 +171,11 @@ export function spaHandler(options: {
 
     const config = options.runtimeConfig();
     const proxied = PROXY_HEADERS.some((name) => c.req.header(name) !== undefined);
-    const exposeKey = shouldExposeApiKey(options.authentication(), requestIp(c), proxied);
+    const exposeKey = shouldExposeApiKey(options.authentication(), {
+      remoteAddress: requestIp(c),
+      proxied,
+      localHost: isLocalHostHeader(c.req.header('host')),
+    });
     return c.html(renderIndexHtml(template, exposeKey ? config : { ...config, apiKey: '' }), 200, {
       'cache-control': 'no-store',
     });
