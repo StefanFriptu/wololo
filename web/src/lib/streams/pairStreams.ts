@@ -1,4 +1,4 @@
-import type { ConversionPlan, MediaStream } from '#lib/shared.ts';
+import type { ConversionPlan, DroppedStream, MediaStream } from '#lib/shared.ts';
 import type { StreamChange } from './StreamChange.ts';
 import type { StreamRow } from './StreamRow.ts';
 
@@ -22,16 +22,21 @@ function fromPlan(before: readonly MediaStream[], plan: ConversionPlan, after: r
       dropReason: null,
     };
   });
-  const dropped = plan.dropped.map(
-    (drop): StreamRow => ({
-      kind: drop.kind,
-      before: source(drop.sourceIndex),
-      planned: null,
-      after: null,
-      change: 'drop',
-      dropReason: drop.reason,
-    }),
-  );
+  const encoded = new Set(plan.streams.filter((stream) => stream.op === 'encode').map((stream) => stream.sourceIndex));
+  const shownElsewhere = (drop: DroppedStream) =>
+    drop.reason === 'incompatible_replaced' && encoded.has(drop.sourceIndex);
+  const dropped = plan.dropped
+    .filter((drop) => !shownElsewhere(drop))
+    .map(
+      (drop): StreamRow => ({
+        kind: drop.kind,
+        before: source(drop.sourceIndex),
+        planned: null,
+        after: null,
+        change: 'drop',
+        dropReason: drop.reason,
+      }),
+    );
   return [...output, ...dropped];
 }
 

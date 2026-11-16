@@ -47,6 +47,33 @@ test('pairStreams - plan rows follow output order and end with dropped sources',
   ]);
 });
 
+test('pairStreams - a source replaced by its converted track is listed once', () => {
+  const replaced = plan({
+    streams: [
+      planned({ sourceIndex: 0, kind: 'video' }),
+      planned({ sourceIndex: 1, kind: 'audio', op: 'encode', codec: 'ac3' }),
+    ],
+    dropped: [{ sourceIndex: 1, kind: 'audio', codec: 'dts', language: 'eng', reason: 'incompatible_replaced' }],
+  });
+  const rows = pairStreams({ before: [video, dts], plan: replaced });
+  expect(rows.map((row) => [row.before?.index ?? null, row.change])).toEqual([
+    [0, 'copy'],
+    [1, 'encode'],
+  ]);
+});
+
+test('pairStreams - a replaced drop without its encoded track stays listed', () => {
+  const orphan = plan({
+    streams: [planned({ sourceIndex: 0, kind: 'video' })],
+    dropped: [{ sourceIndex: 1, kind: 'audio', codec: 'dts', language: 'eng', reason: 'incompatible_replaced' }],
+  });
+  const rows = pairStreams({ before: [video, dts], plan: orphan });
+  expect(rows.map((row) => [row.before?.index ?? null, row.change])).toEqual([
+    [0, 'copy'],
+    [1, 'drop'],
+  ]);
+});
+
 test('pairStreams - written streams are matched by output position', () => {
   const written = [videoStream({ index: 0 }), audioStream({ index: 1, codec: 'ac3' }), subtitleStream({ index: 2 })];
   const rows = pairStreams({ before: [video, dts, ac3, subs], plan: plan(), after: written });
