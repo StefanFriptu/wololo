@@ -259,6 +259,20 @@ test('planConversion - 96 kHz source records the resample forced by ac3', () => 
   expect(result.lostFeatures).toContain('96 kHz resampled to 48 kHz');
 });
 
+test.each([
+  [22050, '22.05 kHz resampled to 32 kHz'],
+  [11025, '11.025 kHz resampled to 32 kHz'],
+  [88200, '88.2 kHz resampled to 48 kHz'],
+])('planConversion - %d Hz source records the resample forced by ac3', (sampleRate, loss) => {
+  const result = plan([audioStream({ codec: 'flac', channels: 2, sampleRate })]);
+  expect(result.lostFeatures).toContain(loss);
+});
+
+test('planConversion - 44.1 kHz source records no resample because ac3 accepts it', () => {
+  const result = plan([audioStream({ codec: 'flac', channels: 2, sampleRate: 44100 })]);
+  expect(result.lostFeatures.some((feature) => feature.includes('kHz'))).toBe(false);
+});
+
 test('planConversion - 48 kHz source records no resample', () => {
   const result = plan([audioStream({ codec: 'flac', channels: 2, sampleRate: 48000 })]);
   expect(result.lostFeatures.some((feature) => feature.includes('kHz'))).toBe(false);

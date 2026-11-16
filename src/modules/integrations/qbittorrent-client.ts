@@ -71,7 +71,7 @@ export function createQbittorrentClient(options: QbittorrentOptions) {
         body: new URLSearchParams({ username: options.username, password: options.password }).toString(),
       }),
     );
-    if (text.trim() !== 'Ok.')
+    if (text.trim() === 'Fails.')
       throw new AppError('upstream', `${SERVICE} rejected the username or password`, { status: 401 });
     cookie = sessionCookie(response) ?? cookie;
     loggedIn = true;

@@ -27,7 +27,12 @@ const TARGET_CODECS: readonly TargetAudioCodec[] = ['ac3', 'eac3', 'aac'];
 
 const TARGET_MAX_CHANNELS: Readonly<Record<TargetAudioCodec, number>> = { ac3: 6, eac3: 6, aac: 8 };
 
-const TARGET_MAX_SAMPLE_RATE: Readonly<Record<TargetAudioCodec, number>> = { ac3: 48000, eac3: 48000, aac: 96000 };
+const AC3_SAMPLE_RATES = [32000, 44100, 48000] as const;
+const TARGET_SAMPLE_RATES: Readonly<Record<TargetAudioCodec, readonly number[]>> = {
+  ac3: AC3_SAMPLE_RATES,
+  eac3: AC3_SAMPLE_RATES,
+  aac: [7350, 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000, 64000, 88200, 96000],
+};
 
 const TARGET_LABELS: Readonly<Record<TargetAudioCodec, string>> = { ac3: 'AC3', eac3: 'E-AC3', aac: 'AAC' };
 
@@ -294,6 +299,13 @@ function objectAudioLoss(stream: AudioStream): string[] {
   return [];
 }
 
+/** The encoder picks the nearest rate it supports; an unknown source rate (0) is left alone. */
+function outputSampleRate(codec: TargetAudioCodec, rate: number): number {
+  const rates = TARGET_SAMPLE_RATES[codec];
+  if (rate <= 0 || rates.includes(rate)) return rate;
+  return rates.reduce((best, candidate) => (Math.abs(candidate - rate) < Math.abs(best - rate) ? candidate : best));
+}
+
 function encodeLosses(stream: AudioStream, encode: AudioEncodeSpec): string[] {
   const target = `${TARGET_LABELS[encode.codec]} ${encode.bitrateKbps} kbps`;
   const losses = objectAudioLoss(stream);
@@ -303,8 +315,9 @@ function encodeLosses(stream: AudioStream, encode: AudioEncodeSpec): string[] {
     );
   }
   if (stream.lossless) losses.push(`Lossless ${sourceCodecLabel(stream)} converted to ${target}`);
-  if (stream.sampleRate > TARGET_MAX_SAMPLE_RATE[encode.codec]) {
-    losses.push(`${stream.sampleRate / 1000} kHz resampled to ${TARGET_MAX_SAMPLE_RATE[encode.codec] / 1000} kHz`);
+  const outputRate = outputSampleRate(encode.codec, stream.sampleRate);
+  if (outputRate !== stream.sampleRate) {
+    losses.push(`${stream.sampleRate / 1000} kHz resampled to ${outputRate / 1000} kHz`);
   }
   return losses;
 }
