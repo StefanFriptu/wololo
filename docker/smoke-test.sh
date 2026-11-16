@@ -70,7 +70,7 @@ step "start ${IMAGE}"
 docker volume create "${VOLUME}" > /dev/null
 docker run -d --name "${NAME}" --restart unless-stopped \
   -p "127.0.0.1:${PORT}:8585" \
-  -e PUID="${SMOKE_UID}" -e PGID="${SMOKE_GID}" -e UMASK=022 -e TZ=Europe/Bucharest \
+  -e PUID="${SMOKE_UID}" -e PGID="${SMOKE_GID}" -e UMASK=022 -e TZ=America/New_York \
   -e WOLOLO__API_KEY="${KEY}" \
   -v "${VOLUME}:/config" \
   "${IMAGE}" > /dev/null
@@ -89,7 +89,7 @@ step "PID 1 runs as ${SMOKE_UID}:${SMOKE_GID} and owns /config"
 [ "$(docker exec "${NAME}" awk '/^Gid:/{print $2}' /proc/1/status)" = "${SMOKE_GID}" ] || fail "wrong gid"
 [ "$(docker exec "${NAME}" stat -c %u:%g /config)" = "${SMOKE_UID}:${SMOKE_GID}" ] || fail "/config not chowned"
 [ "$(docker exec "${NAME}" stat -c %u /config/config.json)" = "${SMOKE_UID}" ] || fail "config.json owner"
-docker exec "${NAME}" readlink /etc/localtime | grep -q 'Europe/Bucharest' || fail "TZ not applied"
+docker exec "${NAME}" readlink /etc/localtime | grep -q 'America/New_York' || fail "TZ not applied"
 
 step "bundled tools"
 docker exec "${NAME}" sh -c 'ffmpeg -hide_banner -protocols 2>/dev/null | grep -Eq "^[[:space:]]*bluray$"' ||
