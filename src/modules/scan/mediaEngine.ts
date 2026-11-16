@@ -1,8 +1,9 @@
 import { basename, extname } from 'node:path';
-import { and, eq, inArray, isNull, ne, notInArray, or } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull, ne, notInArray, or } from 'drizzle-orm';
 import type { AppContext } from '../../app/context.ts';
 import type { CheckAction, CheckResult, DiscoveredEntry, MediaRefs } from '../../contracts/probe-scan.ts';
 import { errorMessage, notFound } from '../../core/errors.ts';
+import { yieldToEventLoop } from '../../core/yieldToEventLoop.ts';
 import { arrInstances, type MediaFileRow, mediaFiles } from '../../db/schema.ts';
 import type {
   ArrItemRef,
@@ -19,6 +20,8 @@ import { statEntry } from './entries.ts';
 import { checkActionFor, statusFromPlan, summarizeProbe } from './evaluation.ts';
 import { libraryQuery } from './libraryQuery.ts';
 import { type MediaSummaryRow, mediaDetailQuery, toSummary } from './mediaQuery.ts';
+
+const INVALIDATE_CHUNK = 500;
 
 export interface RulesContext {
   profile: EffectiveProfile;
@@ -366,27 +369,39 @@ export function createMediaEngine(ctx: AppContext) {
     return { probed, result: outcome(action, saved, messageFor(action, evaluation)) };
   };
 
-  /** Marks rows whose rules key differs from the library's current one as pending. */
+  /** Marks rows whose rules key differs from the library's current one as pending, in id-ordered chunks. */
   const invalidateLibrary = async (library: Library): Promise<number> => {
     const { rulesKey } = await rulesFor(library);
-    const changed = ctx.db
-      .update(mediaFiles)
-      .set({
-        status: 'pending',
-        statusReason: 'rules changed, waiting for re-check',
-        updatedAt: new Date().toISOString(),
-      })
-      .where(
-        and(
-          eq(mediaFiles.libraryId, library.id),
-          notInArray(mediaFiles.status, ['ignored', 'processing', 'pending']),
-          or(isNull(mediaFiles.rulesKey), ne(mediaFiles.rulesKey, rulesKey)),
-        ),
-      )
-      .returning({ id: mediaFiles.id, status: mediaFiles.status, path: mediaFiles.path })
-      .all();
-    for (const row of changed) emitUpdated(row);
-    return changed.length;
+    const stale = and(
+      eq(mediaFiles.libraryId, library.id),
+      notInArray(mediaFiles.status, ['ignored', 'processing', 'pending']),
+      or(isNull(mediaFiles.rulesKey), ne(mediaFiles.rulesKey, rulesKey)),
+    );
+    let total = 0;
+    let afterId = 0;
+    while (true) {
+      const chunk = ctx.db
+        .select({ id: mediaFiles.id })
+        .from(mediaFiles)
+        .where(and(stale, gt(mediaFiles.id, afterId)))
+        .orderBy(asc(mediaFiles.id))
+        .limit(INVALIDATE_CHUNK);
+      const changed = ctx.db
+        .update(mediaFiles)
+        .set({
+          status: 'pending',
+          statusReason: 'rules changed, waiting for re-check',
+          updatedAt: new Date().toISOString(),
+        })
+        .where(inArray(mediaFiles.id, chunk))
+        .returning({ id: mediaFiles.id, status: mediaFiles.status, path: mediaFiles.path })
+        .all();
+      for (const row of changed) emitUpdated(row);
+      total += changed.length;
+      if (changed.length < INVALIDATE_CHUNK) return total;
+      afterId = Math.max(...changed.map((row) => row.id));
+      await yieldToEventLoop();
+    }
   };
 
   const librariesForProfile = (profileId: number | undefined, libraryId: number | undefined): Library[] => {

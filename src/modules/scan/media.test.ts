@@ -661,6 +661,27 @@ describe('media rows without files', () => {
     expect(await media().invalidateRules({})).toBe(0);
   });
 
+  test('media.invalidateRules - a large library is marked pending in chunks with the event loop running between', async () => {
+    for (let i = 0; i < 1201; i++)
+      insertMediaFile(t.ctx.db, seeded(), { path: `/x/${i}`, rulesKey: 'old', status: 'compatible' });
+    let ticks = 0;
+    const timer = setInterval(() => {
+      ticks += 1;
+    }, 0);
+    const ticksAtEvent: number[] = [];
+    t.ctx.events.on('media.updated', () => ticksAtEvent.push(ticks));
+    try {
+      expect(await media().invalidateRules({ libraryId: library.id })).toBe(1201);
+    } finally {
+      clearInterval(timer);
+    }
+
+    expect(updates.filter((update) => update.status === 'pending')).toHaveLength(1201);
+    expect(new Set(updates.map((update) => update.mediaFileId)).size).toBe(1201);
+    expect(t.ctx.db.select().from(mediaFiles).where(eq(mediaFiles.status, 'pending')).all()).toHaveLength(1201);
+    expect(ticksAtEvent.at(-1) ?? 0).toBeGreaterThan(ticksAtEvent[0] ?? 0);
+  });
+
   test('media.recordJobResult - a converted disc clears its plan and failing codecs', async () => {
     const disc = insertMediaFile(t.ctx.db, seeded(), {
       path: join(root, 'Disc'),
