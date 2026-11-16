@@ -96,6 +96,7 @@
     {#if current.restartRequired}
       <div class="alert tone-warning" role="status">
         <p>Port, bind address or URL base changed. Restart Wololo to apply them.</p>
+        {#if current.isDocker}<p>In Docker keep Port 8585 and Bind address *, or the UI becomes unreachable after the restart.</p>{/if}
         <button class="small" onclick={() => restarter.run()} disabled={restarter.restarting}>
           <Icon name="power" size={14} /> {restarter.restarting ? 'Restarting…' : 'Restart now'}
         </button>
@@ -112,13 +113,16 @@
           </div>
           <div class="field">
             <label for="port">Port</label>
-            <div class="control"><input id="port" type="number" min="1" max="65535" bind:value={form.port} required disabled={locked.has('port')} title={lockedHint('port')} /></div>
+            <div class="control">
+              <input id="port" type="number" min="1" max="65535" bind:value={form.port} required disabled={locked.has('port')} title={lockedHint('port')} />
+              {#if current.isDocker}<span class="hint">In Docker keep 8585 and change the published port in compose ports: instead.</span>{/if}
+            </div>
           </div>
           <div class="field">
             <label for="bind-address">Bind address</label>
             <div class="control">
               <input id="bind-address" bind:value={form.bindAddress} required disabled={locked.has('bindAddress')} title={lockedHint('bindAddress')} />
-              <span class="hint">"*" for every interface, or one IP address.</span>
+              <span class="hint">"*" for every interface, or one IP address.{current.isDocker ? ' In Docker keep *.' : ''}</span>
             </div>
           </div>
           <div class="field">

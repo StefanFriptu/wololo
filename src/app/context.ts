@@ -1,3 +1,4 @@
+import { networkInterfaces } from 'node:os';
 import type { BdmvService } from '../contracts/bdmv.ts';
 import type {
   ArrService,
@@ -89,6 +90,8 @@ export interface AppContext {
   requestShutdown(): void;
   /** Graceful stop, then process exit 0 so the container restart policy starts Wololo again (system.restart). */
   requestRestart(): void;
+  /** IP addresses on this machine's interfaces; a bind address outside them cannot be listened on. */
+  localAddresses(): string[];
 }
 
 export type ServiceFactory<T> = (ctx: AppContext) => T;
@@ -101,7 +104,12 @@ export interface CreateContextOptions {
   overrides?: Partial<Services>;
   /** Wired by bootstrap to stop + exit; tests pass a recorder. Default: logs a warning and does nothing. */
   requestRestart?: () => void;
+  /** Default: every address in os.networkInterfaces(). */
+  localAddresses?: () => string[];
 }
+
+const interfaceAddresses = (): string[] =>
+  Object.values(networkInterfaces()).flatMap((entries) => (entries ?? []).map((entry) => entry.address));
 
 export function createAppContext(options: CreateContextOptions): AppContext {
   const log = options.logs.logger('app');
@@ -124,6 +132,7 @@ export function createAppContext(options: CreateContextOptions): AppContext {
     shutdownSignal: shutdown.signal,
     requestShutdown: () => shutdown.abort(),
     requestRestart: options.requestRestart ?? (() => log.warn('restart requested but no restart handler is wired')),
+    localAddresses: options.localAddresses ?? interfaceAddresses,
   };
 
   const services: Services = {

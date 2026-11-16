@@ -159,6 +159,8 @@ export interface GeneralConfigView extends GeneralConfig {
   runningPort: number;
   /** Fields pinned by WOLOLO__* environment variables; PUT answers 409 for them. */
   envOverrides: (keyof GeneralConfig)[];
+  /** In the image the port and bind address must stay 8585 and "*" unless compose publishes otherwise. */
+  isDocker: boolean;
 }
 
 export type GeneralConfigUpdate = Partial<Omit<GeneralConfig, 'apiKey'>>;

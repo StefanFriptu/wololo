@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import {
   ConfigStore,
   DEFAULT_PORT,
+  isLocalBindAddress,
   isValidBindAddress,
   isValidUrlBase,
   loopbackHost,
@@ -119,6 +120,19 @@ test.each([
   ['localhost', false],
 ])('isValidBindAddress(%p) -> %p', (value, expected) => {
   expect(isValidBindAddress(value)).toBe(expected);
+});
+
+test.each([
+  ['*', true],
+  ['0.0.0.0', true],
+  ['::', true],
+  ['127.0.0.1', true],
+  ['FE80::1', true],
+  ['fe80::1%eth0', true],
+  ['192.168.77.77', false],
+  ['::1', false],
+])('isLocalBindAddress(%p) - against 127.0.0.1 and fe80::1%%eth0 -> %p', (value, expected) => {
+  expect(isLocalBindAddress(value, ['127.0.0.1', 'fe80::1%eth0'])).toBe(expected);
 });
 
 test.each([

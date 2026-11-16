@@ -170,6 +170,28 @@ describe('core routes', () => {
     }
   });
 
+  test('general settings - a bind address on no local interface is refused and not saved', async () => {
+    const put = (bindAddress: string) =>
+      t.request('/api/v1/settings/general', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ bindAddress }),
+      });
+    expect(t.ctx.localAddresses()).toContain('127.0.0.1');
+    expect(t.ctx.localAddresses()).not.toContain('203.0.113.7');
+    try {
+      const refused = await put('203.0.113.7');
+      expect(refused.status).toBe(400);
+      expect(await refused.text()).toContain('203.0.113.7 is not on any interface');
+      expect(t.ctx.config.get().bindAddress).toBe('*');
+      const loopback = (await (await put('127.0.0.1')).json()) as GeneralConfigView;
+      expect(loopback.bindAddress).toBe('127.0.0.1');
+      expect(typeof loopback.isDocker).toBe('boolean');
+    } finally {
+      await put('*');
+    }
+  });
+
   test('logs endpoint returns ring buffer entries', async () => {
     t.ctx.logs.logger('test').info('hello from test');
     const entries = (await (await t.request('/api/v1/system/logs?module=test')).json()) as LogEntry[];

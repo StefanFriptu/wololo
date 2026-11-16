@@ -67,12 +67,23 @@ export function createRuntime(options: RuntimeOptions): Runtime {
     await services.jobs.start();
 
     const current = ctx.config.get();
-    server = Bun.serve({
-      port: options.port ?? current.port,
-      hostname: current.bindAddress === '*' ? '0.0.0.0' : current.bindAddress,
-      fetch: (request, bunServer) => app.fetch(request, { server: bunServer }),
-      idleTimeout: 120,
-    });
+    const port = options.port ?? current.port;
+    const hostname = current.bindAddress === '*' ? '0.0.0.0' : current.bindAddress;
+    try {
+      server = Bun.serve({
+        port,
+        hostname,
+        fetch: (request, bunServer) => app.fetch(request, { server: bunServer }),
+        idleTimeout: 120,
+      });
+    } catch (error) {
+      const message =
+        `cannot listen on ${hostname}:${port} (${errorMessage(error)}): the port is taken or the bind address ` +
+        `is not on this machine. Fix port/bindAddress in ${current.configFile} or set WOLOLO__PORT / ` +
+        'WOLOLO__BIND_ADDRESS (in Docker keep port 8585 and bind address *)';
+      log.error(message);
+      throw new Error(message, { cause: error });
+    }
     log.info(`Wololo ${current.version} listening on http://${server.hostname}:${server.port}${current.urlBase}/`);
     return server;
   };

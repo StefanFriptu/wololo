@@ -2,7 +2,7 @@ import { basename } from 'node:path';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 import type { AppContext } from '../app/context.ts';
-import { isValidBindAddress, isValidUrlBase } from '../core/config.ts';
+import { isLocalBindAddress, isValidBindAddress, isValidUrlBase } from '../core/config.ts';
 import { AppError } from '../core/errors.ts';
 import type { GeneralConfigView } from '../shared/api-types.ts';
 import type { ServerEvent, StreamHello } from '../shared/events.ts';
@@ -49,6 +49,7 @@ export function registerCoreRoutes(app: ApiApp, ctx: AppContext): void {
       restartRequired: RESTART_KEYS.some((key) => config[key] !== bootConfig[key]),
       runningPort: bootConfig.port,
       envOverrides: [...config.envOverrides],
+      isDocker: config.isDocker,
     };
   };
 
@@ -114,6 +115,12 @@ export function registerCoreRoutes(app: ApiApp, ctx: AppContext): void {
         ctx.config.get().envOverrides.includes(key),
       );
       if (locked.length > 0) throw new AppError('conflict', `set by environment variables: ${locked.join(', ')}`);
+      if (patch.bindAddress !== undefined && !isLocalBindAddress(patch.bindAddress, ctx.localAddresses())) {
+        throw new AppError(
+          'validation',
+          `bind address ${patch.bindAddress} is not on any interface of this machine; use * or one of its own addresses`,
+        );
+      }
       const next = ctx.config.update(patch);
       ctx.logs.setLevel(next.logLevel);
       return generalView();

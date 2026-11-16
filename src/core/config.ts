@@ -77,6 +77,13 @@ export function isValidBindAddress(value: string): boolean {
   return value === '*' || isIP(value) !== 0;
 }
 
+/** A wildcard, or an address assigned to one of this machine's interfaces; anything else cannot be bound. */
+export function isLocalBindAddress(value: string, localAddresses: ReadonlyArray<string>): boolean {
+  if (value === '*' || value === '0.0.0.0' || value === '::') return true;
+  const address = value.split('%')[0]?.toLowerCase();
+  return localAddresses.some((local) => local.split('%')[0]?.toLowerCase() === address);
+}
+
 /** Address a local client (healthcheck) uses to reach the server. */
 export function loopbackHost(bindAddress: string): string {
   if (bindAddress === '*' || bindAddress === '0.0.0.0') return '127.0.0.1';
