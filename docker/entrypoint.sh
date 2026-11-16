@@ -45,9 +45,13 @@ if [ "$(id -u)" = "0" ]; then
     chown -R "${PUID}:${PGID}" "${CONFIG_DIR}" ||
       echo "Wololo: warning: could not chown ${CONFIG_DIR} (NFS root_squash or read-only mount?); continuing" >&2
   fi
+  setpriv --reuid="${PUID}" --regid="${PGID}" --init-groups test -w "${CONFIG_DIR}" ||
+    fail "${CONFIG_DIR} is not writable by ${PUID}:${PGID}: chown it on the host or set PUID/PGID to its owner"
   echo "Wololo: running as uid=${PUID} gid=${PGID} umask=${UMASK}"
   exec setpriv --reuid="${PUID}" --regid="${PGID}" --init-groups "$@"
 fi
 
+{ mkdir -p "${CONFIG_DIR}" && [ -w "${CONFIG_DIR}" ]; } 2>/dev/null ||
+  fail "${CONFIG_DIR} is not writable by $(id -u):$(id -g): chown it on the host or change the container user"
 echo "Wololo: running as uid=$(id -u) gid=$(id -g) (container user set by Docker; PUID/PGID ignored)"
 exec "$@"
