@@ -193,7 +193,7 @@ describe.skipIf(!ffmpegAvailable() || process.platform === 'win32')(
       const original = await md5(path);
       const queued = await scanAndFindJob(path);
       await untilEncoding(queued.id);
-      expect(tempFiles(path)).toEqual(['Crash (2010).wololo-tmp.mkv']);
+      expect(tempFiles(path)).toEqual([`Crash (2010).wololo-tmp-${queued.id}.mkv`]);
 
       await child?.kill('SIGKILL');
       Bun.spawnSync(['pkill', '-9', '-f', 'Crash \\(2010\\)\\.wololo-tmp']);
