@@ -346,7 +346,7 @@ Defined by `TaskName` (`src/shared/domain.ts`) with defaults in `DEFAULT_TASK_IN
 
 **Child processes.** Use `runProcess` from `src/core/process.ts`. Jobs pass `lowPriority: { niceLevel, ioniceClass }` from settings (done for you by `JobRunContext.run`). Always pass an `AbortSignal`.
 
-**Files.** Audio temp output next to the source: `<stem>.wololo-tmp.<ext>`; BDMV temp directory `<radarr root>/.wololo-tmp-<jobId>/` (`TEMP_FILE_MARKER`). Register it with `JobRunContext.setTempPath` before writing. Never write across filesystems for a replace; recycle bin defaults to `<root>/.wololo-recycle` (a custom `recycleBin.path` must be absolute). Paths stored in the DB are absolute local container paths; translation to Radarr/Sonarr/Plex/qBittorrent paths happens only in integrations.
+**Files.** Audio temp output next to the source: `<stem>.wololo-tmp-<jobId>.mkv`; BDMV temp directory `<radarr root>/.wololo-tmp-<jobId>/` (`TEMP_FILE_MARKER`). Register it with `JobRunContext.setTempPath` before writing. Never write across filesystems for a replace; recycle bin defaults to `<root>/.wololo-recycle` (a custom `recycleBin.path` must be absolute). Paths stored in the DB are absolute local container paths; translation to Radarr/Sonarr/Plex/qBittorrent paths happens only in integrations.
 
 **Time.** ISO 8601 UTC strings in the DB and API.
 

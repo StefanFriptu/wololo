@@ -12,7 +12,7 @@ import {
 import { dirname, join } from 'node:path';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
 import { ensureFixtureCopy, FIXTURES, type FixtureSpec, ffmpegAvailable } from '../../../test/helpers/fixtures.ts';
-import { insertLibrary, insertMediaFile } from '../../../test/helpers/seed.ts';
+import { insertJob, insertLibrary, insertMediaFile } from '../../../test/helpers/seed.ts';
 import { stubService } from '../../../test/helpers/stubs.ts';
 import type { FileChangedEvent } from '../../contracts/integrations.ts';
 import type { RecycleBinService } from '../../contracts/jobs.ts';
@@ -166,7 +166,7 @@ describe.skipIf(!ffmpegAvailable())('audio job end to end', () => {
     expect(Math.abs(Number(output.format.duration) - Number(originalProbe.format.duration))).toBeLessThanOrEqual(0.1);
     expect(output.chapters).toHaveLength(3);
     expect(statSync(s.source).mode & 0o777).toBe(0o640);
-    expect(existsSync(tempPathFor(s.source))).toBe(false);
+    expect(existsSync(tempPathFor(s.source, job.id))).toBe(false);
 
     const detail = await t.ctx.services.jobs.get(job.id);
     expect(detail.verification?.passed).toBe(true);
@@ -351,6 +351,19 @@ describe.skipIf(!ffmpegAvailable())('audio job end to end', () => {
     expect(readdirSync(dirname(s.source))).toEqual([]);
     expect(s.notified).toEqual([]);
     expect(getJobRow(t.ctx.db, job.id)?.tempPath).toBeNull();
+  }, 60_000);
+
+  test('audio job - a same-stem sibling already writing the same output fails before encoding', async () => {
+    const s = await setup({ fileName: 'Movie (2020).mp4' });
+    t = s.t;
+    const sibling = insertJob(t.ctx.db, { sourcePath: join(dirname(s.source), 'Movie (2020).avi'), state: 'running' });
+
+    const { state, job } = await runOneJob(t, s.mediaFileId);
+
+    expect(state).toBe('failed');
+    expect(job.error).toBe(`job ${sibling.id} is already writing ${join(dirname(s.source), 'Movie (2020).mkv')}`);
+    expect(readdirSync(dirname(s.source))).toEqual(['Movie (2020).mp4']);
+    expect((await t.ctx.services.jobs.log(job.id)) ?? '').not.toContain('$ ffmpeg');
   }, 60_000);
 
   test('audio job - recycle bin disabled replaces without keeping the original', async () => {

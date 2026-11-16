@@ -18,6 +18,8 @@ export interface AudioExecutorDeps {
   checkRecycleBin: (sourcePath: string) => Promise<void>;
   /** Stores the plan and source streams as soon as they are known, so a running or failed job shows them. */
   recordPlan: (jobId: number, plan: ConversionPlan, before: MediaStream[]) => void;
+  /** Id of an earlier running job that writes the same output path (a same-stem sibling), else null. */
+  runningJobForOutput: (jobId: number, outputPath: string) => number | null;
   log: Logger;
   fs?: ReplaceFs;
 }
@@ -156,10 +158,12 @@ export function createAudioExecutor(deps: AudioExecutorDeps): JobExecutor {
       } satisfies JobOutcome;
     }
 
-    const tempPath = tempPathFor(sourcePath);
+    const tempPath = tempPathFor(sourcePath, job.id);
     const outputPath = outputPathFor(sourcePath);
     if (exceedsNameMax(outputPath))
       throw new AppError('unprocessable', `output file name is longer than 255 bytes: ${outputPath}`);
+    const sibling = deps.runningJobForOutput(job.id, outputPath);
+    if (sibling !== null) throw new AppError('conflict', `job ${sibling} is already writing ${outputPath}`);
     if (outputPath !== sourcePath && existsSync(outputPath))
       throw new AppError('conflict', `output path already exists: ${outputPath}`);
     await ctx.ensureFreeSpace(dirname(sourcePath), plan.estimatedOutputBytes ?? probe.sizeBytes);

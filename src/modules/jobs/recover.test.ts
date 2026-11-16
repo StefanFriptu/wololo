@@ -122,6 +122,7 @@ describe.skipIf(!ffmpegAvailable())('crash during the replace step of a real aud
       recycleBinEnabled: () => true,
       checkRecycleBin: async () => {},
       recordPlan: () => {},
+      runningJobForOutput: () => null,
       log: s.t.ctx.logs.logger('test'),
       fs: {
         ...NODE_REPLACE_FS,
@@ -143,7 +144,7 @@ describe.skipIf(!ffmpegAvailable())('crash during the replace step of a real aud
     const { source, row, originalHash } = await runUntilCrash(s, 'rename');
     const crashed = getJobRow(t.ctx.db, row.id);
     expect(crashed?.step).toBe('replacing');
-    expect(existsSync(tempPathFor(source))).toBe(true);
+    expect(existsSync(tempPathFor(source, row.id))).toBe(true);
     const bin = await t.ctx.services.recycleBin.list({});
     expect(bin.total).toBe(1);
     expect(crashed?.recycleBinEntryId).toBe(bin.items[0]?.id ?? -1);
@@ -168,7 +169,7 @@ describe.skipIf(!ffmpegAvailable())('crash during the replace step of a real aud
     const s = setup();
     t = s.t;
     const { source, row, originalHash } = await runUntilCrash(s, 'clear_temp_path');
-    expect(existsSync(tempPathFor(source))).toBe(false);
+    expect(existsSync(tempPathFor(source, row.id))).toBe(false);
 
     expect(await t.ctx.services.jobs.recover()).toEqual({ requeued: 0, completed: 1, tempFilesDeleted: 0 });
 
@@ -212,7 +213,7 @@ describe.skipIf(!ffmpegAvailable())('crash during the replace step of a real aud
     t = s.t;
     const { source, row, originalHash } = await runUntilCrash(s, 'rename', { binMode: 'move' });
     expect(existsSync(source)).toBe(false);
-    expect(existsSync(tempPathFor(source))).toBe(true);
+    expect(existsSync(tempPathFor(source, row.id))).toBe(true);
 
     expect(await t.ctx.services.jobs.recover()).toEqual({ requeued: 0, completed: 1, tempFilesDeleted: 0 });
 
@@ -231,7 +232,7 @@ describe('crash recovery decisions on seeded state', () => {
     const s = setup();
     t = s.t;
     const source = join(s.root, 'A', 'A.mkv');
-    const temp = write(tempPathFor(source), 'converted');
+    const temp = write(tempPathFor(source, 1), 'converted');
     const recyclePath = write(join(s.root, '.wololo-recycle', '20261115T000000Z', 'A', 'A.mkv'), 'original');
     const entry = insertRecycleRow(t.ctx.db, {
       originalPath: source,
@@ -261,7 +262,7 @@ describe('crash recovery decisions on seeded state', () => {
       sizeBytes: 8,
       expiresAt: '2099-01-01T00:00:00.000Z',
     });
-    const row = s.seedJob(source, { step: 'replacing', tempPath: tempPathFor(source), recycleBinEntryId: entry.id });
+    const row = s.seedJob(source, { step: 'replacing', tempPath: tempPathFor(source, 1), recycleBinEntryId: entry.id });
 
     expect(await t.ctx.services.jobs.recover()).toEqual({ requeued: 1, completed: 0, tempFilesDeleted: 0 });
 
@@ -275,7 +276,7 @@ describe('crash recovery decisions on seeded state', () => {
     const s = setup();
     t = s.t;
     const source = join(s.root, 'C', 'C.mkv');
-    const row = s.seedJob(source, { step: 'replacing', tempPath: tempPathFor(source) });
+    const row = s.seedJob(source, { step: 'replacing', tempPath: tempPathFor(source, 1) });
 
     expect(await t.ctx.services.jobs.recover()).toEqual({ requeued: 0, completed: 0, tempFilesDeleted: 0 });
 
@@ -290,7 +291,7 @@ describe('crash recovery decisions on seeded state', () => {
     const s = setup();
     t = s.t;
     const source = join(s.root, 'E', 'E.mkv');
-    const temp = write(tempPathFor(source), 'converted');
+    const temp = write(tempPathFor(source, 1), 'converted');
     const row = s.seedJob(source, { step: 'replacing', tempPath: temp });
 
     expect(await t.ctx.services.jobs.recover()).toEqual({ requeued: 0, completed: 0, tempFilesDeleted: 1 });
@@ -305,7 +306,7 @@ describe('crash recovery decisions on seeded state', () => {
     const s = setup();
     t = s.t;
     const source = write(join(s.root, 'F', 'F.mkv'), 'original');
-    const temp = write(tempPathFor(source), 'converted');
+    const temp = write(tempPathFor(source, 1), 'converted');
     const entry = insertRecycleRow(t.ctx.db, {
       originalPath: source,
       recyclePath: join(s.root, '.wololo-recycle', '20261115T000000Z', 'F', 'F.mkv'),
@@ -326,7 +327,7 @@ describe('crash recovery decisions on seeded state', () => {
     t = s.t;
     const source = write(join(s.root, 'D', 'D.mp4'), 'old mp4');
     const output = write(join(s.root, 'D', 'D.mkv'), 'new mkv');
-    const row = s.seedJob(source, { step: 'replacing', tempPath: tempPathFor(source) });
+    const row = s.seedJob(source, { step: 'replacing', tempPath: tempPathFor(source, 1) });
 
     expect(await t.ctx.services.jobs.recover()).toEqual({ requeued: 0, completed: 1, tempFilesDeleted: 0 });
 
@@ -355,7 +356,7 @@ describe('crash recovery decisions on seeded state', () => {
     const s = setup();
     t = s.t;
     const source = write(join(s.root, 'L', 'L.mp4'), 'old mp4');
-    const temp = write(tempPathFor(source), 'new mkv');
+    const temp = write(tempPathFor(source, 1), 'new mkv');
     const output = join(s.root, 'L', 'L.mkv');
     linkSync(temp, output);
     const row = s.seedJob(source, { step: 'replacing', tempPath: temp });
@@ -371,7 +372,7 @@ describe('crash recovery decisions on seeded state', () => {
     const s = setup();
     t = s.t;
     const source = join(s.root, 'K', 'K.mp4');
-    const temp = write(tempPathFor(source), 'converted');
+    const temp = write(tempPathFor(source, 1), 'converted');
     const foreign = write(join(s.root, 'K', 'K.mkv'), 'someone else');
     const recyclePath = write(join(s.root, '.wololo-recycle', '20261115T000000Z', 'K', 'K.mp4'), 'old mp4');
     const entry = insertRecycleRow(t.ctx.db, {
@@ -394,7 +395,7 @@ describe('crash recovery decisions on seeded state', () => {
     const s = setup();
     t = s.t;
     const source = write(join(s.root, 'E', 'E.mkv'), 'original');
-    const temp = write(tempPathFor(source), 'partial');
+    const temp = write(tempPathFor(source, 1), 'partial');
     const row = s.seedJob(source, { step: 'encoding', tempPath: temp });
 
     expect(await t.ctx.services.jobs.recover()).toEqual({ requeued: 1, completed: 0, tempFilesDeleted: 1 });
@@ -408,7 +409,7 @@ describe('crash recovery decisions on seeded state', () => {
     const s = setup();
     t = s.t;
     const source = write(join(s.root, 'F', 'F.mkv'), 'original');
-    const temp = write(tempPathFor(source), 'partial');
+    const temp = write(tempPathFor(source, 1), 'partial');
     const row = s.seedJob(source, { step: 'encoding', tempPath: temp, attempts: 3 });
 
     expect(await t.ctx.services.jobs.recover()).toEqual({ requeued: 0, completed: 0, tempFilesDeleted: 1 });
@@ -448,7 +449,7 @@ describe('crash recovery decisions on seeded state', () => {
     const s = setup();
     t = s.t;
     const source = write(join(s.root, 'H', 'H.mkv'), 'original');
-    const temp = write(tempPathFor(source), 'stale');
+    const temp = write(tempPathFor(source, 1), 'stale');
     const row = s.seedJob(source, { state: 'failed', step: 'encoding', tempPath: temp });
 
     expect(await t.ctx.services.jobs.recover()).toEqual({ requeued: 0, completed: 0, tempFilesDeleted: 1 });
@@ -463,7 +464,7 @@ describe('crash recovery decisions on seeded state', () => {
       const s = setup();
       t = s.t;
       const source = write(join(s.root, 'R', 'R.mkv'), 'original');
-      const temp = write(tempPathFor(source), 'stale');
+      const temp = write(tempPathFor(source, 1), 'stale');
       const row = s.seedJob(source, { state: 'failed', step: 'replacing', tempPath: temp });
       const queued = s.seedJob(write(join(s.root, 'Q', 'Q.mkv'), 'q'), { state: 'running', step: 'encoding' });
       chmodSync(dirname(temp), 0o500);
@@ -503,7 +504,7 @@ describe('crash recovery decisions on seeded state', () => {
     const s = setup();
     t = s.t;
     const source = write(join(s.root, 'P', 'P.mkv'), 'original');
-    const temp = write(tempPathFor(source), 'being written');
+    const temp = write(tempPathFor(source, 1), 'being written');
     s.seedJob(source, { step: 'encoding', tempPath: temp });
     const binned = write(join(s.root, '.wololo-recycle', '20261115T000000Z', 'x.wololo-tmp.mkv'), 'odd but binned');
 

@@ -46,7 +46,7 @@ import type {
 } from '../shared/domain.ts';
 
 /**
- * Audio jobs write "<dir>/<stem>.wololo-tmp.<ext>" next to the source. BDMV jobs write everything (ISO extraction,
+ * Audio jobs write "<dir>/<stem>.wololo-tmp-<jobId>.mkv" next to the source. BDMV jobs write everything (ISO extraction,
  * audio side files, the temp mkv) into one directory "<radarr root>/.wololo-tmp-<jobId>/". Either path is stored in
  * jobs.temp_path before the first byte is written, so recovery can find it.
  */

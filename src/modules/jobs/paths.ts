@@ -4,7 +4,6 @@ import { TEMP_FILE_MARKER } from '../../contracts/jobs.ts';
 import type { MediaFileKind } from '../../shared/domain.ts';
 
 const OUTPUT_EXTENSION = '.mkv';
-const TEMP_SUFFIX = `${TEMP_FILE_MARKER}${OUTPUT_EXTENSION}`;
 const NAME_MAX_BYTES = 255;
 
 function stemOf(path: string): string {
@@ -28,15 +27,17 @@ export function exceedsNameMax(path: string): boolean {
 }
 
 /**
- * "<dir>/<stem>.wololo-tmp.mkv" next to the source, so the final rename never crosses filesystems. A stem too long for
- * NAME_MAX is shortened and suffixed with a hash of the full stem, so two long names never share a temp file.
+ * "<dir>/<stem>.wololo-tmp-<jobId>.mkv" next to the source, so the final rename never crosses filesystems and two jobs
+ * on siblings with the same stem never share a temp file. A stem too long for NAME_MAX is shortened and suffixed with a
+ * hash of the full stem, so two long names never share a temp file either.
  */
-export function tempPathFor(sourcePath: string): string {
+export function tempPathFor(sourcePath: string, jobId: number): string {
   const stem = stemOf(sourcePath);
-  const name = `${stem}${TEMP_SUFFIX}`;
+  const suffix = `${TEMP_FILE_MARKER}-${jobId}${OUTPUT_EXTENSION}`;
+  const name = `${stem}${suffix}`;
   if (Buffer.byteLength(name) <= NAME_MAX_BYTES) return join(dirname(sourcePath), name);
   const hash = createHash('sha256').update(stem).digest('hex').slice(0, 8);
-  const tail = `~${hash}${TEMP_SUFFIX}`;
+  const tail = `~${hash}${suffix}`;
   return join(dirname(sourcePath), `${truncateUtf8(stem, NAME_MAX_BYTES - Buffer.byteLength(tail))}${tail}`);
 }
 

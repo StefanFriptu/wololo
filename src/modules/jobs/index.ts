@@ -27,11 +27,12 @@ import {
   type PageWindow,
   prunableJobIdsQuery,
   queueRows,
+  runningAudioJobsBefore,
   updateJobRow,
 } from './jobQueries.ts';
 import { createJobLifecycle } from './lifecycle.ts';
 import { toHistoryEntry, toJobDetail, toJobSummary } from './mappers.ts';
-import { jobLogPathFor, jobTitleFor } from './paths.ts';
+import { jobLogPathFor, jobTitleFor, outputPathFor } from './paths.ts';
 import { deleteTempPath, resolveInterruptedJob } from './recover.ts';
 import { sweepOrphanedTempPaths } from './sweepOrphanedTempPaths.ts';
 import { createWorker } from './worker.ts';
@@ -80,6 +81,8 @@ export function createJobsService(ctx: AppContext): JobsService {
         path,
       );
     },
+    runningJobForOutput: (jobId, outputPath) =>
+      runningAudioJobsBefore(db, jobId).find((row) => outputPathFor(row.sourcePath) === outputPath)?.id ?? null,
     recordPlan: (jobId, plan, before) => {
       updateJobRow(db, jobId, {
         plan,

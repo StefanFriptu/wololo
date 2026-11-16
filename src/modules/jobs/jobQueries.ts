@@ -90,6 +90,15 @@ export function jobsInState(db: Db, state: JobState): JobRow[] {
   return db.select().from(jobs).where(eq(jobs.state, state)).orderBy(asc(jobs.id)).all();
 }
 
+export function runningAudioJobsBefore(db: Db, jobId: number): Pick<JobRow, 'id' | 'sourcePath'>[] {
+  return db
+    .select({ id: jobs.id, sourcePath: jobs.sourcePath })
+    .from(jobs)
+    .where(and(eq(jobs.state, 'running'), eq(jobs.type, 'audio'), lt(jobs.id, jobId)))
+    .orderBy(asc(jobs.id))
+    .all();
+}
+
 /** Running jobs first, then queued in pick order. */
 export function queueRows(db: Db, limit: number): JobRow[] {
   const running = jobsInState(db, 'running');
