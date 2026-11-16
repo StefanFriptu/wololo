@@ -1,7 +1,7 @@
 import { statSync } from 'node:fs';
 import type { AppContext } from '../../app/context.ts';
 import type { JobExecutor } from '../../contracts/jobs.ts';
-import { errorMessage } from '../../core/errors.ts';
+import { AppError, errorMessage } from '../../core/errors.ts';
 import type { Logger } from '../../core/logger.ts';
 import type { JobRow } from '../../db/schema.ts';
 import { type JobType, QUEUE_PAUSE_REASONS, type QueuePauseReason, type QueueState } from '../../shared/domain.ts';
@@ -195,6 +195,20 @@ export function createWorker(deps: WorkerDeps) {
     await lifecycle.failed(settled, failure);
   };
 
+  const skipReason = async (row: JobRow): Promise<string | null> => {
+    if (row.mediaFileId === null) return null;
+    try {
+      const media = await ctx.services.media.get(row.mediaFileId);
+      if (media.status === 'ignored') return 'the file is ignored';
+      const library = await ctx.services.libraries.get(media.libraryId);
+      return library.enabled ? null : 'its library is disabled';
+    } catch (error) {
+      if (error instanceof AppError && error.code === 'not_found') return 'the file is no longer in a library';
+      log.warn('cannot check whether a job may still run, running it', { jobId: row.id, error: errorMessage(error) });
+      return null;
+    }
+  };
+
   const runJob = async (claimed: JobRow, controller: AbortController) => {
     const jobId = claimed.id;
     const logPath = jobLogPathFor(ctx.config.get().jobLogDir, jobId);
@@ -205,6 +219,13 @@ export function createWorker(deps: WorkerDeps) {
       }) ?? claimed;
     const jobLog = createJobLog(logPath, { log });
     jobLog.section(`attempt ${row.attempts} (${row.trigger}): ${row.type} ${row.sourcePath}`);
+    const skip = await skipReason(row);
+    if (skip !== null) {
+      jobLog.section(`not run: ${skip}`);
+      log.info('job cancelled before it started', { jobId, path: row.sourcePath, reason: skip });
+      lifecycle.skipped(row, skip);
+      return;
+    }
     ctx.events.emit('job.started', { job: toJobSummary(row) });
     lifecycle.addHistory({
       event: 'started',

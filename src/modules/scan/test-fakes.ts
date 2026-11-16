@@ -1,9 +1,17 @@
+import { and, eq } from 'drizzle-orm';
 import { insertJob } from '../../../test/helpers/seed.ts';
 import { stubService } from '../../../test/helpers/stubs.ts';
 import type { JobsService, NewJob } from '../../contracts/jobs.ts';
 import type { RulesService } from '../../contracts/rules-ffmpeg.ts';
 import type { Db } from '../../db/client.ts';
-import type { ConversionPlan, DeviceProfileDefinition, EffectiveProfile, JobSummary } from '../../shared/domain.ts';
+import { jobs } from '../../db/schema.ts';
+import type {
+  ConversionPlan,
+  DeviceProfileDefinition,
+  EffectiveProfile,
+  JobState,
+  JobSummary,
+} from '../../shared/domain.ts';
 
 export const TEST_DEFINITION: DeviceProfileDefinition = {
   audio: {
@@ -63,6 +71,7 @@ export function fakeRules(state: { versionKey: string; definition?: DeviceProfil
 /** Records enqueue calls and inserts a queued jobs row, like the real (idempotent) queue. */
 export function fakeJobs(db: () => Db, options: { fail?: boolean } = {}) {
   const calls: NewJob[] = [];
+  const cancelled: number[] = [];
   const service = stubService<JobsService>('jobs', {
     enqueue: async (job) => {
       if (options.fail) throw new Error('queue unavailable');
@@ -75,6 +84,24 @@ export function fakeJobs(db: () => Db, options: { fail?: boolean } = {}) {
       });
       return { id: row.id, state: row.state } as JobSummary;
     },
+    list: async (query) => {
+      const rows = db()
+        .select({ id: jobs.id, state: jobs.state })
+        .from(jobs)
+        .where(
+          and(
+            query.mediaFileId === undefined ? undefined : eq(jobs.mediaFileId, query.mediaFileId),
+            query.state === undefined ? undefined : eq(jobs.state, query.state as JobState),
+          ),
+        )
+        .all();
+      return { page: 1, pageSize: rows.length, total: rows.length, items: rows as JobSummary[] };
+    },
+    cancel: async (id) => {
+      cancelled.push(id);
+      db().update(jobs).set({ state: 'cancelled' }).where(eq(jobs.id, id)).run();
+      return { id, state: 'cancelled' } as JobSummary;
+    },
   });
-  return { service, calls };
+  return { service, calls, cancelled };
 }

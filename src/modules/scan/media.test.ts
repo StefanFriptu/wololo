@@ -520,6 +520,19 @@ describe('media rows without files', () => {
     expect(ignored).toMatchObject({ status: 'ignored', statusReason: 'restored from recycle bin' });
   });
 
+  test('media.setIgnored - cancels the queued jobs of the file and leaves other jobs alone', async () => {
+    const row = insertMediaFile(t.ctx.db, seeded(), { path: join(root, 'A.mkv'), status: 'needs_work' });
+    const other = insertMediaFile(t.ctx.db, seeded(), { path: join(root, 'B.mkv'), status: 'needs_work' });
+    const queued = insertJob(t.ctx.db, { sourcePath: row.path, mediaFileId: row.id, state: 'queued' });
+    insertJob(t.ctx.db, { sourcePath: row.path, mediaFileId: row.id, state: 'failed' });
+    insertJob(t.ctx.db, { sourcePath: other.path, mediaFileId: other.id, state: 'queued' });
+
+    const ignored = await media().setIgnored(row.id, true);
+
+    expect(jobs.cancelled).toEqual([queued.id]);
+    expect(ignored).toMatchObject({ status: 'ignored', statusReason: 'ignored by user' });
+  });
+
   test('media.setStatus and recordJobResult - unknown ids are not_found', async () => {
     const codes = await Promise.all([
       media()

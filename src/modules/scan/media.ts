@@ -98,6 +98,8 @@ export function createMediaService(ctx: AppContext): MediaService {
       const row = engine.rowById(id);
       if (row.status === 'processing') throw new AppError('conflict', 'a job is processing this file');
       if (ignored) {
+        const queued = await ctx.services.jobs.list({ mediaFileId: id, state: 'queued' });
+        for (const job of queued.items) await ctx.services.jobs.cancel(job.id);
         engine.update(id, { status: 'ignored', statusReason: reason ?? 'ignored by user' });
         return engine.summaryOf(id);
       }

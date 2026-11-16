@@ -65,6 +65,18 @@ export function createJobLifecycle(ctx: AppContext, options: { log: Logger; onCh
   const persist = (row: JobRow, patch: Parameters<typeof updateJobRow>[2]): JobRow =>
     updateJobRow(db, row.id, patch) ?? row;
 
+  const cancel = (row: JobRow, message: string): JobRow => {
+    const updated = persist(row, {
+      state: 'cancelled',
+      speed: null,
+      etaSec: null,
+      tempPath: null,
+      finishedAt: nowIso(),
+    });
+    addHistory({ event: 'cancelled', path: row.sourcePath, message, jobId: row.id, mediaFileId: row.mediaFileId });
+    return updated;
+  };
+
   return {
     addHistory,
     setMediaStatus,
@@ -174,22 +186,16 @@ export function createJobLifecycle(ctx: AppContext, options: { log: Logger; onCh
     },
 
     async cancelled(row: JobRow): Promise<JobRow> {
-      const wasRunning = row.state === 'running';
-      const updated = persist(row, {
-        state: 'cancelled',
-        speed: null,
-        etaSec: null,
-        tempPath: null,
-        finishedAt: nowIso(),
-      });
-      addHistory({
-        event: 'cancelled',
-        path: row.sourcePath,
-        message: 'cancelled',
-        jobId: row.id,
-        mediaFileId: row.mediaFileId,
-      });
-      if (wasRunning) await setMediaStatus(row, 'needs_work', null);
+      const updated = cancel(row, 'cancelled');
+      if (row.state === 'running') await setMediaStatus(row, 'needs_work', null);
+      events.emit('job.finished', { job: toJobSummary(updated), state: 'cancelled' });
+      options.onChange();
+      return updated;
+    },
+
+    /** Cancels a claimed job whose file must not be touched any more; the media status is left as it is. */
+    skipped(row: JobRow, reason: string): JobRow {
+      const updated = cancel(row, `cancelled: ${reason}`);
       events.emit('job.finished', { job: toJobSummary(updated), state: 'cancelled' });
       options.onChange();
       return updated;

@@ -8,6 +8,7 @@ import type { BdmvService } from '../../contracts/bdmv.ts';
 import type { PlexService } from '../../contracts/integrations.ts';
 import type { JobExecutor, JobOutcome } from '../../contracts/jobs.ts';
 import { AppError, type ErrorCode } from '../../core/errors.ts';
+import type { MediaFileDetail } from '../../shared/api-types.ts';
 import type { BdmvJobPlan, ConversionPlan, MediaFileStatus, QueueState } from '../../shared/domain.ts';
 import type { DeepPartial, Settings } from '../../shared/settings.ts';
 import { createJobsService } from './index.ts';
@@ -549,6 +550,22 @@ test('remove - deletes a finished job and its log, refuses active ones', async (
   await expectAppError(t.ctx.services.jobs.get(job.id), 'not_found');
 });
 
+test('log and remove - a stored log path outside the job log dir is never read or deleted', async () => {
+  const s = setup();
+  t = s.t;
+  const job = await enqueueDisc(s, s.addFile());
+  const outside = join(t.dir, 'secret.txt');
+  writeFileSync(outside, 'secret');
+  updateJobRow(t.ctx.db, job.id, { state: 'completed', logPath: outside });
+  expect(existsSync(outside)).toBe(true);
+
+  expect(await t.ctx.services.jobs.log(job.id)).toBeNull();
+  expect((await t.ctx.services.jobs.get(job.id)).hasLog).toBe(false);
+  await t.ctx.services.jobs.remove(job.id);
+
+  expect(existsSync(outside)).toBe(true);
+});
+
 test('stop - a running job is aborted and re-queued without counting the attempt', async () => {
   const s = setup();
   t = s.t;
@@ -653,4 +670,59 @@ test('housekeeping - removes orphaned and expired job logs and stale temp files'
   expect(existsSync(join(logDir, '9999.txt'))).toBe(false);
   expect(existsSync(join(logDir, 'notes.txt'))).toBe(true);
   expect(existsSync(temp)).toBe(false);
+});
+
+test('worker - a file ignored after its job was queued is never processed and stays ignored', async () => {
+  const gate = gatedExecutor();
+  t = createTestContext({
+    settings: { processing: { enabled: true } },
+    overrides: { bdmv: stubService<BdmvService>('bdmv', { execute: gate.execute }) },
+  });
+  const library = insertLibrary(t.ctx.db, { roots: [join(t.dir, 'movies')] });
+  const row = insertMediaFile(t.ctx.db, library, { path: join(t.dir, 'movies', 'A'), kind: 'bdmv' });
+  const job = await t.ctx.services.jobs.enqueue({
+    type: 'bdmv',
+    trigger: 'manual',
+    mediaFileId: row.id,
+    bdmvPlan: DISC_PLAN,
+  });
+
+  await t.ctx.services.media.setIgnored(row.id, true);
+  await t.ctx.services.jobs.start();
+
+  expect(getJobRow(t.ctx.db, job.id)?.state).toBe('cancelled');
+  expect(gate.started).toEqual([]);
+  expect(await t.ctx.services.media.get(row.id)).toMatchObject({ status: 'ignored', statusReason: 'ignored by user' });
+});
+
+test('worker - a claimed job is cancelled without touching the media status when its file is ignored or its library disabled', async () => {
+  const s = setup();
+  t = s.t;
+  const ignored = await enqueueDisc(s, s.addFile());
+  const ignoredId = ignored.mediaFileId as number;
+  s.recorder.files.set(ignoredId, { ...(s.recorder.files.get(ignoredId) as MediaFileDetail), status: 'ignored' });
+  const disabled = insertLibrary(t.ctx.db, { roots: [join(t.dir, 'off')], enabled: false });
+  const offId = s.addFile();
+  s.recorder.files.set(offId, { ...(s.recorder.files.get(offId) as MediaFileDetail), libraryId: disabled.libraryId });
+  const off = await enqueueDisc(s, offId);
+  const finished: number[] = [];
+  const bothFinished = new Promise<void>((resolve) =>
+    t?.ctx.events.on('job.finished', ({ job }) => {
+      finished.push(job.id);
+      if (finished.length === 2) resolve();
+    }),
+  );
+
+  await t.ctx.services.jobs.start();
+  await bothFinished;
+
+  expect(s.gate.started).toEqual([]);
+  expect(s.recorder.statuses).toEqual([]);
+  expect(getJobRow(t.ctx.db, ignored.id)?.state).toBe('cancelled');
+  expect(getJobRow(t.ctx.db, off.id)?.state).toBe('cancelled');
+  const history = await t.ctx.services.jobs.history({ jobId: off.id, sortDir: 'asc' });
+  expect(history.items.map((entry) => [entry.event, entry.message])).toEqual([
+    ['queued', 'queued (manual)'],
+    ['cancelled', 'cancelled: its library is disabled'],
+  ]);
 });
