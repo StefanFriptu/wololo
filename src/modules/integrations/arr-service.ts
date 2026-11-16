@@ -21,6 +21,11 @@ import type { FetchLike } from './upstream.ts';
 
 const INDEX_TTL_MS = 5 * 60_000;
 const INDEX_MISS_REFRESH_MS = 30_000;
+/** A whole library can take far longer to serialise than the interactive calls are allowed. */
+const LIBRARY_TIMEOUT_MS = 120_000;
+const FAILURE_BACKOFF_MS = 60_000;
+const MAX_FAILURE_BACKOFF_MS = 10 * 60_000;
+const MAX_CACHED_SERIES = 256;
 const MAX_LOOKUP_RESULTS = 20;
 const TMDB_TERM = /^tmdb:\s*(\d+)$/i;
 
@@ -44,6 +49,22 @@ interface InstanceIndex {
   entries: IndexEntry[];
 }
 
+interface IndexFailure {
+  at: number;
+  streak: number;
+  error: unknown;
+}
+
+interface SeriesFiles {
+  builtAt: number;
+  byPath: Map<string, number>;
+}
+
+interface PathHit {
+  instance: ArrInstance;
+  entry: IndexEntry;
+}
+
 function masked(instance: ArrInstance): ArrInstance {
   return { ...instance, apiKey: maskSecret(instance.apiKey) };
 }
@@ -58,11 +79,20 @@ function owningEntry(entries: readonly IndexEntry[], localPath: string): IndexEn
   return best;
 }
 
+function samePath(a: string, b: string): boolean {
+  return isSameOrInside(a, b) && isSameOrInside(b, a);
+}
+
 export function createArrService(ctx: AppContext, deps: IntegrationDeps = {}): ArrService {
   const log = ctx.logs.logger('arr');
   const now = deps.now ?? Date.now;
   const indexes = new Map<number, InstanceIndex>();
   const building = new Map<number, Promise<InstanceIndex>>();
+  const failures = new Map<number, IndexFailure>();
+  const seriesFiles = new Map<string, SeriesFiles>();
+  const loadingSeries = new Map<string, Promise<SeriesFiles>>();
+
+  const libraryTimeoutMs = deps.timeoutMs ?? LIBRARY_TIMEOUT_MS;
 
   const clientFor = (instance: Pick<ArrInstance, 'kind' | 'url' | 'apiKey'>): ArrClient =>
     createArrClient({ ...instance, fetch: deps.fetch, timeoutMs: deps.timeoutMs });
@@ -83,7 +113,7 @@ export function createArrService(ctx: AppContext, deps: IntegrationDeps = {}): A
     const client = clientFor(instance);
     const entries: IndexEntry[] = [];
     if (instance.kind === 'radarr') {
-      for (const movie of await client.movies()) {
+      for (const movie of await client.movies(libraryTimeoutMs)) {
         if (!movie.path) continue;
         entries.push({
           itemId: movie.id,
@@ -95,7 +125,7 @@ export function createArrService(ctx: AppContext, deps: IntegrationDeps = {}): A
         });
       }
     } else {
-      for (const series of await client.series()) {
+      for (const series of await client.series(libraryTimeoutMs)) {
         if (!series.path) continue;
         entries.push({
           itemId: series.id,
@@ -115,13 +145,26 @@ export function createArrService(ctx: AppContext, deps: IntegrationDeps = {}): A
   const buildIndex = (instance: ArrInstance): Promise<InstanceIndex> => {
     const pending = building.get(instance.id);
     if (pending) return pending;
-    const build = fetchIndex(instance)
-      .then((index) => {
-        if (building.get(instance.id) === build) indexes.set(instance.id, index);
-        return index;
-      })
+    const current = () => building.get(instance.id) === build;
+    const build: Promise<InstanceIndex> = fetchIndex(instance)
+      .then(
+        (index) => {
+          if (current()) {
+            indexes.set(instance.id, index);
+            failures.delete(instance.id);
+          }
+          return index;
+        },
+        (error: unknown) => {
+          if (current()) {
+            const streak = (failures.get(instance.id)?.streak ?? 0) + 1;
+            failures.set(instance.id, { at: now(), streak, error });
+          }
+          throw error;
+        },
+      )
       .finally(() => {
-        if (building.get(instance.id) === build) building.delete(instance.id);
+        if (current()) building.delete(instance.id);
       });
     building.set(instance.id, build);
     return build;
@@ -130,31 +173,105 @@ export function createArrService(ctx: AppContext, deps: IntegrationDeps = {}): A
   const forgetIndex = (id: number) => {
     indexes.delete(id);
     building.delete(id);
+    failures.delete(id);
+    const prefix = `${id}:`;
+    for (const key of seriesFiles.keys()) if (key.startsWith(prefix)) seriesFiles.delete(key);
+    for (const key of loadingSeries.keys()) if (key.startsWith(prefix)) loadingSeries.delete(key);
   };
 
+  /** After a failed library download the instance is left alone for 1, 2, 4 ... up to 10 minutes. */
+  const backingOff = (id: number): IndexFailure | null => {
+    const failure = failures.get(id);
+    if (!failure) return null;
+    const wait = Math.min(FAILURE_BACKOFF_MS * 2 ** (failure.streak - 1), MAX_FAILURE_BACKOFF_MS);
+    return now() - failure.at < wait ? failure : null;
+  };
+
+  /** A failed refresh keeps serving the previous index rather than downloading the library again for every path. */
   const indexFor = async (instance: ArrInstance): Promise<InstanceIndex> => {
     const cached = indexes.get(instance.id);
     if (cached && now() - cached.builtAt < INDEX_TTL_MS) return cached;
+    const failure = backingOff(instance.id);
+    if (failure) {
+      if (cached) return cached;
+      throw failure.error;
+    }
+    try {
+      return await buildIndex(instance);
+    } catch (error) {
+      if (!cached) throw error;
+      log.warn('arr library refresh failed, using the previous index', { instance: instance.name, error });
+      return cached;
+    }
+  };
+
+  /** A path missing from an index older than INDEX_MISS_REFRESH_MS may belong to an item added since. */
+  const refreshAfterMiss = async (instance: ArrInstance): Promise<InstanceIndex | null> => {
+    const cached = indexes.get(instance.id);
+    if (!cached || now() - cached.builtAt < INDEX_MISS_REFRESH_MS || backingOff(instance.id)) return null;
     return buildIndex(instance);
   };
 
-  const findInInstance = async (instance: ArrInstance, localPath: string): Promise<IndexEntry | null> => {
-    const index = await indexFor(instance);
-    const hit = owningEntry(index.entries, localPath);
-    if (hit || now() - index.builtAt < INDEX_MISS_REFRESH_MS) return hit;
-    return owningEntry((await buildIndex(instance)).entries, localPath);
+  const bestHit = async (
+    instances: readonly ArrInstance[],
+    localPath: string,
+    indexOf: (instance: ArrInstance) => Promise<InstanceIndex | null>,
+  ): Promise<PathHit | null> => {
+    let best: PathHit | null = null;
+    for (const instance of instances) {
+      try {
+        const index = await indexOf(instance);
+        const entry = index && owningEntry(index.entries, localPath);
+        if (entry && (!best || entry.folder.length > best.entry.folder.length)) best = { instance, entry };
+      } catch (error) {
+        log.warn('arr lookup by path failed', { instance: instance.name, path: localPath, error });
+      }
+    }
+    return best;
+  };
+
+  const storeSeriesFiles = (key: string, files: SeriesFiles) => {
+    seriesFiles.delete(key);
+    seriesFiles.set(key, files);
+    const oldest = seriesFiles.size > MAX_CACHED_SERIES ? seriesFiles.keys().next().value : undefined;
+    if (oldest !== undefined) seriesFiles.delete(oldest);
+  };
+
+  /** One GET /episodefile per series, shared by every episode of it; a failure is remembered like an empty list. */
+  const loadSeriesFiles = (instance: ArrInstance, seriesId: number): Promise<SeriesFiles> => {
+    const key = `${instance.id}:${seriesId}`;
+    const pending = loadingSeries.get(key);
+    if (pending) return pending;
+    const current = () => loadingSeries.get(key) === load;
+    const load: Promise<SeriesFiles> = (async () => {
+      const byPath = new Map<string, number>();
+      for (const file of await clientFor(instance).episodeFiles(seriesId)) {
+        if (file.path) byPath.set(await toLocal(instance, file.path), file.id);
+      }
+      return { builtAt: now(), byPath };
+    })()
+      .catch((error: unknown) => {
+        log.warn('sonarr episode file lookup failed', { instance: instance.name, seriesId, error });
+        return { builtAt: now(), byPath: seriesFiles.get(key)?.byPath ?? new Map<string, number>() };
+      })
+      .then((files) => {
+        if (current()) storeSeriesFiles(key, files);
+        return files;
+      })
+      .finally(() => {
+        if (current()) loadingSeries.delete(key);
+      });
+    loadingSeries.set(key, load);
+    return load;
   };
 
   const fileIdFor = async (instance: ArrInstance, entry: IndexEntry, localPath: string): Promise<number | null> => {
     if (instance.kind === 'radarr') return entry.filePath === localPath ? entry.fileId : null;
-    try {
-      for (const file of await clientFor(instance).episodeFiles(entry.itemId)) {
-        if (file.path && (await toLocal(instance, file.path)) === localPath) return file.id;
-      }
-    } catch (error) {
-      log.warn('sonarr episode file lookup failed', { instance: instance.name, error });
-    }
-    return null;
+    let files = seriesFiles.get(`${instance.id}:${entry.itemId}`);
+    if (!files || now() - files.builtAt >= INDEX_TTL_MS) files = await loadSeriesFiles(instance, entry.itemId);
+    const fileId = files.byPath.get(localPath);
+    if (fileId !== undefined || now() - files.builtAt < INDEX_MISS_REFRESH_MS) return fileId ?? null;
+    return (await loadSeriesFiles(instance, entry.itemId)).byPath.get(localPath) ?? null;
   };
 
   const validateInput = (input: ArrInstanceInput, existing: ArrInstance | null) => {
@@ -287,15 +404,8 @@ export function createArrService(ctx: AppContext, deps: IntegrationDeps = {}): A
     },
     findByPath: async (localPath) => {
       const instances = listArrInstances(ctx.db).filter((instance) => instance.enabled);
-      let best: { instance: ArrInstance; entry: IndexEntry } | null = null;
-      for (const instance of instances) {
-        try {
-          const entry = await findInInstance(instance, localPath);
-          if (entry && (!best || entry.folder.length > best.entry.folder.length)) best = { instance, entry };
-        } catch (error) {
-          log.warn('arr lookup by path failed', { instance: instance.name, path: localPath, error });
-        }
-      }
+      const best =
+        (await bestHit(instances, localPath, indexFor)) ?? (await bestHit(instances, localPath, refreshAfterMiss));
       if (!best) return null;
       const { instance, entry } = best;
       return {
@@ -317,11 +427,18 @@ export function createArrService(ctx: AppContext, deps: IntegrationDeps = {}): A
       await clientFor(instance).command(command);
       log.info('rescan requested', { instance: instance.name, command: command.name, itemId: ref.itemId });
     },
-    importMovieFolder: async (instanceId, localPath) => {
+    importMovieFolder: async (instanceId, localPath, movieId) => {
       const instance = requireInstance(instanceId, 'radarr');
+      const client = clientFor(instance);
       const path = await ctx.services.pathMappings.toRemote('radarr', localPath, instanceId);
-      await clientFor(instance).command({ name: 'DownloadedMoviesScan', path });
-      log.info('Radarr import requested', { instance: instance.name, path });
+      const movie = await client.movie(movieId);
+      if (movie.path && samePath(movie.path, path)) {
+        await client.command({ name: 'RescanMovie', movieId });
+        log.info('Radarr rescan of the movie folder requested', { instance: instance.name, movieId, path });
+        return;
+      }
+      await client.command({ name: 'DownloadedMoviesScan', path });
+      log.info('Radarr import requested', { instance: instance.name, movieId, path });
     },
     defaultRadarr: async () => {
       const first = listArrInstances(ctx.db).find((instance) => instance.kind === 'radarr' && instance.enabled);

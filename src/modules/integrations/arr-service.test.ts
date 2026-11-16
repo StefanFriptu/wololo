@@ -45,6 +45,7 @@ beforeEach(() => {
       { title: 'Broken', year: 2000, tmdbId: 0 },
     ],
     'GET /api/v3/movie/lookup/tmdb': () => ({ id: 0, title: 'Heat', year: 1995, tmdbId: 949 }),
+    'GET /api/v3/movie/12': () => ({ id: 12, title: 'Jamon Jamon', path: '/vault/movies/Jamon Jamon (1992)/' }),
     'POST /api/v3/movie': () => ({ id: 99, title: 'New' }),
     'POST /api/v3/command': () => ({ id: 1, name: 'x', status: 'queued' }),
   });
@@ -399,6 +400,32 @@ test('arr.findByPath - Sonarr series with episode file id', async () => {
   expect(sonarr.requestsTo('GET /api/v3/episodefile')[0]?.query.get('seriesId')).toBe('5');
 });
 
+test('arr.findByPath - episodes of one series share one episode file request', async () => {
+  await addSonarr();
+  await t.ctx.services.pathMappings.create({ scope: 'sonarr', remotePath: '/vault/tv', localPath: '/data/tv' });
+  const found = await Promise.all([
+    t.ctx.services.arr.findByPath('/data/tv/Show/Season 01/e1.mkv'),
+    t.ctx.services.arr.findByPath('/data/tv/Show/Season 01/e2.mkv'),
+  ]);
+  expect(await t.ctx.services.arr.findByPath('/data/tv/Show/Season 01/e1.mkv')).toMatchObject({ ref: { fileId: 50 } });
+  expect(found.map((result) => result?.ref.fileId)).toEqual([50, 51]);
+  expect(sonarr.requestsTo('GET /api/v3/episodefile')).toHaveLength(1);
+});
+
+test('arr.findByPath - an unknown episode refetches the series files only after the miss interval', async () => {
+  let clock = 0;
+  const service = createArrService(t.ctx, { now: () => clock });
+  await addSonarr();
+  await t.ctx.services.pathMappings.create({ scope: 'sonarr', remotePath: '/vault/tv', localPath: '/data/tv' });
+  expect((await service.findByPath('/data/tv/Show/Season 01/e3.mkv'))?.ref.fileId).toBeNull();
+  expect((await service.findByPath('/data/tv/Show/Season 01/e3.mkv'))?.ref.fileId).toBeNull();
+  expect(sonarr.requestsTo('GET /api/v3/episodefile')).toHaveLength(1);
+  sonarr.on('GET /api/v3/episodefile', () => [{ id: 52, path: '/vault/tv/Show/Season 01/e3.mkv' }]);
+  clock = 31_000;
+  expect((await service.findByPath('/data/tv/Show/Season 01/e3.mkv'))?.ref.fileId).toBe(52);
+  expect(sonarr.requestsTo('GET /api/v3/episodefile')).toHaveLength(2);
+});
+
 test('arr.findByPath - unknown path is null, a failing instance is skipped', async () => {
   await addRadarr();
   await addSonarr();
@@ -426,13 +453,64 @@ test('arr.findByPath - concurrent lookups share one library download', async () 
   expect(radarr.requestsTo('GET /api/v3/movie')).toHaveLength(1);
 });
 
-test('arr.findByPath - a failed build is not cached', async () => {
+test('arr.findByPath - does not refetch the library during back-off after a failure', async () => {
+  let clock = 0;
+  const service = createArrService(t.ctx, { now: () => clock });
   await addRadarr();
   await mapRadarr();
   radarr.on('GET /api/v3/movie', () => new Response('down', { status: 503 }));
-  expect(await t.ctx.services.arr.findByPath('/data/movies/Heat (1995)/Heat.mkv')).toBeNull();
+  for (let file = 0; file < 5; file++) {
+    expect(await service.findByPath(`/data/movies/Heat (1995)/${file}.mkv`)).toBeNull();
+    clock += 1_000;
+  }
+  expect(radarr.requestsTo('GET /api/v3/movie')).toHaveLength(1);
+});
+
+test('arr.findByPath - retries after the back-off elapses and doubles it on another failure', async () => {
+  let clock = 0;
+  const service = createArrService(t.ctx, { now: () => clock });
+  await addRadarr();
+  await mapRadarr();
+  radarr.on('GET /api/v3/movie', () => new Response('down', { status: 503 }));
+  await service.findByPath('/data/movies/Heat (1995)/Heat.mkv');
+  clock = 60_000;
+  await service.findByPath('/data/movies/Heat (1995)/Heat.mkv');
+  expect(radarr.requestsTo('GET /api/v3/movie')).toHaveLength(2);
+  clock = 179_000;
+  await service.findByPath('/data/movies/Heat (1995)/Heat.mkv');
+  expect(radarr.requestsTo('GET /api/v3/movie')).toHaveLength(2);
   radarr.on('GET /api/v3/movie', () => [{ id: 11, title: 'Heat', path: '/vault/movies/Heat (1995)' }]);
-  expect((await t.ctx.services.arr.findByPath('/data/movies/Heat (1995)/Heat.mkv'))?.ref.itemId).toBe(11);
+  clock = 180_000;
+  expect((await service.findByPath('/data/movies/Heat (1995)/Heat.mkv'))?.ref.itemId).toBe(11);
+  expect(radarr.requestsTo('GET /api/v3/movie')).toHaveLength(3);
+});
+
+test('arr.findByPath - serves the stale index when a refresh fails', async () => {
+  let clock = 0;
+  const service = createArrService(t.ctx, { now: () => clock });
+  await addRadarr();
+  await mapRadarr();
+  await service.findByPath('/data/movies/Heat (1995)/Heat.mkv');
+  radarr.on('GET /api/v3/movie', () => new Response('down', { status: 503 }));
+  clock = 6 * 60_000;
+  expect((await service.findByPath('/data/movies/Heat (1995)/Heat.mkv'))?.ref.itemId).toBe(11);
+  expect((await service.findByPath('/data/movies/Jamon Jamon (1992)/a.mkv'))?.ref.itemId).toBe(12);
+  expect(radarr.requestsTo('GET /api/v3/movie')).toHaveLength(2);
+});
+
+test('arr.findByPath - a hit in one instance does not refresh the other instance index', async () => {
+  let clock = 0;
+  const service = createArrService(t.ctx, { now: () => clock });
+  await addRadarr();
+  await addSonarr();
+  await mapRadarr();
+  await t.ctx.services.pathMappings.create({ scope: 'sonarr', remotePath: '/vault/tv', localPath: '/data/tv' });
+  for (let minute = 0; minute < 4; minute++) {
+    clock = minute * 60_000;
+    expect((await service.findByPath('/data/tv/Show/Season 01/e1.mkv'))?.ref.kind).toBe('sonarr');
+  }
+  expect(radarr.requestsTo('GET /api/v3/movie')).toHaveLength(1);
+  expect(sonarr.requestsTo('GET /api/v3/series')).toHaveLength(1);
 });
 
 test('arr.findByPath - a miss refreshes a stale index once', async () => {
@@ -469,12 +547,19 @@ test('arr.rescan - kind mismatch is unprocessable', async () => {
   ).rejects.toMatchObject({ code: 'unprocessable' });
 });
 
-test('arr.importMovieFolder - DownloadedMoviesScan with the remote path', async () => {
+test('arr.importMovieFolder - the movie own folder is rescanned, not scanned as a download', async () => {
   const created = await addRadarr();
   await mapRadarr();
-  await t.ctx.services.arr.importMovieFolder(created.id, '/data/movies/Jamon Jamon (1992)');
+  await t.ctx.services.arr.importMovieFolder(created.id, '/data/movies/Jamon Jamon (1992)', 12);
+  expect(jsonBody(radarr, 'POST /api/v3/command')).toEqual([{ name: 'RescanMovie', movieId: 12 }]);
+});
+
+test('arr.importMovieFolder - another folder is a DownloadedMoviesScan with the remote path', async () => {
+  const created = await addRadarr();
+  await mapRadarr();
+  await t.ctx.services.arr.importMovieFolder(created.id, '/data/movies/Jamon Jamon (1992) Remux', 12);
   expect(jsonBody(radarr, 'POST /api/v3/command')).toEqual([
-    { name: 'DownloadedMoviesScan', path: '/vault/movies/Jamon Jamon (1992)' },
+    { name: 'DownloadedMoviesScan', path: '/vault/movies/Jamon Jamon (1992) Remux' },
   ]);
 });
 

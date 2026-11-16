@@ -347,7 +347,7 @@ export function createBdmvExecutor(
         });
         run.log.line(`added ${plan.movie.title} to Radarr (movie ${movieId})`);
       }
-      await services.arr.importMovieFolder(plan.radarrInstanceId, movieDir);
+      await services.arr.importMovieFolder(plan.radarrInstanceId, movieDir, movieId);
       await services.jobs.addHistory({
         event: 'imported',
         path: main.title.outputPath,

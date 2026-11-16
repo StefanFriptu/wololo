@@ -102,7 +102,7 @@ export function createArrClient(options: ArrClientOptions) {
   const call = <T extends z.ZodType>(
     path: string,
     schema: T,
-    init: { method?: string; query?: Record<string, string>; body?: unknown } = {},
+    init: { method?: string; query?: Record<string, string>; body?: unknown; timeoutMs?: number } = {},
   ) => {
     const url = new URL(`${base}/api/v3/${path}`);
     for (const [key, value] of Object.entries(init.query ?? {})) url.searchParams.set(key, value);
@@ -116,7 +116,7 @@ export function createArrClient(options: ArrClientOptions) {
         headers,
         body: init.body === undefined ? undefined : JSON.stringify(init.body),
         fetch: options.fetch,
-        timeoutMs: options.timeoutMs,
+        timeoutMs: init.timeoutMs ?? options.timeoutMs,
       },
       schema,
     );
@@ -129,8 +129,9 @@ export function createArrClient(options: ArrClientOptions) {
     qualityProfiles: () => call('qualityprofile', z.array(qualityProfileSchema)),
     lookupMovies: (term: string) => call('movie/lookup', z.array(lookupMovieSchema), { query: { term } }),
     lookupTmdb: (tmdbId: number) => call('movie/lookup/tmdb', lookupMovieSchema, { query: { tmdbId: String(tmdbId) } }),
-    movies: () => call('movie', z.array(movieSchema)),
-    series: () => call('series', z.array(seriesSchema)),
+    movies: (timeoutMs?: number) => call('movie', z.array(movieSchema), { timeoutMs }),
+    movie: (id: number) => call(`movie/${id}`, movieSchema),
+    series: (timeoutMs?: number) => call('series', z.array(seriesSchema), { timeoutMs }),
     episodeFiles: (seriesId: number) =>
       call('episodefile', z.array(episodeFileSchema), { query: { seriesId: String(seriesId) } }),
     /** GET /api/v3/history?downloadId= (import events only); downloadId is the client's hash, Radarr/Sonarr store it upper case. */

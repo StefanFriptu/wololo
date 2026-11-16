@@ -394,7 +394,7 @@ test('bdmv.execute - encodes, muxes, verifies, renames, imports and records the 
 
   expect(s.calls.addMovie?.[0]?.[0]).toBe(7);
   expect(s.calls.addMovie?.[0]?.[1]).toMatchObject({ tmdbId: 4517, rootFolderPath: s.root, qualityProfileId: null });
-  expect(s.calls.importMovieFolder).toEqual([[7, dirname(output)]]);
+  expect(s.calls.importMovieFolder).toEqual([[7, dirname(output), 99]]);
   expect(s.calls.recordJobResult).toEqual([
     [s.mediaFileId, { status: 'compatible', reason: `converted to ${output}`, lastJobId: 31 }],
   ]);
@@ -582,7 +582,7 @@ test('bdmv.execute - two editions: one probe, plan, mux and verification per tit
   expect(fake.verifyRequests.map((request) => request.expectedDurationSec)).toEqual([5706, 5706]);
   expect(existsSync(extended)).toBe(true);
   expect(existsSync(theatrical)).toBe(true);
-  expect(s.calls.importMovieFolder).toEqual([[7, folder]]);
+  expect(s.calls.importMovieFolder).toEqual([[7, folder, 99]]);
   expect(s.calls.addHistory?.[0]?.[0]).toMatchObject({ event: 'imported', path: extended });
   expect(outcome).toMatchObject({
     outputPath: extended,

@@ -70,8 +70,12 @@ export interface ArrService {
   findByPath(localPath: string): Promise<{ ref: ArrItemRef; originalLanguage: string | null } | null>;
   /** POST /api/v3/command {"name":"RescanMovie","movieId"} or {"name":"RescanSeries","seriesId"}. */
   rescan(ref: ArrItemRef): Promise<void>;
-  /** Radarr POST /api/v3/command {"name":"DownloadedMoviesScan","path":<remote path>} so Radarr imports a BDMV output. */
-  importMovieFolder(instanceId: number, localPath: string): Promise<void>;
+  /**
+   * Makes Radarr import a BDMV output folder. Radarr refuses DownloadedMoviesScan on a folder that is a movie's own
+   * path, so when the folder is movie movieId's path this sends RescanMovie instead; otherwise POST /api/v3/command
+   * {"name":"DownloadedMoviesScan","path":<remote path>} and Radarr moves the file into the movie's folder.
+   */
+  importMovieFolder(instanceId: number, localPath: string, movieId: number): Promise<void>;
   /** First enabled Radarr instance, used by BDMV when the library has none assigned. */
   defaultRadarr(): Promise<ArrInstance | null>;
 }
