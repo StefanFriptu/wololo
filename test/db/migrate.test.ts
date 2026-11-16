@@ -137,6 +137,7 @@ test('runMigrations - the pre-migration copy and its folder are private', () => 
 });
 
 const OLD_COPIES = [1, 2, 3, 4].map((day) => `pre-migration-2020-01-0${day}T00-00-00-000Z.db`);
+const NEWEST_OLD_COPY = 'pre-migration-2020-01-04T00-00-00-000Z.db';
 
 function upgradeWithOldCopies(second: string): { backupDir: string; run: () => void } {
   const work = mkdtempSync(join(tmpdir(), 'wololo-db-'));
@@ -171,8 +172,8 @@ test('runMigrations - keeps only the newest two pre-migration copies after a suc
   const left = readdirSync(backupDir).sort();
   expect(left).toHaveLength(3);
   expect(left).toContain('notes.txt');
-  expect(left).toContain(OLD_COPIES[3]);
-  expect(left.filter((name) => name.startsWith('pre-migration-2020'))).toEqual([OLD_COPIES[3]]);
+  expect(left).toContain(NEWEST_OLD_COPY);
+  expect(left.filter((name) => name.startsWith('pre-migration-2020'))).toEqual([NEWEST_OLD_COPY]);
 });
 
 test('runMigrations - a failed upgrade deletes no pre-migration copy', () => {
