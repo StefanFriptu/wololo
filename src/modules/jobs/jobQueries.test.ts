@@ -2,13 +2,18 @@ import type { SQLQueryBindings } from 'bun:sqlite';
 import { afterEach, expect, test } from 'bun:test';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
 import { insertJob } from '../../../test/helpers/seed.ts';
+import type { JobRow, NewJobRow } from '../../db/schema.ts';
 import {
   finishedJobIdsBefore,
   finishedJobIdsBeforeQuery,
+  getJobRow,
   isTempPathReferenced,
+  listJobRows,
   prunableJobIdsQuery,
+  queueRows,
   tempPathReferencedQuery,
 } from './jobQueries.ts';
+import { toJobSummary } from './mappers.ts';
 
 let t: TestContext | null = null;
 afterEach(() => {
@@ -81,4 +86,37 @@ test('recycle_bin - the media file foreign key action looks rows up by index', (
   const plan = queryPlan(t, 'SELECT 1 FROM recycle_bin WHERE media_file_id = ?', [1]);
 
   expect(plan).toEqual([expect.stringContaining('recycle_bin_media_file_idx')]);
+});
+
+test('queueRows and listJobRows - summaries match the ones built from full rows', () => {
+  t = createTestContext();
+  const { db } = t.ctx;
+  const heavy = {
+    plan: { steps: [] },
+    bdmvPlan: { playlists: [] },
+    beforeStreams: [],
+    afterStreams: [],
+    lostFeatures: ['dts-x'],
+    verification: { ok: true },
+  } as unknown as Partial<NewJobRow>;
+  const running = insertJob(db, { sourcePath: '/r', state: 'running', progress: 0.4, speed: 2, etaSec: 9, ...heavy });
+  const low = insertJob(db, { sourcePath: '/low', state: 'queued', priority: 0, ...heavy });
+  const high = insertJob(db, { sourcePath: '/high', state: 'queued', priority: 5, error: 'x', attempts: 2, ...heavy });
+  const done = insertJob(db, { sourcePath: '/done', state: 'completed', finishedAt: '2026-01-01T00:00:00.000Z' });
+  const summaryOf = (id: number) => toJobSummary(getJobRow(db, id) as JobRow);
+
+  const queue = queueRows(db, 10);
+  expect(queue.map((row) => row.id)).toEqual([running.id, high.id, low.id]);
+  expect(JSON.stringify(queue.map((row) => toJobSummary(row)))).toBe(
+    JSON.stringify([running, high, low].map((row) => summaryOf(row.id))),
+  );
+  expect(queueRows(db, 1).map((row) => row.id)).toEqual([running.id, high.id]);
+
+  const page = listJobRows(db, {}, { page: 1, pageSize: 3, sortDir: 'desc' });
+  expect(page.total).toBe(4);
+  expect(page.rows.map((row) => row.id)).toEqual([done.id, high.id, low.id]);
+  expect(JSON.stringify(page.rows.map((row) => toJobSummary(row)))).toBe(
+    JSON.stringify([done, high, low].map((row) => summaryOf(row.id))),
+  );
+  expect(Object.keys(page.rows[0] ?? {})).not.toContain('plan');
 });

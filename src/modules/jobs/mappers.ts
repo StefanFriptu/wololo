@@ -1,5 +1,6 @@
 import type { JobHistoryRow, JobRow, RecycleBinRow } from '../../db/schema.ts';
 import type { HistoryEntry, JobDetail, JobSummary, RecycleBinEntry } from '../../shared/domain.ts';
+import type { JobSummaryRow } from './jobQueries.ts';
 
 export interface LiveProgress {
   progress: number;
@@ -7,7 +8,7 @@ export interface LiveProgress {
   etaSec: number | null;
 }
 
-export function toJobSummary(row: JobRow, live?: LiveProgress): JobSummary {
+export function toJobSummary(row: JobSummaryRow, live?: LiveProgress): JobSummary {
   return {
     id: row.id,
     type: row.type,

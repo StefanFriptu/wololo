@@ -24,6 +24,7 @@ import {
   idleJobsWithTempPath,
   insertJobRow,
   isTempPathReferenced,
+  type JobSummaryRow,
   jobsInState,
   listHistoryRows,
   listJobRows,
@@ -97,7 +98,7 @@ export function createJobsService(ctx: AppContext): JobsService {
     executorFor: (type) => (type === 'audio' ? audioExecutor : ctx.services.bdmv.execute),
   });
 
-  const summary = (row: JobRow): JobSummary => toJobSummary(row, worker.live(row.id));
+  const summary = (row: JobSummaryRow): JobSummary => toJobSummary(row, worker.live(row.id));
   const mustGet = (id: number): JobRow => {
     const row = getJobRow(db, id);
     if (!row) throw notFound(`job ${id}`);
