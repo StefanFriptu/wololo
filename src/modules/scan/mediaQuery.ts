@@ -2,8 +2,8 @@ import { and, asc, count, desc, eq, gt, inArray, type SQL, sql, sum } from 'driz
 import { chunk, IN_LIST_CHUNK_SIZE } from '../../core/chunk.ts';
 import type { Db } from '../../db/client.ts';
 import { type JobRow, jobs, libraryProfiles, libraryRoots, mediaFiles } from '../../db/schema.ts';
-import type { MediaFileSummary, MediaQuery, MediaSortKey } from '../../shared/api-types.ts';
-import { ACTIVE_JOB_STATES, type JobSummary, type MediaFileStatus } from '../../shared/domain.ts';
+import type { MediaFileSummary, MediaQuery } from '../../shared/api-types.ts';
+import { ACTIVE_JOB_STATES, type JobSummary, type MediaFileStatus, type MediaSortKey } from '../../shared/domain.ts';
 import { DEFAULT_PAGE_SIZE } from '../../shared/paging.ts';
 import { relativeToRoot } from './paths.ts';
 import { parseKindList, parseStatusList } from './schemas.ts';
