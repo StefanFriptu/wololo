@@ -1,4 +1,4 @@
-import { constants, existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { constants, existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { access } from 'node:fs/promises';
 import { release, type } from 'node:os';
 import { join } from 'node:path';
@@ -6,7 +6,7 @@ import type { AppContext } from '../../app/context.ts';
 import type { SystemService } from '../../contracts/platform.ts';
 import { freeBytes } from '../../core/freeBytes.ts';
 import { findExecutable, runProcess } from '../../core/process.ts';
-import { MIGRATIONS_DIR } from '../../db/client.ts';
+import { latestJournalMillis, MIGRATIONS_DIR } from '../../db/client.ts';
 import type { SystemStatus } from '../../shared/api-types.ts';
 import { createBackupStore } from './backups.ts';
 import { existingJobIdsQuery } from './existingJobIdsQuery.ts';
@@ -21,13 +21,6 @@ import { withTimeout } from './withTimeout.ts';
 
 const TOOL_CACHE_MS = 5 * 60 * 1000;
 export const RESTART_DELAY_MS = 250;
-
-function latestMigrationMillis(): number {
-  const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf8')) as {
-    entries: { when: number }[];
-  };
-  return Math.max(0, ...journal.entries.map((entry) => entry.when));
-}
 
 function fileSize(path: string): number {
   try {
@@ -60,7 +53,7 @@ export function createSystemService(ctx: AppContext): SystemService {
     sqlite: ctx.dbHandle.sqlite,
     log,
     now: () => new Date(),
-    latestMigrationMillis,
+    latestMigrationMillis: () => latestJournalMillis(MIGRATIONS_DIR),
   });
 
   let toolCache: { at: number; report: Promise<ToolReport> } | null = null;
