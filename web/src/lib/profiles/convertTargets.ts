@@ -1,3 +1,4 @@
+import { nameById } from '#lib/nameById.ts';
 import type { DeviceProfile } from '#lib/shared.ts';
 
 export interface ConvertTarget {
@@ -16,7 +17,7 @@ export function convertTargets(
   if (unique.length < 2) return [];
   const named = unique.map((id) => ({
     profileId: id,
-    label: profiles.find((profile) => profile.id === id)?.name ?? `#${id}`,
+    label: nameById(profiles, id),
   }));
   return [STRICTEST_TARGET, ...named];
 }

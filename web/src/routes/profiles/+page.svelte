@@ -7,6 +7,7 @@
   import Modal from '#lib/components/Modal.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import PlayerSetup from '#lib/components/PlayerSetup.svelte';
+  import { nameById } from '#lib/nameById.ts';
   import { href } from '#lib/paths.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import type { ProfileWithUsage } from '#lib/shared.ts';
@@ -34,7 +35,7 @@
   }
 
   function libraryNames(ids: number[]): string {
-    const names = ids.map((id) => libraries.data?.find((library) => library.id === id)?.name ?? `#${id}`);
+    const names = ids.map((id) => nameById(libraries.data, id));
     return names.join(', ');
   }
 

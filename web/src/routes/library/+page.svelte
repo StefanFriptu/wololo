@@ -16,6 +16,7 @@
   import { formatBytes } from '#lib/format/formatBytes.ts';
   import { formatDuration } from '#lib/format/formatDuration.ts';
   import { formatRelativeTime } from '#lib/format/formatRelativeTime.ts';
+  import { parseOptionalNumber } from '#lib/parseOptionalNumber.ts';
   import { MEDIA_KIND_LABELS, MEDIA_STATUS_LABELS, MEDIA_STATUS_TONES } from '#lib/labels.ts';
   import type { MediaFilters } from '#lib/library/MediaFilters.ts';
   import { PAGE_SIZES } from '#lib/library/pageSizes.ts';
@@ -133,10 +134,6 @@
   function ariaSort(key: MediaSortKey): 'ascending' | 'descending' | 'none' {
     if (filters.sortKey !== key) return 'none';
     return filters.sortDir === 'asc' ? 'ascending' : 'descending';
-  }
-
-  function numberOrUndefined(value: string): number | undefined {
-    return value === '' ? undefined : Number(value);
   }
 
   const KIND_FILTERS = Object.keys(MEDIA_KIND_FILTER_LABELS) as MediaKindFilter[];
@@ -265,7 +262,7 @@
       <span>Library</span>
       <select
         value={filters.libraryId ?? ''}
-        onchange={(event) => update({ libraryId: numberOrUndefined(event.currentTarget.value) })}
+        onchange={(event) => update({ libraryId: parseOptionalNumber(event.currentTarget.value) })}
       >
         <option value="">All libraries</option>
         {#each libraries.data ?? [] as library (library.id)}
@@ -277,7 +274,7 @@
       <span>Profile</span>
       <select
         value={filters.profileId ?? ''}
-        onchange={(event) => update({ profileId: numberOrUndefined(event.currentTarget.value) })}
+        onchange={(event) => update({ profileId: parseOptionalNumber(event.currentTarget.value) })}
       >
         <option value="">Any profile</option>
         {#each profiles.data ?? [] as profile (profile.id)}

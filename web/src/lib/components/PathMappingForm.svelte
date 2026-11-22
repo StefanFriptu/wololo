@@ -3,6 +3,7 @@
   import { api } from '#lib/api/client.ts';
   import { attemptOk } from '#lib/attempt.ts';
   import Modal from '#lib/components/Modal.svelte';
+  import { parseOptionalNumber } from '#lib/parseOptionalNumber.ts';
   import { PATH_SCOPE_LABELS } from '#lib/labels.ts';
   import type { ArrInstance, PathMapping, PathMappingInput, PathMappingScope } from '#lib/shared.ts';
 
@@ -68,7 +69,7 @@
           <select
             id="{uid}-instance"
             value={form.instanceId ?? ''}
-            onchange={(event) => (form.instanceId = event.currentTarget.value === '' ? null : Number(event.currentTarget.value))}
+            onchange={(event) => (form.instanceId = parseOptionalNumber(event.currentTarget.value) ?? null)}
           >
             <option value="">Every {PATH_SCOPE_LABELS[form.scope]} instance</option>
             {#each scopedInstances as instance (instance.id)}<option value={instance.id}>{instance.name}</option>{/each}

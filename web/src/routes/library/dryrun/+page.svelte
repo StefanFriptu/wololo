@@ -11,6 +11,7 @@
   import { formatDateTime } from '#lib/format/formatDateTime.ts';
   import { formatEstimate } from '#lib/format/formatEstimate.ts';
   import { dryRunGroupQuery } from '#lib/library/dryRunGroupQuery.ts';
+  import { parseOptionalNumber } from '#lib/parseOptionalNumber.ts';
   import { href } from '#lib/paths.ts';
   import { convertTargets } from '#lib/profiles/convertTargets.ts';
   import { Resource } from '#lib/resource.svelte.ts';
@@ -45,8 +46,6 @@
   );
   $effect(() => live.onReconnect(() => report.load({ silent: true })));
 
-  const toNumber = (value: string): number | undefined => (value === '' ? undefined : Number(value));
-
   let convertOpen = $state(false);
 
   const scopeLibraries = $derived((libraries.data ?? []).filter((item) => libraryId === undefined || item.id === libraryId));
@@ -75,14 +74,14 @@
 <div class="toolbar selectors">
   <label>
     <span>Library</span>
-    <select value={libraryId ?? ''} onchange={(event) => (libraryId = toNumber(event.currentTarget.value))}>
+    <select value={libraryId ?? ''} onchange={(event) => (libraryId = parseOptionalNumber(event.currentTarget.value))}>
       <option value="">All libraries</option>
       {#each libraries.data ?? [] as library (library.id)}<option value={library.id}>{library.name}</option>{/each}
     </select>
   </label>
   <label>
     <span>Profile</span>
-    <select value={profileId ?? ''} onchange={(event) => (profileId = toNumber(event.currentTarget.value))}>
+    <select value={profileId ?? ''} onchange={(event) => (profileId = parseOptionalNumber(event.currentTarget.value))}>
       <option value="">Every assigned profile</option>
       {#each profiles.data ?? [] as profile (profile.id)}<option value={profile.id}>{profile.name}</option>{/each}
     </select>

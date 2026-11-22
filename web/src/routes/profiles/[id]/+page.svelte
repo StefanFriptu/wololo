@@ -8,6 +8,7 @@
   import CodecPicker from '#lib/components/CodecPicker.svelte';
   import Icon from '#lib/components/Icon.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
+  import { nameById } from '#lib/nameById.ts';
   import { href } from '#lib/paths.ts';
   import { audioProblems } from '#lib/profiles/audioLimits.ts';
   import { Resource } from '#lib/resource.svelte.ts';
@@ -147,7 +148,7 @@
     {#if existing && existing.libraryIds.length > 0}
       <p class="muted">
         Used by {existing.libraryIds
-          .map((id) => loaded.libraries.find((library) => library.id === id)?.name ?? `#${id}`)
+          .map((id) => nameById(loaded.libraries, id))
           .join(', ')}. Saving changes re-checks only the files these libraries hold.
       </p>
     {/if}
