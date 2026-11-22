@@ -73,12 +73,8 @@ async function walkFolder(root: string, relative = '', depth = 0): Promise<DiscE
 
 export async function openDisc(path: string, kind: DiscKind, isoReader: SevenZipIsoReader): Promise<DiscSource> {
   if (kind === 'iso') {
-    return {
-      kind,
-      path,
-      entries: await isoReader.entries(path),
-      readFiles: (paths) => isoReader.readFiles(path, paths),
-    };
+    const entries = await isoReader.entries(path);
+    return { kind, path, entries, readFiles: (paths) => isoReader.readFiles(path, paths, entries) };
   }
   const entries = await walkFolder(path);
   return {

@@ -1,9 +1,20 @@
 import { afterAll, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { writeDiscFolder } from '../../../test/fixtures/bdmv/disc.ts';
 import { writeMpls } from '../../../test/fixtures/bdmv/writers.ts';
+import { runResult } from '../../../test/helpers/runResult.ts';
+import type { RunOptions, RunResult } from '../../core/process.ts';
 import { analyzeDisc, clipBytes, detectDisc, openDisc, parseDiscTitle } from './disc.ts';
 import { createIsoReader, type DiscEntry } from './iso.ts';
 
@@ -169,4 +180,43 @@ test('clipBytes - each clip once per playlist, shared clips once per title, angl
   expect(clipBytes(entries, [playlist], false)).toBe(100);
   expect(clipBytes(entries, [playlist], true)).toBe(110);
   expect(clipBytes(entries, [playlist, { ...playlist, name: '00002.mpls' }], false)).toBe(200);
+});
+
+function sevenZipOverFolder(root: string, calls: string[]) {
+  return async (options: RunOptions): Promise<RunResult> => {
+    calls.push(options.args[0] ?? '');
+    if (options.args[0] === 'l') {
+      const items = readdirSync(root, { recursive: true, encoding: 'utf8' }).map((path) => {
+        const info = statSync(join(root, path));
+        return `Path = ${path}\nFolder = ${info.isDirectory() ? '+' : '-'}\nSize = ${info.isDirectory() ? 0 : info.size}\n`;
+      });
+      return runResult({ stdout: `----------\n${items.join('\n')}` });
+    }
+    const dest = options.args.find((arg) => arg.startsWith('-o'))?.slice(2) ?? '';
+    const list = options.args.find((arg) => arg.startsWith('@'))?.slice(1) ?? '';
+    for (const path of readFileSync(list, 'utf8').split('\n').filter(Boolean)) {
+      mkdirSync(dirname(join(dest, path)), { recursive: true });
+      copyFileSync(join(root, path), join(dest, path));
+    }
+    return runResult();
+  };
+}
+
+test('analyzeDisc - an iso is listed once and gives the same analysis as the folder', async () => {
+  const disc = writeDiscFolder(join(scratch, 'iso-as-folder'), {
+    playlists: { '00800.mpls': FEATURE, '00999.mpls': FEATURE },
+    clips: { '00001': { streams: [{ pid: 0x1100, codingType: 0x86, language: 'spa' }], streamBytes: 4000 } },
+    files: {
+      'BDMV/META/DL/bdmt_eng.xml': '<di:discinfo><di:title><di:name>JAMON JAMON</di:name></di:title></di:discinfo>',
+    },
+  });
+  const options = { ambiguityPercent: 5, extrasMinMinutes: 2 };
+  const calls: string[] = [];
+  const iso = createIsoReader({ sevenZip: '7z', run: sevenZipOverFolder(disc, calls), tempRoot: scratch });
+  const fromIso = await analyzeDisc(await openDisc('/x.iso', 'iso', iso), options);
+  const fromFolder = await analyzeDisc(await openDisc(disc, 'bdmv', noIso), options);
+  expect({ ...fromIso, source: null }).toEqual({ ...fromFolder, source: null });
+  expect(fromIso.volumeLabel).toBe('JAMON JAMON');
+  expect(calls.filter((call) => call === 'l')).toHaveLength(1);
+  expect(calls.filter((call) => call === 'x')).toHaveLength(3);
 });

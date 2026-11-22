@@ -171,6 +171,24 @@ test('createIsoReader - extractForMux copies the playlist and its clips (angles 
   rmSync(dest, { recursive: true });
 });
 
+test('createIsoReader - extractForMux lists once, reads the playlist and extracts once', async () => {
+  const calls: string[][] = [];
+  const reader = createIsoReader({ sevenZip: '7z', run: fakeSevenZip(calls), tempRoot: scratch });
+  const dest = join(scratch, 'mux-calls');
+  await reader.extractForMux('/x.iso', '00800.mpls', dest, new AbortController().signal);
+  expect(calls.map((args) => args[0])).toEqual(['l', 'x', 'x']);
+  rmSync(dest, { recursive: true });
+});
+
+test('createIsoReader - readFiles with a known listing does not list again', async () => {
+  const calls: string[][] = [];
+  const reader = createIsoReader({ sevenZip: '7z', run: fakeSevenZip(calls), tempRoot: scratch });
+  const listing = await reader.entries('/x.iso');
+  const files = await reader.readFiles('/x.iso', ['bdmv/index.bdmv', 'BDMV/missing'], listing);
+  expect([...files.keys()]).toEqual(['bdmv/index.bdmv']);
+  expect(calls.map((args) => args[0])).toEqual(['l', 'x']);
+});
+
 test('createIsoReader - extractForMux of an unknown playlist is not_found', async () => {
   const reader = createIsoReader({ sevenZip: '7z', run: fakeSevenZip([]), tempRoot: scratch });
   await expect(reader.extractForMux('/x.iso', '00999.mpls', scratch, new AbortController().signal)).rejects.toThrow(
