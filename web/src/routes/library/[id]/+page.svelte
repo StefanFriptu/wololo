@@ -3,6 +3,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { api } from '#lib/api/client.ts';
+  import { errorMessage } from '#lib/api/errorMessage.ts';
   import { live } from '#lib/api/live.svelte.ts';
   import Async from '#lib/components/Async.svelte';
   import Badge from '#lib/components/Badge.svelte';
@@ -27,9 +28,18 @@
     PATH_SCOPE_LABELS,
     PLAN_ACTION_LABELS,
     PLAN_ACTION_TONES,
+    REMOVAL_CHOICE_LABELS,
+    TORRENT_REMOVAL_STATE_LABELS,
   } from '#lib/labels.ts';
   import { convertedByJob } from '#lib/library/convertedByJob.ts';
   import { fileProcessAction } from '#lib/library/fileProcessAction.ts';
+  import {
+    initialRemovalChoice,
+    REMOVAL_CHOICES,
+    type RemovalChoice,
+    removalChange,
+    torrentProgress,
+  } from '#lib/library/torrentRemoval.ts';
   import { nameById } from '#lib/nameById.ts';
   import { href } from '#lib/paths.ts';
   import { convertTargets } from '#lib/profiles/convertTargets.ts';
@@ -49,6 +59,7 @@
     api('GET /api/v1/history', { query: { mediaFileId: id, pageSize: 20, sortDir: 'desc' }, signal }),
   );
   const disc = new Resource((signal) => api('GET /api/v1/bdmv/discs/:id', { params: { id }, signal }));
+  const torrent = new Resource((signal) => api('GET /api/v1/media/:id/torrent', { params: { id }, signal }));
   const convertingJobId = $derived(convertedByJob(detail.data));
   const convertingJob = new Resource((signal) => {
     if (convertingJobId === null) throw new Error('this file was not converted by a job');
@@ -61,6 +72,8 @@
   let busy = $state(false);
   let convertOpen = $state(false);
   let pendingForce = $state(false);
+  let removalChoice = $state<RemovalChoice>('keep');
+  const uid = $props.id();
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
   $effect(() => {
@@ -69,6 +82,7 @@
       detail.reset();
       history.reset();
       disc.reset();
+      torrent.reset();
       convertingJob.reset();
       detail.load();
       history.load();
@@ -82,6 +96,10 @@
   });
 
   $effect(() => {
+    if (detail.data?.kind === 'file') untrack(() => torrent.load());
+  });
+
+  $effect(() => {
     if (convertingJobId !== null) untrack(() => convertingJob.load());
   });
 
@@ -90,6 +108,7 @@
     refreshTimer = setTimeout(() => {
       detail.load({ silent: true });
       history.load({ silent: true });
+      if (detail.data?.kind === 'file') torrent.load({ silent: true });
     }, 800);
   }
 
@@ -125,7 +144,8 @@
   function process(file: MediaFileDetail, force: boolean): Promise<void> {
     const library = libraries.data?.find((item) => item.id === file.libraryId);
     const hasChoice = file.kind === 'file' && convertTargets(library?.profileIds ?? [], profiles.data ?? []).length > 0;
-    if (!hasChoice) return enqueue(force, undefined);
+    removalChoice = initialRemovalChoice(torrent.data ?? null);
+    if (!hasChoice && !torrent.data) return enqueue(force, undefined);
     pendingForce = force;
     convertOpen = true;
     return Promise.resolve();
@@ -135,12 +155,25 @@
     busy = true;
     const result = await attempt(() => api('POST /api/v1/jobs', { body: { mediaFileIds: [id], force, profileId } }));
     if (result?.jobs.length) {
+      await applyRemovalChoice();
       const [job] = result.jobs;
       if (job) await goto(href(`/activity/jobs/${job.id}`));
     } else if (result) {
       toasts.show('warning', `Not queued: ${result.skipped[0]?.reason ?? 'the file does not need work'}`);
     }
     busy = false;
+  }
+
+  async function applyRemovalChoice(): Promise<void> {
+    const change = removalChange(torrent.data ?? null, removalChoice);
+    if (change?.kind === 'cancel') {
+      await attempt(() => api('DELETE /api/v1/media/:id/torrent/removal', { params: { id } }), 'Torrent kept');
+    } else if (change?.kind === 'request') {
+      await attempt(
+        () => api('PUT /api/v1/media/:id/torrent/removal', { params: { id }, body: { condition: change.condition } }),
+        'Torrent removal scheduled',
+      );
+    }
   }
 
   async function setIgnored(ignored: boolean): Promise<void> {
@@ -196,6 +229,21 @@
         <dd>{formatDuration(file.durationSec)}{file.probe ? ` · ${file.probe.chapterCount} chapters` : ''}</dd>
         <dt>Original language</dt>
         <dd>{file.originalLanguage ?? 'unknown'}</dd>
+        {#if torrent.data}
+          {@const found = torrent.data}
+          <dt>Torrent</dt>
+          <dd>
+            {found.name} <span class="muted">· {torrentProgress(found)}</span>
+            {#if found.removal}
+              <br />
+              {TORRENT_REMOVAL_STATE_LABELS[found.removal.state]}{#if found.removal.state === 'pending'}: {REMOVAL_CHOICE_LABELS[found.removal.condition].toLowerCase()}{/if}
+              {#if found.removal.reason}<span class="muted">({found.removal.reason})</span>{/if}
+            {/if}
+          </dd>
+        {:else if torrent.error}
+          <dt>Torrent</dt>
+          <dd class="muted">Could not check qBittorrent: {errorMessage(torrent.error)}</dd>
+        {/if}
         {#if file.arr}
           <dt>{PATH_SCOPE_LABELS[file.arr.kind]}</dt>
           <dd>{file.arr.kind === 'radarr' ? 'Movie' : 'Series'} #{file.arr.itemId} on instance #{file.arr.instanceId}</dd>
@@ -242,10 +290,13 @@
       </section>
     {/if}
 
+    {@const targets = convertTargets(library?.profileIds ?? [], profiles.data ?? [])}
     <ConvertTargetModal
       bind:open={convertOpen}
+      title={targets.length > 0 ? undefined : 'Convert this file'}
       question="Convert this file?"
-      targets={convertTargets(library?.profileIds ?? [], profiles.data ?? [])}
+      {targets}
+      extra={torrent.data ? removalChoices : undefined}
       onconfirm={(profileId) => enqueue(pendingForce, profileId)}
     />
 
@@ -385,7 +436,31 @@
   {/snippet}
 </Async>
 
+{#snippet removalChoices()}
+  {#if torrent.data}
+    {@const found = torrent.data}
+    <fieldset class="removal">
+      <legend>After converting: torrent {found.name}</legend>
+      <p class="hint">
+        {torrentProgress(found)}. Removing deletes the torrent and its downloaded files from qBittorrent; your library
+        files stay.
+      </p>
+      {#each REMOVAL_CHOICES as choice (choice)}
+        <label class="check">
+          <input type="radio" name="{uid}-removal" value={choice} bind:group={removalChoice} />
+          {REMOVAL_CHOICE_LABELS[choice]}
+        </label>
+      {/each}
+    </fieldset>
+  {/if}
+{/snippet}
+
 <style>
+  .removal {
+    display: flex;
+    flex-direction: column;
+    margin-top: 1rem;
+  }
   .lost {
     margin-top: 0.75rem;
   }
