@@ -120,7 +120,8 @@ export interface ProbeResult {
   probedAt: IsoDateTime;
 }
 
-export type TargetAudioCodec = 'ac3' | 'eac3' | 'aac';
+export const TARGET_AUDIO_CODECS = ['ac3', 'eac3', 'aac'] as const;
+export type TargetAudioCodec = (typeof TARGET_AUDIO_CODECS)[number];
 /**
  * Handling of dual-layer Dolby Vision (UHD Blu-ray profile 7) in BDMV jobs. v1 ships only "drop_hdr10": keep the
  * HDR10 base layer, drop the enhancement layer. "keep" and "convert_8_1" need dovi_tool and are v1.1.

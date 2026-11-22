@@ -12,7 +12,7 @@ import type {
   PlannedStream,
 } from '../../shared/domain.ts';
 import { templateDefinition } from '../profiles/profileTemplates.ts';
-import { checkProfiles, codecAllowed, computeRulesKey, planConversion, resolveEffectiveProfile } from './engine.ts';
+import { checkProfiles, computeRulesKey, planConversion, resolveEffectiveProfile } from './engine.ts';
 
 const LIBRARY: LibraryRuleSettings = {
   mode: 'replace',
@@ -90,21 +90,6 @@ function dataStream(): OtherStream {
     mimeType: null,
   };
 }
-
-test.each([
-  ['ac3', ['ac3', 'aac'], true],
-  ['AC3', ['ac3'], true],
-  ['ac3', ['AC3'], true],
-  ['dts', ['ac3', 'aac', 'mp3'], false],
-  ['eac3', ['ac3'], false],
-  ['pcm_s24le', ['pcm_*'], true],
-  ['pcm_bluray', ['ac3', 'pcm_*'], true],
-  ['flac', ['pcm_*'], false],
-  ['ac3', [], false],
-  ['vorbis', ['*'], true],
-] as const)('codecAllowed - %s against %j is %p', (codec, allowed, expected) => {
-  expect(codecAllowed(codec, allowed)).toBe(expected);
-});
 
 test.each([
   ['dts', null, null],

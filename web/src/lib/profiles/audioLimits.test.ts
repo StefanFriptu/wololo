@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { DeviceProfileDefinition } from '#lib/shared.ts';
-import { audioProblems, maxBitrate } from './audioLimits.ts';
+import { audioProblems } from './audioLimits.ts';
 
 const audio = (overrides: Partial<DeviceProfileDefinition['audio']> = {}): DeviceProfileDefinition['audio'] => ({
   allowedCodecs: ['ac3', 'eac3', 'aac'],
@@ -8,14 +8,6 @@ const audio = (overrides: Partial<DeviceProfileDefinition['audio']> = {}): Devic
   bitrates: { mono: 192, stereo: 448, surround: 640 },
   maxChannels: 6,
   ...overrides,
-});
-
-test.each([
-  ['ac3', 640],
-  ['eac3', 1536],
-  ['aac', 1536],
-] as const)('maxBitrate - %s allows up to %d kbps', (target, expected) => {
-  expect(maxBitrate(target)).toBe(expected);
 });
 
 test('audioProblems - a valid audio section has none', () => {

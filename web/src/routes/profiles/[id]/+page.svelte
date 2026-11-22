@@ -8,9 +8,13 @@
   import Icon from '#lib/components/Icon.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { href } from '#lib/paths.ts';
-  import { audioProblems, maxBitrate } from '#lib/profiles/audioLimits.ts';
+  import { audioProblems } from '#lib/profiles/audioLimits.ts';
   import { Resource } from '#lib/resource.svelte.ts';
-  import { DOLBY_VISION_MODES, type ProfileInput, type ProfileTemplate, type TargetAudioCodec } from '#lib/shared.ts';
+  import {
+    DOLBY_VISION_MODES,
+    MAX_AUDIO_KBPS,
+    maxBitrateKbps,
+    type ProfileInput, type ProfileTemplate, type TargetAudioCodec } from '#lib/shared.ts';
   import { toasts } from '#lib/toast.svelte.ts';
 
   const TARGETS: { value: TargetAudioCodec; label: string }[] = [
@@ -50,7 +54,7 @@
   let busy = $state(false);
   const dirty = $derived(form !== null && JSON.stringify(form) !== saved);
   const problems = $derived(form ? audioProblems(form.definition.audio) : []);
-  const bitrateMax = $derived(form ? maxBitrate(form.definition.audio.targetCodec) : 1536);
+  const bitrateMax = $derived(form ? maxBitrateKbps(form.definition.audio.targetCodec) : MAX_AUDIO_KBPS);
 
   $effect(() => {
     void rawId;
