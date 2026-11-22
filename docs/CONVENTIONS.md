@@ -22,7 +22,12 @@ This file holds the shared and backend rules. Frontend rules live in [CONVENTION
 
 ## Structure and naming
 
-- One export per file, named exactly like the file (`getFoo.ts` exports `getFoo`). Tests and a module's `index.ts` are exempt. Exception: a file may group the functions of one concern, with the types and constants they share (the queries of one table in a `*Queries.ts` file, the pure functions ARCHITECTURE.md assigns to one file); split it once it holds a second concern.
+- One export per file, named exactly like the file (`getFoo.ts` exports `getFoo`). Tests and a module's `index.ts` are exempt.
+- A file may group exports only in these shapes, each holding one concern:
+  - type and constant catalogues in `src/shared`, `src/contracts` and `src/db/schema.ts`;
+  - one table's queries in a `*Queries.ts` file, or one boundary's Zod schemas in a `*schemas.ts` file;
+  - a family of pure functions with the types and constants they share, when ARCHITECTURE.md assigns them to one file.
+- Split a grouped file once it holds a second concern or exports more than 8 functions. Why: past that, the file name no longer tells a reader what the file owns.
 - Never add a barrel that only re-exports siblings. A module's `index.ts` is its factory and public surface, not a re-export list.
 - Local non-exported helpers and types are fine. Move one to its own file once a second file needs it.
 - Extract a step only when a second caller reuses it, when it is a unit worth naming, or when its edge cases need their own test table. Otherwise keep it in the caller.
