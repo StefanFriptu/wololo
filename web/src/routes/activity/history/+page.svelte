@@ -17,11 +17,13 @@
   import type { HistoryEventType } from '#lib/shared.ts';
 
   const PAGE_SIZE = 50;
+  const REFRESH_DEBOUNCE_MS = 1000;
   const EVENTS = Object.keys(HISTORY_EVENT_LABELS) as HistoryEventType[];
 
   let event = $state<HistoryEventType | undefined>(undefined);
   let pageNumber = $state(1);
   let now = $state(Date.now());
+  let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
   const history = new Resource((signal) =>
     api('GET /api/v1/history', { query: { event, page: pageNumber, pageSize: PAGE_SIZE, sortDir: 'desc' }, signal }),
@@ -43,12 +45,18 @@
     return () => clearInterval(timer);
   });
 
+  function refreshSoon(): void {
+    clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(() => history.load({ silent: true }), REFRESH_DEBOUNCE_MS);
+  }
+
   $effect(() =>
     live.on((message) => {
       if (pageNumber !== 1) return;
-      if (message.name === 'job.finished' || message.name === 'job.queued') history.load({ silent: true });
+      if (message.name === 'job.finished' || message.name === 'job.queued') refreshSoon();
     }),
   );
+  $effect(() => () => clearTimeout(refreshTimer));
   $effect(() => live.onReconnect(() => history.load({ silent: true })));
 
   const fileName = (path: string): string => path.split('/').filter(Boolean).at(-1) ?? path;
