@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { AppContext } from '../../app/context.ts';
 import type { JobsService, NewJob } from '../../contracts/jobs.ts';
 import { chunk, IN_LIST_CHUNK_SIZE } from '../../core/chunk.ts';
-import { AppError, errorMessage, notFound } from '../../core/errors.ts';
+import { AppError, errnoCode, errorMessage, notFound } from '../../core/errors.ts';
 import { DAY_MS } from '../../core/time.ts';
 import { yieldToEventLoop } from '../../core/yieldToEventLoop.ts';
 import type { JobRow } from '../../db/schema.ts';
@@ -107,12 +107,10 @@ export function createJobsService(ctx: AppContext): JobsService {
   const logPathOf = (row: JobRow): string | null =>
     row.logPath === null ? null : jobLogPathFor(ctx.config.get().jobLogDir, row.id);
 
-  const enqueue = async (job: NewJob): Promise<JobSummary> => {
-    const existing = findActiveJobForMedia(db, job.mediaFileId);
-    if (existing) return summary(existing);
-    const media = await ctx.services.media.get(job.mediaFileId);
-    const raced = findActiveJobForMedia(db, job.mediaFileId);
-    if (raced) return summary(raced);
+  const insertQueuedJob = (
+    media: Pick<MediaFileSummary, 'libraryId' | 'path' | 'kind' | 'sizeBytes'>,
+    job: NewJob,
+  ): JobSummary => {
     const row = insertJobRow(db, {
       type: job.type,
       trigger: job.trigger,
@@ -140,22 +138,45 @@ export function createJobsService(ctx: AppContext): JobsService {
     return toJobSummary(row);
   };
 
+  const enqueue = async (job: NewJob): Promise<JobSummary> => {
+    const existing = findActiveJobForMedia(db, job.mediaFileId);
+    if (existing) return summary(existing);
+    const media = await ctx.services.media.get(job.mediaFileId);
+    const raced = findActiveJobForMedia(db, job.mediaFileId);
+    if (raced) return summary(raced);
+    return insertQueuedJob(media, job);
+  };
+
+  const enqueueLoaded = (media: MediaFileSummary, job: NewJob): JobSummary => {
+    const existing = findActiveJobForMedia(db, job.mediaFileId);
+    if (existing) return summary(existing);
+    try {
+      return insertQueuedJob(media, job);
+    } catch (error) {
+      if (errnoCode(error) === 'SQLITE_CONSTRAINT_FOREIGNKEY') throw notFound(`media file ${media.id}`);
+      throw error;
+    }
+  };
+
   const enqueueOne = async (
     media: MediaFileSummary,
     request: EnqueueRequest,
     plan: NewJob['plan'],
+    libraryProfileIds: (libraryId: number) => Promise<readonly number[]>,
   ): Promise<{ job: JobSummary } | { reason: string }> => {
     if (!request.force && media.status !== 'needs_work') return { reason: `status is ${media.status}` };
     const base = { trigger: 'manual' as const, mediaFileId: media.id, priority: request.priority };
     if (media.kind === 'file') {
       const profileId = request.profileId ?? null;
-      if (profileId !== null && !(await ctx.services.libraries.get(media.libraryId)).profileIds.includes(profileId))
+      if (profileId !== null && !(await libraryProfileIds(media.libraryId)).includes(profileId))
         return { reason: `profile ${profileId} is not assigned to this file's library` };
-      return { job: await enqueue({ ...base, type: 'audio', profileId, plan: profileId === null ? plan : null }) };
+      return {
+        job: enqueueLoaded(media, { ...base, type: 'audio', profileId, plan: profileId === null ? plan : null }),
+      };
     }
     const evaluation = await ctx.services.bdmv.evaluate(media.id);
     if (!evaluation.plan) return { reason: evaluation.reason ?? `disc is ${evaluation.status}` };
-    return { job: await enqueue({ ...base, type: 'bdmv', bdmvPlan: evaluation.plan }) };
+    return { job: enqueueLoaded(media, { ...base, type: 'bdmv', bdmvPlan: evaluation.plan }) };
   };
 
   const enqueueMany = async (request: EnqueueRequest): Promise<EnqueueResponse> => {
@@ -170,9 +191,17 @@ export function createJobsService(ctx: AppContext): JobsService {
       handled += 1;
       if (handled % ENQUEUE_SLICE === 0) await yieldToEventLoop();
     };
+    const profileIdsByLibrary = new Map<number, readonly number[]>();
+    const libraryProfileIds = async (libraryId: number): Promise<readonly number[]> => {
+      const cached = profileIdsByLibrary.get(libraryId);
+      if (cached) return cached;
+      const { profileIds } = await ctx.services.libraries.get(libraryId);
+      profileIdsByLibrary.set(libraryId, profileIds);
+      return profileIds;
+    };
     const consider = async (media: MediaFileSummary, plan: NewJob['plan']) => {
       try {
-        const result = await enqueueOne(media, request, plan);
+        const result = await enqueueOne(media, request, plan, libraryProfileIds);
         if ('job' in result) response.jobs.push(result.job);
         else response.skipped.push({ mediaFileId: media.id, reason: result.reason });
       } catch (error) {

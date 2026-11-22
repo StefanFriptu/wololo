@@ -203,6 +203,83 @@ test('enqueueMany - profileId converts files for that profile alone; discs and o
   expect(getJobRow(t.ctx.db, result.jobs[0]?.id ?? 0)?.plan).toBeNull();
 });
 
+function countLoads(context: TestContext) {
+  const counts = { media: 0, libraries: 0 };
+  const { media, libraries } = context.ctx.services;
+  context.ctx.services.media = {
+    ...media,
+    get: (id) => {
+      counts.media += 1;
+      return media.get(id);
+    },
+  };
+  context.ctx.services.libraries = {
+    ...libraries,
+    get: (id) => {
+      counts.libraries += 1;
+      return libraries.get(id);
+    },
+  };
+  return counts;
+}
+
+test('enqueueMany - loads each file once and each library once, queueing in input order with one history entry each', async () => {
+  const s = setup();
+  t = s.t;
+  const files = [s.addFile('needs_work', 'file'), s.addFile('needs_work', 'file'), s.addFile('needs_work', 'bdmv')];
+  const { libraryId } = await t.ctx.services.media.get(files[0] ?? 0);
+  const assigned = insertProfile(t.ctx.db, templateDefinition('basic'));
+  t.ctx.db.insert(libraryProfiles).values({ libraryId, profileId: assigned }).run();
+  const queued: number[] = [];
+  t.ctx.events.on('job.queued', ({ job }) => queued.push(job.id));
+  const counts = countLoads(t);
+
+  const result = await t.ctx.services.jobs.enqueueMany({ mediaFileIds: files, profileId: assigned });
+
+  expect(counts).toEqual({ media: 3, libraries: 1 });
+  expect(result.jobs.map((job) => job.mediaFileId)).toEqual(files);
+  expect(queued).toEqual(result.jobs.map((job) => job.id));
+  for (const job of result.jobs)
+    expect((await t.ctx.services.jobs.history({ jobId: job.id })).items.map((entry) => entry.event)).toEqual([
+      'queued',
+    ]);
+  expect(t.ctx.services.jobs.state().queued).toBe(3);
+});
+
+test('enqueueMany - a file deleted after it was loaded is skipped as not found without leaking SQL', async () => {
+  const s = setup();
+  t = s.t;
+  const id = s.addFile('needs_work', 'file');
+  const { media } = t.ctx.services;
+  t.ctx.services.media = {
+    ...media,
+    get: async (mediaFileId) => {
+      const loaded = await media.get(mediaFileId);
+      s.t.ctx.db.delete(mediaFiles).where(eq(mediaFiles.id, mediaFileId)).run();
+      return loaded;
+    },
+  };
+
+  const result = await t.ctx.services.jobs.enqueueMany({ mediaFileIds: [id] });
+
+  expect(result).toEqual({ jobs: [], skipped: [{ mediaFileId: id, reason: `media file ${id} not found` }] });
+});
+
+test('enqueueMany - a filter does not reload the files it listed and never queues a second job per file', async () => {
+  const s = setup();
+  t = s.t;
+  const ids = [s.addFile('needs_work', 'file'), s.addFile('needs_work', 'file')];
+  const counts = countLoads(t);
+  const first = await t.ctx.services.jobs.enqueueMany({ filter: {}, force: true });
+
+  const again = await t.ctx.services.jobs.enqueueMany({ filter: {}, force: true });
+
+  expect(counts.media).toBe(0);
+  expect(again.jobs.map((job) => job.id)).toEqual(first.jobs.map((job) => job.id));
+  expect(first.jobs.map((job) => job.mediaFileId)).toEqual(ids);
+  expect(t.ctx.services.jobs.state().queued).toBe(2);
+});
+
 test('enqueueMany - a disc without a plan is skipped with the evaluation reason', async () => {
   const s = setup({ evaluatePlan: null });
   t = s.t;
