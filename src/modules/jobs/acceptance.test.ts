@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
 import { ensureFixtureCopy, FIXTURES, type FixtureSpec, ffmpegAvailable } from '../../../test/helpers/fixtures.ts';
 import { insertJob, insertLibrary, insertMediaFile } from '../../../test/helpers/seed.ts';
+import { ffprobeJson } from '../../../test/helpers/server.ts';
 import { stubService } from '../../../test/helpers/stubs.ts';
 import type { FileChangedEvent } from '../../contracts/integrations.ts';
 import type { RecycleBinService } from '../../contracts/jobs.ts';
@@ -39,21 +40,10 @@ interface ProbedStream {
   bit_rate?: string;
 }
 
-async function ffprobeJson(
-  path: string,
-): Promise<{ streams: ProbedStream[]; format: { duration: string }; chapters: unknown[] }> {
-  const proc = Bun.spawn([
-    'ffprobe',
-    '-v',
-    'error',
-    '-show_streams',
-    '-show_format',
-    '-show_chapters',
-    '-of',
-    'json',
-    path,
-  ]);
-  return JSON.parse(await new Response(proc.stdout).text());
+interface ProbedFile {
+  streams: ProbedStream[];
+  format: { duration: string };
+  chapters: unknown[];
 }
 
 async function videoHash(path: string): Promise<string> {
@@ -145,7 +135,7 @@ describe.skipIf(!ffmpegAvailable())('audio job end to end', () => {
     chmodSync(s.source, 0o640);
     const originalHash = await sha256(s.source);
     const originalVideo = await videoHash(s.source);
-    const originalProbe = await ffprobeJson(s.source);
+    const originalProbe = await ffprobeJson<ProbedFile>(s.source);
     expect(
       originalProbe.streams.filter((stream) => stream.codec_type === 'audio').map((stream) => stream.codec_name),
     ).toEqual(['dts']);
@@ -157,7 +147,7 @@ describe.skipIf(!ffmpegAvailable())('audio job end to end', () => {
     const { state, job } = await runOneJob(t, s.mediaFileId);
 
     expect(state).toBe('completed');
-    const output = await ffprobeJson(s.source);
+    const output = await ffprobeJson<ProbedFile>(s.source);
     const audio = output.streams.filter((stream) => stream.codec_type === 'audio');
     expect(audio).toHaveLength(1);
     expect(audio[0]).toMatchObject({ codec_name: 'ac3', channels: 6, bit_rate: '640000' });
@@ -406,14 +396,14 @@ describe.skipIf(!ffmpegAvailable())('audio job end to end', () => {
     });
     t = s.t;
     const originalVideo = await videoHash(s.source);
-    const originalProbe = await ffprobeJson(s.source);
+    const originalProbe = await ffprobeJson<ProbedFile>(s.source);
     const steps: string[] = [];
     t.ctx.events.on('job.step', (event) => steps.push(event.step));
 
     const { state, job } = await runOneJob(t, s.mediaFileId);
 
     expect(state).toBe('completed');
-    const output = await ffprobeJson(s.source);
+    const output = await ffprobeJson<ProbedFile>(s.source);
     expect(output.streams.map((stream) => [stream.codec_type, stream.codec_name])).toEqual([
       ['video', 'h264'],
       ['audio', 'ac3'],
@@ -446,7 +436,7 @@ describe.skipIf(!ffmpegAvailable())('audio job end to end', () => {
     expect(state).toBe('completed');
     expect(job.outputPath).toBe(output);
     expect(readdirSync(dirname(s.source))).toEqual(['Movie (2020).mkv']);
-    const probe = await ffprobeJson(output);
+    const probe = await ffprobeJson<ProbedFile>(output);
     expect(probe.streams.filter((stream) => stream.codec_type === 'audio')).toMatchObject([
       { codec_name: 'ac3', channels: 2, bit_rate: '448000' },
     ]);

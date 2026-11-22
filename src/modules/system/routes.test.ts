@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { unzipSync } from 'fflate';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
 import { insertJob, insertLibrary } from '../../../test/helpers/seed.ts';
+import { eventually } from '../../../test/helpers/server.ts';
 import { routesOf, splitRouteKey } from '../../shared/api-routes.ts';
 import type { BackupInfo, HealthCheck, RestoreResult, SystemStatus } from '../../shared/api-types.ts';
 import { RESTART_DELAY_MS } from './index.ts';
@@ -37,16 +38,6 @@ function upload(bytes: Uint8Array | string, field = 'file'): Promise<Response> {
   const form = new FormData();
   form.append(field, new File([bytes], 'backup.zip', { type: 'application/zip' }));
   return t.request('/api/v1/system/backups/restore', { method: 'POST', body: form });
-}
-
-async function eventually(check: () => boolean, timeoutMs = 2000): Promise<void> {
-  const started = Date.now();
-  let attempts = 0;
-  while (!check()) {
-    attempts += 1;
-    if (Date.now() - started > timeoutMs) throw new Error(`condition not met after ${attempts} attempts`);
-    await Bun.sleep(20);
-  }
 }
 
 test('platform routes - every parameterless GET answers 200', async () => {
@@ -184,7 +175,12 @@ test('POST /api/v1/system/restart - answers 204 first, then requests the restart
   const response = await t.request('/api/v1/system/restart', { method: 'POST' });
   expect(response.status).toBe(204);
   expect(t.restarts()).toBe(before);
-  await eventually(() => t.restarts() === before + 1, RESTART_DELAY_MS * 8);
+  await eventually(
+    'restart requested',
+    async () => t.restarts(),
+    (restarts) => restarts === before + 1,
+    RESTART_DELAY_MS * 8,
+  );
 });
 
 test('GET /api/v1/docs - is public HTML listing every route', async () => {

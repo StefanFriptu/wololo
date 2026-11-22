@@ -12,6 +12,7 @@ import { hasBinary } from '../../../test/helpers/binaries.ts';
 import { ffmpegAvailable } from '../../../test/helpers/fixtures.ts';
 import { audioStream, probeResult, subtitleStream, videoStream } from '../../../test/helpers/probe.ts';
 import { createFakeRunContext } from '../../../test/helpers/run-context.ts';
+import { ffprobeJson } from '../../../test/helpers/server.ts';
 import { stubService } from '../../../test/helpers/stubs.ts';
 import type { FfmpegService } from '../../contracts/rules-ffmpeg.ts';
 import { blurayInput, playlistArgs } from '../../core/bluray.ts';
@@ -148,18 +149,14 @@ interface FfprobeStream {
   disposition?: Record<string, number>;
 }
 
-function ffprobeJson(args: string[]): {
+interface FfprobeJson {
   streams: FfprobeStream[];
   format: { duration?: string };
   chapters?: unknown[];
-} {
-  return JSON.parse(
-    exec(['ffprobe', '-v', 'error', '-show_streams', '-show_format', '-show_chapters', '-of', 'json', ...args]),
-  );
 }
 
-function toProbe(path: string, args: string[]): ProbeResult {
-  const raw = ffprobeJson(args);
+async function toProbe(path: string, inputArgs: string[] = []): Promise<ProbeResult> {
+  const raw = await ffprobeJson<FfprobeJson>(path, inputArgs);
   const streams: MediaStream[] = raw.streams.map((s) => {
     const common = {
       index: s.index,
@@ -181,7 +178,7 @@ function toProbe(path: string, args: string[]): ProbeResult {
   });
 }
 
-const discProbe = (disc: string) => toProbe(disc, [...playlistArgs(PLAYLIST), blurayInput(disc)]);
+const discProbe = (disc: string) => toProbe(blurayInput(disc), playlistArgs(PLAYLIST));
 
 /** The probe as if ffmpeg had tagged nothing: languages must then come from the MPLS stream table. */
 const withoutLanguages = (probe: ProbeResult): ProbeResult => ({
@@ -287,17 +284,17 @@ describe.skipIf(!READY)('bdmv end to end (tsMuxeR + mkvmerge + ffmpeg/libbluray)
   });
 
   async function convert(disc: string, kind: 'bdmv' | 'iso') {
-    const probe = discProbe(disc);
+    const probe = await discProbe(disc);
     const s = setup({
       existingDisc: { path: disc, kind },
       plan: (input) => planFor(input.probe),
-      probe: (path) => (path.endsWith('.mkv') ? toProbe(path, [path]) : withoutLanguages(probe)),
+      probe: (path) => (path.endsWith('.mkv') ? toProbe(path) : withoutLanguages(probe)),
       overrides: { ffmpeg: ffmpegService },
     });
     const fake = createFakeRunContext({ job: { id: 5, type: 'bdmv', mediaFileId: s.mediaFileId, sourcePath: disc } });
     const outcome = await s.t.ctx.services.bdmv.execute(fake);
     const output = outcome.outputPath as string;
-    const result = ffprobeJson([output]);
+    const result = await ffprobeJson<FfprobeJson>(output);
     const request = fake.verifyRequests[0];
 
     expect(output).toEndWith('Jamón Jamón (1992)/Jamón Jamón (1992).mkv');

@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { writeMpls } from '../../../test/fixtures/bdmv/writers.ts';
+import { runResult } from '../../../test/helpers/runResult.ts';
 import type { RunOptions, RunResult } from '../../core/process.ts';
 import { createIsoReader, findEntry, muxFilesForPlaylist, parseSevenZipListing } from './iso.ts';
 
@@ -113,7 +114,7 @@ const FAKE_LISTING = `----------\n${Object.entries(FILES)
   .join('\n')}`;
 
 function result(argv: string[], stdout = '', exitCode = 0): RunResult {
-  return { argv, exitCode, signalCode: null, stdout, stderr: '', durationMs: 1, aborted: false, timedOut: false };
+  return runResult({ argv, stdout, exitCode });
 }
 
 /** Behaves like 7z for `l -slt` and `x -o<dir> <iso> @list`. */

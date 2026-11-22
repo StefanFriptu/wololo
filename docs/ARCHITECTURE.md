@@ -56,7 +56,7 @@ src/
 drizzle/                   generated SQL migrations (applied at startup)
 web/                       SvelteKit 3 (Svelte 5) SPA, adapter-static, fallback index.html
 test/
-  helpers/                 context, seed, probe, run-context, stubs, fixtures (ffmpeg lavfi generator), binaries, server
+  helpers/                 context, seed, probe, run-context, stubs, fixtures (ffmpeg lavfi generator), binaries, server (apiClient, eventually, ffprobeJson), runResult, mplsStream
   core/ api/ db/ shared/   tests of the core
   integration/             booted server (createRuntime) with every real service; packaging checks
 docker/                    entrypoint.sh (PUID/PGID/UMASK/TZ), healthcheck.ts, smoke-test.sh

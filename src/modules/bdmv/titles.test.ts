@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { writeSup } from '../../../test/fixtures/bdmv/writers.ts';
+import { mplsStream } from '../../../test/helpers/mplsStream.ts';
 import type { MplsPlaylist, MplsStream } from '../../contracts/bdmv.ts';
 import {
   cleanDiscName,
@@ -281,14 +282,7 @@ test('countForcedPgsCompositions - truncated trailing segment is ignored', () =>
   expect(countForcedPgsCompositions(sup.subarray(0, sup.length - 20))).toEqual({ compositions: 1, forced: 1 });
 });
 
-const stream = (kind: MplsStream['kind'], language: string | null): MplsStream => ({
-  kind,
-  pid: 0,
-  codingType: 0,
-  codec: '',
-  language,
-  secondaryVideo: false,
-});
+const stream = (kind: MplsStream['kind'], language: string | null): MplsStream => mplsStream(kind, { language });
 
 test('titleCandidate - summarises clips, chapters and unique languages', () => {
   const candidate = titleCandidate(
