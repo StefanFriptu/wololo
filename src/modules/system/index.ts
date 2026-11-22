@@ -6,6 +6,7 @@ import type { AppContext } from '../../app/context.ts';
 import type { SystemService } from '../../contracts/platform.ts';
 import { freeBytes } from '../../core/freeBytes.ts';
 import { findExecutable, runProcess } from '../../core/process.ts';
+import { withTimeout } from '../../core/withTimeout.ts';
 import { latestJournalMillis, MIGRATIONS_DIR } from '../../db/client.ts';
 import type { SystemStatus } from '../../shared/api-types.ts';
 import { createBackupStore } from './backups.ts';
@@ -17,7 +18,6 @@ import { RESTORE_DIR } from './restore.ts';
 import { ROOT_PROBE_TIMEOUT_MS, rootProblem } from './rootProblem.ts';
 import { JOB_LOG_MAX_AGE_DAYS, jobIdOfLog, selectStaleJobLogs } from './staleJobLogs.ts';
 import { probeTools, type ToolReport } from './tools.ts';
-import { withTimeout } from './withTimeout.ts';
 
 const TOOL_CACHE_MS = 5 * 60 * 1000;
 export const RESTART_DELAY_MS = 250;

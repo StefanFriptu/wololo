@@ -1,7 +1,7 @@
 import { constants } from 'node:fs';
 import { access, stat } from 'node:fs/promises';
 import { errnoCode, errorMessage } from '../../core/errors.ts';
-import { withTimeout } from './withTimeout.ts';
+import { withTimeout } from '../../core/withTimeout.ts';
 
 export interface RootProbeDeps {
   stat: (path: string) => Promise<{ isDirectory(): boolean }>;

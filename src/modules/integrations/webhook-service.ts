@@ -4,6 +4,7 @@ import type { AppContext } from '../../app/context.ts';
 import type { WebhookService } from '../../contracts/integrations.ts';
 import type { MediaRefs } from '../../contracts/probe-scan.ts';
 import { errorMessage } from '../../core/errors.ts';
+import { withTimeout } from '../../core/withTimeout.ts';
 import type { WebhookResponse } from '../../shared/api-types.ts';
 import type { ArrKind } from '../../shared/domain.ts';
 import { normalizeLanguage } from '../../shared/language.ts';
@@ -51,17 +52,8 @@ export function createWebhookService(ctx: AppContext, deps: WebhookDeps = {}): W
   const replyBudgetMs = deps.replyBudgetMs ?? DEFAULT_REPLY_BUDGET_MS;
   const inFlight = new Map<string, Promise<FileOutcome>>();
 
-  const withinBudget = async (work: Promise<WebhookResponse>): Promise<WebhookResponse> => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const late = new Promise<WebhookResponse>((resolve) => {
-      timer = setTimeout(() => resolve(reply('accepted', 'the check continues in the background')), replyBudgetMs);
-    });
-    try {
-      return await Promise.race([work, late]);
-    } finally {
-      clearTimeout(timer);
-    }
-  };
+  const withinBudget = (work: Promise<WebhookResponse>): Promise<WebhookResponse> =>
+    withTimeout(work, replyBudgetMs, reply('accepted', 'the check continues in the background'));
 
   const handleImport = async (
     kind: ArrKind,
