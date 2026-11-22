@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { eq } from 'drizzle-orm';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
 import { insertLibrary } from '../../../test/helpers/seed.ts';
 import { stubService } from '../../../test/helpers/stubs.ts';
 import type { MediaService } from '../../contracts/probe-scan.ts';
 import { AppError } from '../../core/errors.ts';
+import { deviceProfiles } from '../../db/schema.ts';
 import type { ProfileInput } from '../../shared/api-types.ts';
 import type { DeviceProfileDefinition } from '../../shared/domain.ts';
 import { templateDefinition } from './profileTemplates.ts';
@@ -101,6 +103,24 @@ test('profiles.update - renaming keeps the version and invalidates nothing', asy
   const renamed = await profiles().update(created.id, { ...input('Guest room'), description: 'guest TV' });
   expect(renamed).toMatchObject({ name: 'Guest room', description: 'guest TV', version: 1 });
   expect(invalidations).toEqual([]);
+});
+
+test('profiles.update - an unchanged input writes nothing and keeps updated_at', async () => {
+  const created = await profiles().create(input('Bedroom'));
+  const stale = '2020-01-01T00:00:00.000Z';
+  t.ctx.db.update(deviceProfiles).set({ updatedAt: stale }).where(eq(deviceProfiles.id, created.id)).run();
+  const same = await profiles().update(created.id, { ...input('Bedroom'), description: created.description });
+  expect(same).toMatchObject({ id: created.id, name: 'Bedroom', version: 1, updatedAt: stale });
+  expect(invalidations).toEqual([]);
+});
+
+test('profiles.update - a changed description bumps updated_at', async () => {
+  const created = await profiles().create(input('Bedroom'));
+  const stale = '2020-01-01T00:00:00.000Z';
+  t.ctx.db.update(deviceProfiles).set({ updatedAt: stale }).where(eq(deviceProfiles.id, created.id)).run();
+  const updated = await profiles().update(created.id, { ...input('Bedroom'), description: 'edited' });
+  expect(updated.updatedAt).not.toBe(stale);
+  expect(updated.version).toBe(1);
 });
 
 test('profiles.update - key order of an equal definition is not a change', async () => {
