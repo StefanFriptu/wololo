@@ -45,15 +45,12 @@ const episodeFileSchema = z.object({
   path: z.string().nullish(),
   relativePath: z.string().nullish(),
 });
-const historySchema = z.object({
-  records: z.array(
-    z.object({
-      eventType: z.string(),
-      downloadId: z.string().nullish(),
-      data: z.record(z.string(), z.string().nullish()).nullish(),
-    }),
-  ),
+const historyRecordSchema = z.object({
+  eventType: z.string(),
+  downloadId: z.string().nullish(),
+  data: z.record(z.string(), z.string().nullish()).nullish(),
 });
+const historySchema = z.object({ records: z.array(historyRecordSchema) });
 const notificationFieldSchema = z.looseObject({ name: z.string(), value: z.unknown().optional() });
 const notificationSchema = z.looseObject({
   id: z.number().int().optional(),
@@ -75,6 +72,13 @@ export type ArrSeries = z.infer<typeof seriesSchema>;
 /** History eventType 3 is downloadFolderImported in both Radarr and Sonarr. */
 const DOWNLOAD_FOLDER_IMPORTED = '3';
 const HISTORY_PAGE_SIZE = '250';
+
+export interface ArrItemImport {
+  /** The download client's hash, upper case as Radarr/Sonarr store it. */
+  downloadId: string;
+  /** Path of the imported library file (Radarr/Sonarr's view) at import time. */
+  importedPath: string;
+}
 
 export interface ArrImportRecord {
   /** Path of the file in the download folder (Radarr/Sonarr's view). */
@@ -174,6 +178,18 @@ export function createArrClient(options: ArrClientOptions) {
         const droppedPath = dataValue(record.data, 'droppedPath');
         const importedPath = dataValue(record.data, 'importedPath');
         return droppedPath && importedPath ? [{ droppedPath, importedPath }] : [];
+      });
+    },
+    /** GET /api/v3/history/movie?movieId= (Radarr) or history/series?seriesId= (Sonarr), import events only; a plain array. */
+    itemImports: async (itemId: number): Promise<ArrItemImport[]> => {
+      const [path, key] = options.kind === 'radarr' ? ['history/movie', 'movieId'] : ['history/series', 'seriesId'];
+      const records = await call(path, z.array(historyRecordSchema), {
+        query: { [key]: String(itemId), eventType: DOWNLOAD_FOLDER_IMPORTED },
+      });
+      return records.flatMap((record) => {
+        if (record.eventType !== 'downloadFolderImported' || !record.downloadId) return [];
+        const importedPath = dataValue(record.data, 'importedPath');
+        return importedPath ? [{ downloadId: record.downloadId, importedPath }] : [];
       });
     },
     notifications: () => call('notification', z.array(notificationSchema)),
