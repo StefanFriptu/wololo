@@ -143,14 +143,16 @@ From then on, every changed file triggers a partial scan of its folder only. Opt
 
 ## First run: dry run, then process
 
-Wololo starts with **processing off**. In this dry-run mode it checks files and reports, but never writes a media file. Keep it that way until you have seen the report.
+Wololo starts with **processing off** and **no player profile**. In this dry-run mode it checks files and reports, but never writes a media file. Keep it that way until you have seen the report.
 
-1. Run a scan: **System > Tasks > Library scan > Run now**. The scheduled scan runs every 6 hours anyway.
-2. Open the dry-run report under **Library > Dry run**. It lists files per failing codec, with estimated time and disk space for the conversion. Files marked **Blocked** need work Wololo cannot do (for example a video codec your TVs cannot play); they are never queued.
-3. Check the device profile under **Profiles**. "Samsung Tizen" is the default; clone and edit it if your TVs decode more.
+1. Add your players under **Profiles** (top of the sidebar). Name each TV or box you watch on and pick the closest template: **Basic** (AC3, AAC, MP3), **Dolby** (+ E-AC3, TrueHD), **Lossless** (+ FLAC, ALAC, PCM), **Everything** (an AV receiver decodes all audio) or **Blank**. Check your TV's manual or spec sheet for its audio formats, then adjust the codecs on the profile page. Assign the profiles to your libraries under **Settings > Media**; a library without a profile shows "No profile" and scans skip it.
+2. Run a scan: **System > Tasks > Library scan > Run now**. The scheduled scan runs every 6 hours anyway.
+3. Open the dry-run report under **Library > Dry run**. It lists files per failing codec, with estimated time and disk space for the conversion. Files marked **Blocked** need work Wololo cannot do (for example a video codec your TVs cannot play); they are never queued.
+   **Library > Files** shows one chip per player on every file: green plays as is, red names the codec that player cannot decode. A file's page marks each track per player.
 4. Tick **Convert files** in **Settings > Media**. Jobs can only be queued from then on.
-5. Try one file first. Open it in **Library > Files**, check the planned changes, and press **Process now**. Watch **Activity > Queue**, then play the result on the TV.
-6. Press **Process all needs-work** on the **Library > Dry run** page, or wait for the next scan.
+5. Try one file first. Open it in **Library > Files**, check the planned changes, and press **Process now**. When the library has more than one player, Wololo asks which one to convert for; the strictest combination (every player plays the result) is preselected. Watch **Activity > Queue**, then play the result on the TV.
+6. Press **Process all needs-work** on the **Library > Dry run** page.
+7. Choose what new imports do under **Settings > Media > On new imports**: **Check only** (the default: check and show the chips, convert nothing), **Always convert for the strictest profile**, or **Always convert for** one player. The same setting decides whether scheduled scans queue the files that need work.
 
 The target on a Raspberry Pi 4 is under 20 minutes per 2-hour movie, so a big backlog takes days. One job at a time, at low CPU and disk priority, is the default (**Settings > Media**: Jobs at once, CPU priority, Disk priority).
 
