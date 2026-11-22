@@ -1,7 +1,10 @@
 <script lang="ts">
   import '#lib/styles/app.css';
   import { type Snippet, untrack } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { page } from '$app/state';
   import { auth } from '#lib/api/auth.svelte.ts';
+  import { api } from '#lib/api/client.ts';
   import { live } from '#lib/api/live.svelte.ts';
   import { pendingDecisions } from '#lib/bdmv/pendingDecisions.ts';
   import ApiKeyPrompt from '#lib/components/ApiKeyPrompt.svelte';
@@ -10,6 +13,8 @@
   import Toasts from '#lib/components/Toasts.svelte';
   import { href } from '#lib/paths.ts';
   import { runtimeConfig } from '#lib/runtime.ts';
+  import { saveSetupProgress, setupProgress } from '#lib/setup/setupProgress.svelte.ts';
+  import { shouldOpenSetup } from '#lib/setup/shouldOpenSetup.ts';
   import { theme } from '#lib/theme.svelte.ts';
   import { toasts } from '#lib/toast.svelte.ts';
 
@@ -47,6 +52,36 @@
       stopEvents();
       stopReconnect();
     };
+  });
+
+  const onSetupPage = $derived(page.url.pathname.slice(config.urlBase.length).startsWith('/setup'));
+  const showSetupBanner = $derived(
+    !onSetupPage && setupProgress.data !== undefined && !setupProgress.data.completed && !setupProgress.data.dismissed,
+  );
+
+  async function openSetupOnFirstLaunch(): Promise<void> {
+    await setupProgress.load({ silent: true });
+    const setup = setupProgress.data;
+    if (!setup || setup.completed || setup.dismissed || onSetupPage) return;
+    try {
+      const [libraries, arr] = await Promise.all([api('GET /api/v1/libraries'), api('GET /api/v1/arr')]);
+      if (shouldOpenSetup({ setup, libraryCount: libraries.length, arrCount: arr.length })) await goto(href('/setup'));
+    } catch (error) {
+      console.error('[setup] could not tell whether this is a fresh install', error);
+    }
+  }
+
+  async function dismissSetup(): Promise<void> {
+    try {
+      await saveSetupProgress({ dismissed: true });
+    } catch (error) {
+      toasts.error(error);
+    }
+  }
+
+  $effect(() => {
+    if (auth.needsKey) return;
+    untrack(() => openSetupOnFirstLaunch());
   });
 
   const badges = $derived({ '/library/decisions': pendingDecisions.data?.length ?? 0 });
@@ -90,6 +125,13 @@
         <button class="scrim" aria-label="Close menu" tabindex="-1" onclick={() => (menuOpen = false)}></button>
       {/if}
       <main id="content" tabindex="-1">
+        {#if showSetupBanner}
+          <div class="alert tone-info setup-banner" role="status">
+            <p>Set up Wololo in a few guided steps: players, folders, Sonarr/Radarr and Plex, each tested as you go.</p>
+            <a class="button primary small" href={href('/setup')}>Run setup</a>
+            <button class="small" onclick={dismissSetup}>Not now</button>
+          </div>
+        {/if}
         {@render children()}
         <footer class="muted">Wololo {config.version}</footer>
       </main>
@@ -183,6 +225,17 @@
     min-width: 0;
     padding: 1.25rem;
     outline: none;
+  }
+  .setup-banner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+    margin-bottom: 1rem;
+  }
+  .setup-banner p {
+    flex: 1 1 20rem;
+    margin: 0;
   }
   footer {
     margin-top: 2rem;

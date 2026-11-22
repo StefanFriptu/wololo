@@ -8,6 +8,7 @@
   import { formatBytes } from '#lib/format/formatBytes.ts';
   import { formatDateTime } from '#lib/format/formatDateTime.ts';
   import { formatEstimate } from '#lib/format/formatEstimate.ts';
+  import { href } from '#lib/paths.ts';
   import type { Tone } from '#lib/labels.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import { restarter } from '#lib/restarter.svelte.ts';
@@ -30,6 +31,7 @@
 
 <PageHeader title="Status">
   {#snippet actions()}
+    <a class="button" href={href('/setup')}>Run setup again</a>
     <button onclick={() => restarter.run()} disabled={restarter.restarting}><Icon name="power" size={16} /> {restarter.restarting ? 'Restarting…' : 'Restart'}</button>
   {/snippet}
 </PageHeader>
