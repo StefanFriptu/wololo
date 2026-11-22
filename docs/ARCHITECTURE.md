@@ -29,7 +29,8 @@ src/
   core/                    config (config.json + WOLOLO__* env), logger (ring buffer + rotating file),
                            events (typed bus), settings (typed KV store), process (spawn + nice/ionice), errors,
                            chunk (chunk, IN_LIST_CHUNK_SIZE for inArray lists), time (MINUTE_MS, DAY_MS), isWithin,
-                           freeBytes (statfs bavail * bsize, async + sync)
+                           freeBytes (statfs bavail * bsize, async + sync),
+                           recyclePaths (RECYCLE_DIR_NAME, isRecycleStamp, isRecyclePath, isNormalizedAbsolutePath)
   db/
     schema.ts              THE complete v1 schema (Drizzle)
     client.ts              openDatabase() (WAL, FKs), runMigrations()

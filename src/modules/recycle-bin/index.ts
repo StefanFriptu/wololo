@@ -13,13 +13,14 @@ import { dirname } from 'node:path';
 import type { AppContext } from '../../app/context.ts';
 import type { RecycleBinService } from '../../contracts/jobs.ts';
 import { AppError, errorMessage, notFound } from '../../core/errors.ts';
+import { isNormalizedAbsolutePath, isRecyclePath } from '../../core/recyclePaths.ts';
 import type { RecycleBinRow } from '../../db/schema.ts';
 import type { RecycleBinEntry } from '../../shared/domain.ts';
 import { isLinkUnsupported } from '../jobs/isLinkUnsupported.ts';
 import { toRecycleBinEntry } from '../jobs/mappers.ts';
 import { checkRecycleBinLocation } from './checkRecycleBinLocation.ts';
 import { removeEmptyRecycleDirs } from './cleanup.ts';
-import { expiresAtFor, isNormalizedAbsolutePath, isRecyclePath, recyclePathFor, recycleStamp } from './paths.ts';
+import { expiresAtFor, recyclePathFor, recycleStamp } from './paths.ts';
 import {
   deleteRecycleRow,
   getRecycleRow,

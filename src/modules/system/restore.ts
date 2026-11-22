@@ -1,7 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { existsSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { isNormalizedAbsolutePath, isRecyclePath } from '../recycle-bin/paths.ts';
+import { isNormalizedAbsolutePath, isRecyclePath } from '../../core/recyclePaths.ts';
 
 export const DATABASE_FILE = 'wololo.db';
 export const CONFIG_FILE = 'config.json';
