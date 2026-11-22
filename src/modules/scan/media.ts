@@ -13,10 +13,10 @@ import { createMediaEngine, NO_PROFILE_MESSAGE } from './mediaEngine.ts';
 import {
   jobsForMediaQuery,
   listMediaQuery,
-  type MediaSummaryRow,
   mediaAfterPathQuery,
   mediaDetailQuery,
   mediaStatsQuery,
+  mediaSummaryQuery,
   toSummary,
 } from './mediaQuery.ts';
 
@@ -51,7 +51,7 @@ export function createMediaService(ctx: AppContext): MediaService {
           ? { instanceId: row.arrInstanceId, kind: row.arrKind, itemId: row.arrItemId, fileId: row.arrFileId }
           : null;
       return {
-        ...toSummary(row as MediaSummaryRow),
+        ...toSummary(row),
         probe: row.probe,
         plan: row.plan,
         rulesKey: row.rulesKey,
@@ -72,8 +72,8 @@ export function createMediaService(ctx: AppContext): MediaService {
     },
 
     findByPath: async (path) => {
-      const row = mediaDetailQuery(ctx.db, { path });
-      return row ? toSummary(row as MediaSummaryRow) : null;
+      const row = mediaSummaryQuery(ctx.db, { path });
+      return row ? toSummary(row) : null;
     },
 
     checkPath: async (path, refs) => {

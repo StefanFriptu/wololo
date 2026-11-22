@@ -615,6 +615,20 @@ describe('media rows without files', () => {
     expect(await media().findByPath(join(root, 'nope.mkv'))).toBeNull();
   });
 
+  test('media.findByPath - the summary equals the one inside the detail', async () => {
+    const row = insertMediaFile(t.ctx.db, seeded(), {
+      path: join(root, 'A.mkv'),
+      status: 'needs_work',
+      probe: probeResult([videoStream(), audioStream({ codec: 'dts' })]),
+      audioCodecs: ['dts'],
+      failingCodecs: ['dts'],
+    });
+    const summary = await media().findByPath(row.path);
+    const { probe, plan, rulesKey, originalLanguage, arr, jobs: detailJobs, ...fromDetail } = await media().get(row.id);
+    expect(summary).toEqual(fromDetail);
+    expect(summary).not.toHaveProperty('probe');
+  });
+
   test('media.setIgnored - refuses while processing; reason stored', async () => {
     const row = insertMediaFile(t.ctx.db, seeded(), { path: join(root, 'A.mkv'), status: 'processing' });
     const error = await media()

@@ -5,7 +5,7 @@ import type { CheckAction, CheckResult, DiscoveredEntry, MediaRefs } from '../..
 import { chunk, IN_LIST_CHUNK_SIZE } from '../../core/chunk.ts';
 import { errorMessage, notFound } from '../../core/errors.ts';
 import { yieldToEventLoop } from '../../core/yieldToEventLoop.ts';
-import { arrInstances, type MediaFileRow, mediaFiles } from '../../db/schema.ts';
+import { arrInstances, libraryRoots, type MediaFileRow, mediaFiles } from '../../db/schema.ts';
 import type {
   ArrItemRef,
   BdmvJobPlan,
@@ -23,7 +23,7 @@ import { eligibilityRules, exclusionReason } from './eligibility.ts';
 import { statEntry } from './entries.ts';
 import { checkActionFor, statusFromPlan, summarizeProbe } from './evaluation.ts';
 import { libraryQuery } from './libraryQuery.ts';
-import { type MediaSummaryRow, mediaDetailQuery, toSummary } from './mediaQuery.ts';
+import { mediaSummaryQuery, toSummary } from './mediaQuery.ts';
 
 const INVALIDATE_CHUNK = 500;
 
@@ -47,6 +47,8 @@ export interface EvaluateOptions {
   entry?: DiscoveredEntry;
   /** Precomputed per library by the scanner. */
   rules?: RulesContext;
+  /** The root the scanner is walking; skips the root lookup. */
+  root?: { library: Library; rootId: number; rootPath: string };
   /** Apply the scanner's eligibility rules (enabled library, extensions, hidden/temp/recycle-bin paths, ignore globs). */
   screen?: boolean;
   signal?: AbortSignal;
@@ -101,10 +103,13 @@ export function createMediaEngine(ctx: AppContext) {
   };
 
   const summaryOf = (id: number) => {
-    const row = mediaDetailQuery(ctx.db, { id });
+    const row = mediaSummaryQuery(ctx.db, { id });
     if (!row) throw notFound(`media file ${id}`);
-    return toSummary(row as MediaSummaryRow);
+    return toSummary(row);
   };
+
+  const rootExists = (rootId: number) =>
+    ctx.db.select({ id: libraryRoots.id }).from(libraryRoots).where(eq(libraryRoots.id, rootId)).get() !== undefined;
 
   const emitUpdated = (row: Pick<MediaFileRow, 'id' | 'status' | 'path'>) =>
     ctx.events.emit('media.updated', { mediaFileId: row.id, status: row.status, path: row.path });
@@ -299,7 +304,11 @@ export function createMediaEngine(ctx: AppContext) {
     refs: MediaRefs,
     options: EvaluateOptions = {},
   ): Promise<EvaluateOutcome> => {
-    const found = await ctx.services.libraries.findRootForPath(path);
+    const found = options.root
+      ? rootExists(options.root.rootId)
+        ? options.root
+        : null
+      : await ctx.services.libraries.findRootForPath(path);
     if (!found) return { probed: false, result: outcome('unknown_path', null, `${path} is not inside a library root`) };
     const { library, rootId, rootPath } = found;
     const entry = options.entry ?? (await statEntry(path));
