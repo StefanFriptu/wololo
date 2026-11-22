@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { isWithin, matchRoot, normalizeRootPath, relativeToRoot, rootsOverlap } from './paths.ts';
+import { matchRoot, normalizeRootPath, relativeToRoot, rootsOverlap } from './paths.ts';
 
 test.each([
   ['/data/media/', '/data/media'],
@@ -10,19 +10,6 @@ test.each([
   ['', null],
 ])('normalizeRootPath - %p -> %p', (input, expected) => {
   expect(normalizeRootPath(input)).toBe(expected);
-});
-
-test.each([
-  ['/data/media/movies/a.mkv', '/data/media/movies', true],
-  ['/data/media/movies', '/data/media/movies', true],
-  ['/data/media/movies2/a.mkv', '/data/media/movies', false],
-  ['/data/media', '/data/media/movies', false],
-  ['/anything', '/', true],
-  ['/data/media/Recycle', '/data/media/Recycle/', true],
-  ['/data/media/Recycle/old.mkv', '/data/media/Recycle/', true],
-  ['/data/media/Recycled', '/data/media/Recycle/', false],
-])('isWithin - %s in %s -> %p', (path, root, expected) => {
-  expect(isWithin(path, root)).toBe(expected);
 });
 
 test('matchRoot - longest matching root wins', () => {
