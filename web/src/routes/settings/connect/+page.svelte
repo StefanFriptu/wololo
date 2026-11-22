@@ -12,11 +12,10 @@
   import { PATH_SCOPE_LABELS } from '#lib/labels.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import { runtimeConfig } from '#lib/runtime.ts';
-  import type { ArrInstance, ArrKind, PathMapping } from '#lib/shared.ts';
+  import { type ArrInstance, type ArrKind, type PathMapping, webhookUrl } from '#lib/shared.ts';
   import { attempt } from '#lib/attempt.ts';
   import { toasts } from '#lib/toast.svelte.ts';
   import { isLoopbackAddress, loadWebhookAddress, saveWebhookAddress } from '#lib/webhookAddress.ts';
-  import { webhookUrl } from '#lib/webhookUrl.ts';
 
   const instances = new Resource((signal) => api('GET /api/v1/arr', { signal }));
   const mappings = new Resource((signal) => api('GET /api/v1/pathmappings', { signal }));

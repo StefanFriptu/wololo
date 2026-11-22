@@ -135,6 +135,13 @@ export const API_ROUTE_META: { readonly [K in RouteKey]: RouteMeta } = {
   'DELETE /api/v1/arr/:id': empty('integrations', 'Delete a Radarr/Sonarr instance'),
   'GET /api/v1/arr/:id/rootfolders': json('integrations', 'Root folders with local path mapping'),
   'GET /api/v1/arr/:id/qualityprofiles': json('integrations', 'Radarr/Sonarr quality profiles'),
+  'GET /api/v1/arr/:id/webhook': json('integrations', "Wololo's webhook in Radarr/Sonarr Settings > Connect"),
+  'PUT /api/v1/arr/:id/webhook': json('integrations', "Create or update Wololo's webhook in Radarr/Sonarr"),
+  'POST /api/v1/arr/:id/webhook/test': json('integrations', 'Make Radarr/Sonarr send their Test event to Wololo'),
+  'GET /api/v1/arr/:id/pathcheck': json(
+    'integrations',
+    'Check a real Radarr/Sonarr file is visible through the path mappings',
+  ),
   'GET /api/v1/arr/:id/lookup': json('integrations', 'Search Radarr for a movie (BDMV movie_match decision)'),
   'POST /api/v1/webhook/radarr': json('integrations', 'Radarr webhook (Test, Download incl. upgrades); ?instance=<id>'),
   'POST /api/v1/webhook/sonarr': json('integrations', 'Sonarr webhook (Test, Download incl. upgrades); ?instance=<id>'),

@@ -1,4 +1,4 @@
-import type { ArrKind } from '#lib/shared.ts';
+import type { ArrKind } from './domain.ts';
 
 interface WebhookUrlInput {
   origin: string;

@@ -1,4 +1,5 @@
 import type {
+  ArrKind,
   JobState,
   JobStep,
   JobSummary,
@@ -65,6 +66,8 @@ export interface EventMap {
   'task.finished': { task: ScheduledTaskInfo };
   'bdmv.decision': { decisionId: number; mediaFileId: number };
   'settings.changed': { sections: string[] };
+  /** A Radarr/Sonarr Test event reached the webhook; instanceId from ?instance=, null without it. */
+  'webhook.test': { kind: ArrKind; instanceId: number | null };
   'log.entry': LogEntry;
 }
 
@@ -91,6 +94,7 @@ export const EVENT_NAMES = [
   'task.finished',
   'bdmv.decision',
   'settings.changed',
+  'webhook.test',
   'log.entry',
 ] as const satisfies readonly EventName[];
 

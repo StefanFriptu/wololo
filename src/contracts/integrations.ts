@@ -5,9 +5,12 @@
  */
 import type {
   ArrInstanceInput,
+  ArrPathCheck,
   ArrQualityProfile,
   ArrRootFolder,
   ArrTestRequest,
+  ArrWebhookStatus,
+  ArrWebhookTest,
   ConnectionTestResult,
   DownloadClientInput,
   PathMappingInput,
@@ -78,6 +81,14 @@ export interface ArrService {
   importMovieFolder(instanceId: number, localPath: string, movieId: number): Promise<void>;
   /** First enabled Radarr instance, used by BDMV when the library has none assigned. */
   defaultRadarr(): Promise<ArrInstance | null>;
+  /** GET /api/v3/notification: the Webhook whose URL is Wololo's webhook path with ?instance=<id>. */
+  webhook(id: number): Promise<ArrWebhookStatus>;
+  /** Creates (from GET /api/v3/notification/schema) or updates that Webhook to POST webhookUrl on import and upgrade. */
+  ensureWebhook(id: number, address: string): Promise<ArrWebhookStatus>;
+  /** POST /api/v3/notification/test on that Webhook. */
+  testWebhook(id: number): Promise<ArrWebhookTest>;
+  /** Maps one real Radarr/Sonarr file to a local path; suggests a mapping under a library root when it is missing. */
+  checkPaths(id: number): Promise<ArrPathCheck>;
 }
 
 /**
