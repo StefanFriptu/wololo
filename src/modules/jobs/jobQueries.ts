@@ -23,8 +23,6 @@ export interface PageWindow {
   sortDir: SortDir;
 }
 
-const nowIso = () => new Date().toISOString();
-
 const JOB_SUMMARY_COLUMNS = {
   id: jobs.id,
   type: jobs.type,
@@ -58,13 +56,12 @@ export function getJobRow(db: Db, id: number): JobRow | undefined {
   return db.select().from(jobs).where(eq(jobs.id, id)).get();
 }
 
-export function updateJobRow(db: Db, id: number, patch: Partial<NewJobRow>): JobRow | undefined {
-  return db
-    .update(jobs)
-    .set({ ...patch, updatedAt: nowIso() })
-    .where(eq(jobs.id, id))
-    .returning()
-    .get();
+export function updateJobRow(
+  db: Db,
+  id: number,
+  patch: Partial<NewJobRow> & { updatedAt: string },
+): JobRow | undefined {
+  return db.update(jobs).set(patch).where(eq(jobs.id, id)).returning().get();
 }
 
 /** media_files.last_job_id has no foreign key, so the pointer is cleared here with the job. */
@@ -85,7 +82,7 @@ export function findActiveJobForMedia(db: Db, mediaFileId: number): JobRow | und
 }
 
 /** Atomically moves the highest-priority oldest queued job to running. */
-export function claimNextQueued(db: Db): JobRow | undefined {
+export function claimNextQueued(db: Db, nowIso: string): JobRow | undefined {
   return db.transaction((tx) => {
     const next = tx
       .select({ id: jobs.id, attempts: jobs.attempts })
@@ -94,20 +91,19 @@ export function claimNextQueued(db: Db): JobRow | undefined {
       .orderBy(desc(jobs.priority), asc(jobs.id))
       .get();
     if (!next) return undefined;
-    const now = nowIso();
     return tx
       .update(jobs)
       .set({
         state: 'running',
         step: 'preparing',
         attempts: next.attempts + 1,
-        startedAt: now,
+        startedAt: nowIso,
         finishedAt: null,
         progress: 0,
         speed: null,
         etaSec: null,
         error: null,
-        updatedAt: now,
+        updatedAt: nowIso,
       })
       .where(and(eq(jobs.id, next.id), eq(jobs.state, 'queued')))
       .returning()

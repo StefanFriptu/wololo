@@ -148,7 +148,7 @@ test('enqueue - a finished job does not block a new one', async () => {
   t = s.t;
   const id = s.addFile();
   const first = await enqueueDisc(s, id);
-  updateJobRow(t.ctx.db, first.id, { state: 'completed' });
+  updateJobRow(t.ctx.db, first.id, { state: 'completed', updatedAt: new Date().toISOString() });
 
   expect((await enqueueDisc(s, id)).id).not.toBe(first.id);
 });
@@ -642,7 +642,12 @@ test('retry - re-queues a failed job and rejects active ones', async () => {
   t = s.t;
   const job = await enqueueDisc(s, s.addFile());
   await expectAppError(t.ctx.services.jobs.retry(job.id), 'conflict');
-  updateJobRow(t.ctx.db, job.id, { state: 'failed', error: 'boom', finishedAt: '2026-01-01T00:00:00.000Z' });
+  updateJobRow(t.ctx.db, job.id, {
+    state: 'failed',
+    error: 'boom',
+    finishedAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: new Date().toISOString(),
+  });
 
   expect(await t.ctx.services.jobs.retry(job.id)).toMatchObject({ state: 'queued', trigger: 'retry', error: null });
   const history = await t.ctx.services.jobs.history({ jobId: job.id });
@@ -653,7 +658,7 @@ test('retry - resets the attempt counter so earlier failures do not count as int
   const s = setup();
   t = s.t;
   const job = await enqueueDisc(s, s.addFile());
-  updateJobRow(t.ctx.db, job.id, { state: 'failed', attempts: 3 });
+  updateJobRow(t.ctx.db, job.id, { state: 'failed', attempts: 3, updatedAt: new Date().toISOString() });
 
   await t.ctx.services.jobs.retry(job.id);
 
@@ -675,7 +680,7 @@ test('retry - refuses when another job for the same file is active', async () =>
   t = s.t;
   const id = s.addFile();
   const old = await enqueueDisc(s, id);
-  updateJobRow(t.ctx.db, old.id, { state: 'failed' });
+  updateJobRow(t.ctx.db, old.id, { state: 'failed', updatedAt: new Date().toISOString() });
   await enqueueDisc(s, id);
   await expectAppError(t.ctx.services.jobs.retry(old.id), 'conflict');
 });
@@ -687,7 +692,7 @@ test('remove - deletes a finished job and its log, refuses active ones', async (
   await expectAppError(t.ctx.services.jobs.remove(job.id), 'conflict');
   const logPath = join(t.ctx.config.get().jobLogDir, `${job.id}.txt`);
   writeFileSync(logPath, 'log');
-  updateJobRow(t.ctx.db, job.id, { state: 'completed', logPath });
+  updateJobRow(t.ctx.db, job.id, { state: 'completed', logPath, updatedAt: new Date().toISOString() });
   const removed = waitForEvent(t.ctx.events, 'job.removed');
 
   await t.ctx.services.jobs.remove(job.id);
@@ -702,7 +707,7 @@ test('remove - clears the media file last job pointer', async () => {
   t = s.t;
   const mediaFileId = s.addFile();
   const job = await enqueueDisc(s, mediaFileId);
-  updateJobRow(t.ctx.db, job.id, { state: 'completed' });
+  updateJobRow(t.ctx.db, job.id, { state: 'completed', updatedAt: new Date().toISOString() });
   t.ctx.db.update(mediaFiles).set({ lastJobId: job.id }).where(eq(mediaFiles.id, mediaFileId)).run();
   const lastJobId = () =>
     t?.ctx.db.select({ lastJobId: mediaFiles.lastJobId }).from(mediaFiles).where(eq(mediaFiles.id, mediaFileId)).get()
@@ -720,7 +725,7 @@ test('log and remove - a stored log path outside the job log dir is never read o
   const job = await enqueueDisc(s, s.addFile());
   const outside = join(t.dir, 'secret.txt');
   writeFileSync(outside, 'secret');
-  updateJobRow(t.ctx.db, job.id, { state: 'completed', logPath: outside });
+  updateJobRow(t.ctx.db, job.id, { state: 'completed', logPath: outside, updatedAt: new Date().toISOString() });
   expect(existsSync(outside)).toBe(true);
 
   expect(await t.ctx.services.jobs.log(job.id)).toBeNull();
@@ -749,10 +754,10 @@ test('list - filters by state list, type and media file, newest first by default
   t = s.t;
   const fileId = s.addFile();
   const a = await enqueueDisc(s, fileId);
-  updateJobRow(t.ctx.db, a.id, { state: 'failed' });
+  updateJobRow(t.ctx.db, a.id, { state: 'failed', updatedAt: new Date().toISOString() });
   const b = await enqueueDisc(s, s.addFile());
   const c = await enqueueDisc(s, s.addFile());
-  updateJobRow(t.ctx.db, c.id, { state: 'completed' });
+  updateJobRow(t.ctx.db, c.id, { state: 'completed', updatedAt: new Date().toISOString() });
   const jobs = t.ctx.services.jobs;
 
   expect((await jobs.list({})).items.map((job) => job.id)).toEqual([c.id, b.id, a.id]);
@@ -820,7 +825,11 @@ test('housekeeping - removes orphaned and expired job logs and stale temp files'
   const logDir = t.ctx.config.get().jobLogDir;
   const recent = await enqueueDisc(s, s.addFile());
   const old = await enqueueDisc(s, s.addFile());
-  updateJobRow(t.ctx.db, old.id, { state: 'completed', finishedAt: '2020-01-01T00:00:00.000Z' });
+  updateJobRow(t.ctx.db, old.id, {
+    state: 'completed',
+    finishedAt: '2020-01-01T00:00:00.000Z',
+    updatedAt: new Date().toISOString(),
+  });
   for (const id of [recent.id, old.id, 9999]) writeFileSync(join(logDir, `${id}.txt`), 'log');
   writeFileSync(join(logDir, 'notes.txt'), 'not a job log');
   const temp = join(t.dir, 'x.wololo-tmp.mkv');

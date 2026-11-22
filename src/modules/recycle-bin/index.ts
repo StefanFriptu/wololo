@@ -105,11 +105,15 @@ export function createRecycleBinService(ctx: AppContext, options: RecycleBinOpti
   };
 
   const moveForReplace = async (path: string, target: string, refs: { jobId: number; mediaFileId: number | null }) => {
-    const row = insertRecycleRowForJob(db, { ...rowValues(path, target, statSync(path), refs), jobId: refs.jobId });
+    const row = insertRecycleRowForJob(
+      db,
+      { ...rowValues(path, target, statSync(path), refs), jobId: refs.jobId },
+      now().toISOString(),
+    );
     try {
       rename(path, target);
     } catch (error) {
-      deleteRecycleRow(db, row.id);
+      deleteRecycleRow(db, row.id, now().toISOString());
       throw error;
     }
     await recordHistory(row, refs, 'move');
@@ -214,7 +218,7 @@ export function createRecycleBinService(ctx: AppContext, options: RecycleBinOpti
         return { entry: toRecycleBinEntry(await moveForReplace(path, target, refs)), mode: 'move' };
       }
       const row = await record(path, target, refs, 'link');
-      linkJobToRecycleRow(db, refs.jobId, row.id);
+      linkJobToRecycleRow(db, refs.jobId, row.id, now().toISOString());
       return { entry: toRecycleBinEntry(row), mode: 'link' };
     },
 

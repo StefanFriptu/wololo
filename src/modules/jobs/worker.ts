@@ -139,7 +139,8 @@ export function createWorker(deps: WorkerDeps) {
   };
 
   const requeueWithoutAttempt = async (row: JobRow, message: string) => {
-    const restored = updateJobRow(ctx.db, row.id, { attempts: Math.max(0, row.attempts - 1) }) ?? row;
+    const restored =
+      updateJobRow(ctx.db, row.id, { attempts: Math.max(0, row.attempts - 1), updatedAt: now().toISOString() }) ?? row;
     await lifecycle.requeued(restored, restored.trigger, message);
   };
 
@@ -164,7 +165,9 @@ export function createWorker(deps: WorkerDeps) {
       await lifecycle.completedAfterInterruption(row, resolution.outputPath, `completed (late error: ${message})`);
       return;
     }
-    const settled = resolution ? (updateJobRow(ctx.db, jobId, { tempPath: null }) ?? row) : row;
+    const settled = resolution
+      ? (updateJobRow(ctx.db, jobId, { tempPath: null, updatedAt: now().toISOString() }) ?? row)
+      : row;
     const reason = signal.aborted ? (signal.reason as AbortReason) : null;
     if (reason === 'shutdown') {
       jobLog.section('interrupted by shutdown, re-queued');
@@ -216,6 +219,7 @@ export function createWorker(deps: WorkerDeps) {
       updateJobRow(ctx.db, jobId, {
         logPath,
         bytesBefore: (claimed.type === 'audio' ? fileSize(claimed.sourcePath) : null) ?? claimed.bytesBefore,
+        updatedAt: now().toISOString(),
       }) ?? claimed;
     const jobLog = createJobLog(logPath, { log });
     jobLog.section(`attempt ${row.attempts} (${row.trigger}): ${row.type} ${row.sourcePath}`);
@@ -267,7 +271,7 @@ export function createWorker(deps: WorkerDeps) {
   const startAvailable = () => {
     while (started && pauseReasons().length === 0) {
       if (active.size >= ctx.settings.section('processing').concurrency) return;
-      const row = claimNextQueued(ctx.db);
+      const row = claimNextQueued(ctx.db, now().toISOString());
       if (!row) return;
       launch(row);
     }

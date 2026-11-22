@@ -98,7 +98,7 @@ test('GET /api/v1/jobs/:id and /log - detail, 404s and the plain-text log', asyn
   const logPath = join(t.ctx.config.get().jobLogDir, `${row.id}.txt`);
   mkdirSync(t.ctx.config.get().jobLogDir, { recursive: true });
   writeFileSync(logPath, 'line one\nline two\n');
-  updateJobRow(t.ctx.db, row.id, { logPath });
+  updateJobRow(t.ctx.db, row.id, { logPath, updatedAt: new Date().toISOString() });
   const log = await t.request(`/api/v1/jobs/${row.id}/log`);
   expect(log.status).toBe(200);
   expect(log.headers.get('content-type')).toContain('text/plain');
@@ -114,7 +114,7 @@ test('GET /api/v1/jobs/:id/log/tail - returns only the tail of a large log, then
   mkdirSync(t.ctx.config.get().jobLogDir, { recursive: true });
   const flood = 'Past duration 0.999 too large\n'.repeat(20_000);
   writeFileSync(logPath, `${flood}last line\n`);
-  updateJobRow(t.ctx.db, row.id, { logPath });
+  updateJobRow(t.ctx.db, row.id, { logPath, updatedAt: new Date().toISOString() });
   const size = Bun.file(logPath).size;
   expect(size).toBeGreaterThan(512 * 1024);
 

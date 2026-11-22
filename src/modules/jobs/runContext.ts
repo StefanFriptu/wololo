@@ -32,6 +32,7 @@ export function createRunContext(deps: RunContextDeps): JobRunContext {
   const jobId = row.id;
   let step: JobStep = row.step;
   let lastEvent = 0;
+  const nowIso = () => new Date(now()).toISOString();
   let lastPersist = now();
 
   const run: JobRunContext['run'] = async (options) => {
@@ -64,7 +65,7 @@ export function createRunContext(deps: RunContextDeps): JobRunContext {
     log: jobLog,
     setStep: (next, message) => {
       step = next;
-      updateJobRow(ctx.db, jobId, { step: next });
+      updateJobRow(ctx.db, jobId, { step: next, updatedAt: nowIso() });
       jobLog.section(message ? `${next}: ${message}` : next);
       ctx.events.emit('job.step', { jobId, step: next, message: message ?? null });
     },
@@ -76,7 +77,7 @@ export function createRunContext(deps: RunContextDeps): JobRunContext {
       const current = now();
       if (current - lastPersist >= PROGRESS_PERSIST_INTERVAL_MS) {
         lastPersist = current;
-        updateJobRow(ctx.db, jobId, { progress, speed, etaSec });
+        updateJobRow(ctx.db, jobId, { progress, speed, etaSec, updatedAt: nowIso() });
       }
       if (progress < 1 && current - lastEvent < PROGRESS_EVENT_INTERVAL_MS) return;
       lastEvent = current;
@@ -85,7 +86,7 @@ export function createRunContext(deps: RunContextDeps): JobRunContext {
     setTempPath: async (path) => {
       if (path !== null && !isTempPath(path))
         throw new AppError('internal', `temp path must contain the temp marker: ${path}`);
-      updateJobRow(ctx.db, jobId, { tempPath: path });
+      updateJobRow(ctx.db, jobId, { tempPath: path, updatedAt: nowIso() });
       jobLog.line(path === null ? 'temp path cleared' : `temp path: ${path}`);
     },
     run,
@@ -104,7 +105,7 @@ export function createRunContext(deps: RunContextDeps): JobRunContext {
     },
     verify: async (request) => {
       const result = await verifier(request);
-      updateJobRow(ctx.db, jobId, { verification: result });
+      updateJobRow(ctx.db, jobId, { verification: result, updatedAt: nowIso() });
       return result;
     },
   };

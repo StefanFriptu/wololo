@@ -37,10 +37,10 @@ function compact(data: HistoryData): HistoryData {
 
 export type JobLifecycle = ReturnType<typeof createJobLifecycle>;
 
-export function createJobLifecycle(ctx: AppContext, options: { log: Logger; onChange: () => void }) {
+export function createJobLifecycle(ctx: AppContext, options: { log: Logger; now: () => Date; onChange: () => void }) {
   const { db, events } = ctx;
   const { log } = options;
-  const nowIso = () => new Date().toISOString();
+  const nowIso = () => options.now().toISOString();
 
   const addHistory = (entry: HistoryInput) => {
     insertHistoryRow(db, {
@@ -62,8 +62,8 @@ export function createJobLifecycle(ctx: AppContext, options: { log: Logger; onCh
     }
   };
 
-  const persist = (row: JobRow, patch: Parameters<typeof updateJobRow>[2]): JobRow =>
-    updateJobRow(db, row.id, patch) ?? row;
+  const persist = (row: JobRow, patch: Omit<Parameters<typeof updateJobRow>[2], 'updatedAt'>): JobRow =>
+    updateJobRow(db, row.id, { ...patch, updatedAt: nowIso() }) ?? row;
 
   const cancel = (row: JobRow, message: string): JobRow => {
     const updated = persist(row, {

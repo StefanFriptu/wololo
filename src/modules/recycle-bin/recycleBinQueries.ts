@@ -3,8 +3,6 @@ import type { Db } from '../../db/client.ts';
 import { jobs, type RecycleBinRow, recycleBin } from '../../db/schema.ts';
 import type { SortDir } from '../../shared/domain.ts';
 
-const nowIso = () => new Date().toISOString();
-
 const active = () => and(isNull(recycleBin.restoredAt), isNull(recycleBin.purgedAt));
 
 export function insertRecycleRow(db: Db, values: typeof recycleBin.$inferInsert): RecycleBinRow {
@@ -27,22 +25,23 @@ export function markRecycleRow(db: Db, id: number, patch: { restoredAt?: string;
   return row;
 }
 
-export function deleteRecycleRow(db: Db, id: number): void {
-  db.update(jobs).set({ recycleBinEntryId: null, updatedAt: nowIso() }).where(eq(jobs.recycleBinEntryId, id)).run();
+export function deleteRecycleRow(db: Db, id: number, nowIso: string): void {
+  db.update(jobs).set({ recycleBinEntryId: null, updatedAt: nowIso }).where(eq(jobs.recycleBinEntryId, id)).run();
   db.delete(recycleBin).where(eq(recycleBin.id, id)).run();
 }
 
-export function linkJobToRecycleRow(db: Db, jobId: number, entryId: number): void {
-  db.update(jobs).set({ recycleBinEntryId: entryId, updatedAt: nowIso() }).where(eq(jobs.id, jobId)).run();
+export function linkJobToRecycleRow(db: Db, jobId: number, entryId: number, nowIso: string): void {
+  db.update(jobs).set({ recycleBinEntryId: entryId, updatedAt: nowIso }).where(eq(jobs.id, jobId)).run();
 }
 
 export function insertRecycleRowForJob(
   db: Db,
   values: typeof recycleBin.$inferInsert & { jobId: number },
+  nowIso: string,
 ): RecycleBinRow {
   return db.transaction((tx) => {
     const row = tx.insert(recycleBin).values(values).returning().get();
-    tx.update(jobs).set({ recycleBinEntryId: row.id, updatedAt: nowIso() }).where(eq(jobs.id, values.jobId)).run();
+    tx.update(jobs).set({ recycleBinEntryId: row.id, updatedAt: nowIso }).where(eq(jobs.id, values.jobId)).run();
     return row;
   });
 }
