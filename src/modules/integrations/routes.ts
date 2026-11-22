@@ -11,6 +11,7 @@ import type {
   PlexConnectionUpdate,
   WebhookQuery,
 } from '../../shared/api-types.ts';
+import { ARR_KINDS, PATH_MAPPING_SCOPES } from '../../shared/domain.ts';
 import { radarrWebhookSchema, sonarrWebhookSchema } from './webhook-payload.ts';
 
 const httpUrl = z
@@ -20,7 +21,7 @@ const httpUrl = z
   .refine((value) => /^https?:\/\//i.test(value), 'expected an http(s) URL');
 
 const arrInstanceSchema = z.object({
-  kind: z.enum(['radarr', 'sonarr']),
+  kind: z.enum(ARR_KINDS),
   name: z.string().trim().min(1).max(64),
   url: httpUrl,
   apiKey: z.string().min(1),
@@ -69,7 +70,7 @@ const downloadClientSchema = z.object({
 }) satisfies z.ZodType<DownloadClientInput>;
 
 const pathMappingSchema = z.object({
-  scope: z.enum(['radarr', 'sonarr', 'plex', 'qbittorrent']),
+  scope: z.enum(PATH_MAPPING_SCOPES),
   instanceId: z.number().int().positive().nullish(),
   remotePath: z.string().trim().min(1),
   localPath: z.string().trim().min(1),

@@ -14,11 +14,10 @@
   import { formatDateTime } from '#lib/format/formatDateTime.ts';
   import { LOG_LEVEL_TONES } from '#lib/labels.ts';
   import { filterLogs } from '#lib/logs/filterLogs.ts';
-  import { LOG_LEVELS } from '#lib/logs/logLevels.ts';
   import type { LiveLogs } from '#lib/logs/LiveLogs.ts';
   import { updateLiveLogs } from '#lib/logs/updateLiveLogs.ts';
   import { Resource } from '#lib/resource.svelte.ts';
-  import type { LogFileInfo, LogLevel } from '#lib/shared.ts';
+  import { LOG_LEVELS, type LogFileInfo, type LogLevel } from '#lib/shared.ts';
 
   const MAX_ENTRIES = 1000;
   const TIME = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });

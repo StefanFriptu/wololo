@@ -1,5 +1,4 @@
-import type { LogEntry, LogLevel } from '#lib/shared.ts';
-import { LOG_LEVELS } from './logLevels.ts';
+import { LOG_LEVELS, type LogEntry, type LogLevel } from '#lib/shared.ts';
 
 interface LogFilter {
   /** Minimum level shown. */

@@ -9,12 +9,18 @@ import {
   type NewJobRow,
   recycleBin,
 } from '../../db/schema.ts';
-import { ACTIVE_JOB_STATES, type HistoryEventType, type JobState, type JobType } from '../../shared/domain.ts';
+import {
+  ACTIVE_JOB_STATES,
+  type HistoryEventType,
+  type JobState,
+  type JobType,
+  type SortDir,
+} from '../../shared/domain.ts';
 
 export interface PageWindow {
   page: number;
   pageSize: number;
-  sortDir: 'asc' | 'desc';
+  sortDir: SortDir;
 }
 
 const nowIso = () => new Date().toISOString();

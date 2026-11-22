@@ -1,5 +1,5 @@
 import { positiveIntParam as positiveInt } from '#lib/queryParams.ts';
-import { MEDIA_FILE_STATUSES, type MediaFileStatus, type MediaSortKey } from '#lib/shared.ts';
+import { MEDIA_FILE_STATUSES, type MediaFileStatus, type MediaSortKey, SORT_DIRS } from '#lib/shared.ts';
 import { DEFAULT_MEDIA_FILTERS } from './defaultMediaFilters.ts';
 import type { MediaFilters } from './MediaFilters.ts';
 import { MEDIA_KIND_FILTER_LABELS, type MediaKindFilter } from './mediaKindFilterLabels.ts';
@@ -19,7 +19,7 @@ export function parseMediaFilters(params: Pick<URLSearchParams, 'get'>): MediaFi
     page: positiveInt(params.get('page')) ?? DEFAULT_MEDIA_FILTERS.page,
     pageSize: pageSize !== undefined && PAGE_SIZES.includes(pageSize) ? pageSize : DEFAULT_MEDIA_FILTERS.pageSize,
     sortKey: oneOf(MEDIA_SORT_KEYS, params.get('sortKey')) ?? DEFAULT_MEDIA_FILTERS.sortKey,
-    sortDir: oneOf(['asc', 'desc'] as const, params.get('sortDir')) ?? DEFAULT_MEDIA_FILTERS.sortDir,
+    sortDir: oneOf(SORT_DIRS, params.get('sortDir')) ?? DEFAULT_MEDIA_FILTERS.sortDir,
     status: oneOf<MediaFileStatus>(MEDIA_FILE_STATUSES, params.get('status')),
     kind: oneOf(Object.keys(MEDIA_KIND_FILTER_LABELS) as MediaKindFilter[], params.get('kind')),
     libraryId: positiveInt(params.get('libraryId')),

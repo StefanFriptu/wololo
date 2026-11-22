@@ -4,7 +4,7 @@ import { isIP } from 'node:net';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pkg from '../../package.json' with { type: 'json' };
-import type { LogLevel } from '../shared/domain.ts';
+import { LOG_LEVELS } from '../shared/domain.ts';
 import { AUTHENTICATION_MODES, type AuthenticationMode, type GeneralConfig } from '../shared/settings.ts';
 
 type Env = Record<string, string | undefined>;
@@ -42,8 +42,6 @@ export interface AppConfig extends GeneralConfig {
   /** Problems found while loading (invalid env values, repaired config.json); logged by bootstrap. */
   warnings: string[];
 }
-
-const LOG_LEVELS: readonly LogLevel[] = ['trace', 'debug', 'info', 'warn', 'error'];
 
 const ENV_KEYS: Record<keyof GeneralConfig, string> = {
   port: 'WOLOLO__PORT',

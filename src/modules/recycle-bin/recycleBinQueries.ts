@@ -1,6 +1,7 @@
 import { and, asc, count, desc, eq, isNull, lte, type SQL } from 'drizzle-orm';
 import type { Db } from '../../db/client.ts';
 import { jobs, type RecycleBinRow, recycleBin } from '../../db/schema.ts';
+import type { SortDir } from '../../shared/domain.ts';
 
 const nowIso = () => new Date().toISOString();
 
@@ -48,7 +49,7 @@ export function insertRecycleRowForJob(
 
 export function listActiveRecycleRows(
   db: Db,
-  window: { page: number; pageSize: number; sortDir: 'asc' | 'desc' },
+  window: { page: number; pageSize: number; sortDir: SortDir },
 ): { rows: RecycleBinRow[]; total: number } {
   const total = db.select({ value: count() }).from(recycleBin).where(active()).get()?.value ?? 0;
   const rows = db

@@ -5,6 +5,7 @@ import type { AppContext } from '../app/context.ts';
 import { isLocalBindAddress, isValidBindAddress, isValidUrlBase } from '../core/config.ts';
 import { AppError, notFound } from '../core/errors.ts';
 import type { GeneralConfigView } from '../shared/api-types.ts';
+import { LOG_LEVELS } from '../shared/domain.ts';
 import type { ServerEvent, StreamHello } from '../shared/events.ts';
 import { AUTHENTICATION_MODES, type GeneralConfig } from '../shared/settings.ts';
 import { type ApiApp, parseBody, parseQuery, route } from './http.ts';
@@ -16,7 +17,7 @@ const generalUpdateSchema = z
     port: z.number().int().min(1).max(65535),
     bindAddress: z.string().refine(isValidBindAddress, 'expected "*" or an IP address'),
     urlBase: z.string().refine(isValidUrlBase, 'expected "" or "/path" with letters, digits, ".", "_", "~", "-"'),
-    logLevel: z.enum(['trace', 'debug', 'info', 'warn', 'error']),
+    logLevel: z.enum(LOG_LEVELS),
     instanceName: z.string().trim().min(1).max(64),
     authentication: z.enum(AUTHENTICATION_MODES),
   })
@@ -26,7 +27,7 @@ const generalUpdateSchema = z
 const settingsUpdateSchema = z.record(z.string(), z.unknown());
 
 const logQuerySchema = z.object({
-  level: z.enum(['trace', 'debug', 'info', 'warn', 'error']).optional(),
+  level: z.enum(LOG_LEVELS).optional(),
   module: z.string().optional(),
   afterId: z.coerce.number().int().optional(),
   limit: z.coerce.number().int().min(1).max(1000).optional(),

@@ -6,11 +6,16 @@
   import CopyButton from '#lib/components/CopyButton.svelte';
   import Icon from '#lib/components/Icon.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
-  import { LOG_LEVELS } from '#lib/logs/logLevels.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import { restarter } from '#lib/restarter.svelte.ts';
   import { runtimeConfig } from '#lib/runtime.ts';
-  import { AUTHENTICATION_MODES, type AuthenticationMode, type GeneralConfig, type GeneralConfigUpdate } from '#lib/shared.ts';
+  import {
+    AUTHENTICATION_MODES,
+    type AuthenticationMode,
+    type GeneralConfig,
+    type GeneralConfigUpdate,
+    LOG_LEVELS,
+  } from '#lib/shared.ts';
   import type { ThemeChoice } from '#lib/ThemeChoice.ts';
   import { theme } from '#lib/theme.svelte.ts';
   import { attempt } from '#lib/attempt.ts';
