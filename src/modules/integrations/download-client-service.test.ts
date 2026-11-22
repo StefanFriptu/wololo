@@ -381,6 +381,71 @@ test('downloadClient.checkSeedingGoals - without a recycle-bin entry the import 
   }
 });
 
+function importHistory(importedPath: string) {
+  return () => ({
+    page: 1,
+    pageSize: 250,
+    totalRecords: 1,
+    records: [
+      {
+        eventType: 'downloadFolderImported',
+        downloadId: 'REPLACED',
+        data: { droppedPath: '/downloads/Replaced/movie.mkv', importedPath },
+      },
+    ],
+  });
+}
+
+test('downloadClient.checkSeedingGoals - a later instance overrides an earlier import and a failing one is logged', async () => {
+  const { radarr } = await historyFixture('completed');
+  const later = startFakeUpstream({ 'GET /api/v3/history': importHistory('/movies/Other/Other.mkv') });
+  const down = startFakeUpstream({ 'GET /api/v3/history': () => new Response('down', { status: 503 }) });
+  try {
+    insertArrInstance(t.ctx.db, { name: 'Later', url: later.url });
+    insertArrInstance(t.ctx.db, { name: 'Down', url: down.url });
+    torrents = [torrent('replaced', '/downloads/Replaced')];
+    expect(await t.ctx.services.downloadClient.checkSeedingGoals()).toContain('0 removed');
+    expect(deletedHashes()).toEqual([]);
+    const warnings = t.ctx.logs
+      .entries({ module: 'downloadclient', level: 'warn' })
+      .filter((entry) => entry.message === 'import history unavailable; relying on the recycle bin');
+    expect(warnings.map((entry) => entry.data)).toMatchObject([{ instance: 'Down', hash: 'replaced' }]);
+  } finally {
+    radarr.stop();
+    later.stop();
+    down.stop();
+  }
+});
+
+test('downloadClient.checkSeedingGoals - torrents are removed one at a time in listing order', async () => {
+  const { downloads, radarr } = await historyFixture('completed');
+  mkdirSync(join(downloads, 'Second'), { recursive: true });
+  writeFileSync(join(downloads, 'Second', 'movie.mkv'), 'x');
+  radarr.on('GET /api/v3/history', (request) => {
+    const id = request.query.get('downloadId');
+    const dropped = id === 'REPLACED' ? '/downloads/Replaced/movie.mkv' : '/downloads/Second/movie.mkv';
+    return {
+      page: 1,
+      pageSize: 250,
+      totalRecords: 1,
+      records: [
+        {
+          eventType: 'downloadFolderImported',
+          downloadId: id,
+          data: { droppedPath: dropped, importedPath: '/movies/Movie (2020)/Movie.mkv' },
+        },
+      ],
+    };
+  });
+  try {
+    torrents = [torrent('replaced', '/downloads/Replaced'), torrent('second', '/downloads/Second')];
+    expect(await t.ctx.services.downloadClient.checkSeedingGoals()).toContain('2 removed');
+    expect(deletedHashes()).toEqual(['replaced', 'second']);
+  } finally {
+    radarr.stop();
+  }
+});
+
 test('downloadClient.checkSeedingGoals - imported but not converted keeps the torrent', async () => {
   const { radarr } = await historyFixture('failed');
   try {
