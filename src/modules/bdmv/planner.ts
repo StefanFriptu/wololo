@@ -13,6 +13,7 @@ import type {
   BdmvJobPlan,
   BdmvOutputTitle,
   BdmvTitleCandidate,
+  EffectiveProfile,
   Library,
   MovieMatchCandidate,
   ProbeResult,
@@ -129,6 +130,9 @@ export interface DiscPlan {
   analysis: DiscAnalysis | null;
   /** bluray: probe of the main playlist (when the plan got that far). */
   probe: ProbeResult | null;
+  /** The library and effective profile the plan was made with (when it got that far). */
+  library: Library | null;
+  profile: EffectiveProfile | null;
 }
 
 type Mode = 'evaluate' | 'execute';
@@ -141,6 +145,8 @@ const result = (
   evaluation: { status, reason, plan: extra.plan ?? null, decisionId: extra.decisionId ?? null },
   analysis: extra.analysis ?? null,
   probe: extra.probe ?? null,
+  library: extra.library ?? null,
+  profile: extra.profile ?? null,
 });
 
 function formatDuration(seconds: number): string {
@@ -286,9 +292,14 @@ export function createDiscPlanner(ctx: AppContext, deps: { isoReader: SevenZipIs
     return (containing ?? folders[0])?.localPath ?? null;
   }
 
-  async function plan(disc: DiscRow, mode: Mode, signal?: AbortSignal): Promise<DiscPlan> {
+  async function plan(
+    disc: DiscRow,
+    mode: Mode,
+    options: { signal?: AbortSignal; library?: Library } = {},
+  ): Promise<DiscPlan> {
+    const { signal } = options;
     const settings = ctx.settings.section('bdmv');
-    const library = await services.libraries.get(disc.row.libraryId);
+    const library = options.library ?? (await services.libraries.get(disc.row.libraryId));
     const source = await openDisc(disc.row.path, disc.kind, deps.isoReader);
     const analysis = await analyzeDisc(source, pickOptions(settings));
     if (analysis.parseErrors.length > 0 || analysis.warnings.length > 0)
@@ -375,13 +386,15 @@ export function createDiscPlanner(ctx: AppContext, deps: { isoReader: SevenZipIs
           plan: jobPlan,
           analysis,
           probe,
+          library,
+          profile,
         },
       );
     const extrasNote = titles.length > 1 ? ` (+${titles.length - 1} more)` : '';
     return result(
       'needs_work',
       `convert ${mainPlaylist.name} (${formatDuration(mainPlaylist.durationSec)}) to ${outputs[0]}${extrasNote}`,
-      { plan: jobPlan, analysis, probe },
+      { plan: jobPlan, analysis, probe, library, profile },
     );
   }
 
@@ -394,14 +407,14 @@ export function createDiscPlanner(ctx: AppContext, deps: { isoReader: SevenZipIs
     const converted = completedBdmvJob(ctx, mediaFileId);
     if (converted) return result('compatible', `converted to ${converted.outputPath ?? 'MKV'}`).evaluation;
     try {
-      return (await plan(disc, 'evaluate')).evaluation;
+      return (await plan(disc, 'evaluate', { library })).evaluation;
     } catch (error) {
       log.warn('BDMV evaluation failed', { mediaFileId, path: disc.row.path, error });
       return result('failed', `BDMV evaluation failed: ${errorMessage(error)}`).evaluation;
     }
   }
 
-  return { plan, evaluate, formatDuration };
+  return { plan, evaluate };
 }
 
 export type DiscPlanner = ReturnType<typeof createDiscPlanner>;

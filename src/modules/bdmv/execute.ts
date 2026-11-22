@@ -458,9 +458,10 @@ export function createBdmvExecutor(
     run.setStep('preparing', 're-analysing the disc');
     const disc = loadDiscRow(ctx, mediaFileId);
     const discPath = disc.row.path;
-    const fresh = await deps.planner.plan(disc, 'execute', run.signal);
+    const fresh = await deps.planner.plan(disc, 'execute', { signal: run.signal });
     const plan = fresh.evaluation.plan;
-    if (fresh.evaluation.status !== 'needs_work' || !plan || !fresh.analysis)
+    const { library, profile } = fresh;
+    if (fresh.evaluation.status !== 'needs_work' || !plan || !fresh.analysis || !library || !profile)
       throw new AppError('unprocessable', fresh.evaluation.reason ?? 'the disc no longer needs conversion');
     const playlists = fresh.analysis.playlists;
     run.log.section(`BDMV ${discPath} -> ${plan.titles.map((title) => title.outputPath).join(', ')}`);
@@ -474,9 +475,6 @@ export function createBdmvExecutor(
     try {
       await mkdir(tempDir, { recursive: true });
       await run.ensureFreeSpace(plan.rootFolderPath, plan.extractBytes + plan.estimatedOutputBytes);
-      const library = await services.libraries.get(disc.row.libraryId);
-      const profile = await services.rules.effectiveProfileForLibrary(disc.row.libraryId);
-      if (!profile) throw new AppError('unprocessable', 'the library has no player profile');
       const of = plan.titles.length;
 
       const work: TitleWork[] = [];

@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, mock, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -186,6 +186,17 @@ test('bdmv.evaluate - single main title becomes a needs_work plan into the Radar
   });
   expect(calls.lookupMovie?.[0]).toEqual([7, 'Jamon Jamon', 1992]);
   expect(calls.probe?.[0]).toEqual([disc, { playlist: '00800.mpls', signal: undefined }]);
+});
+
+test('bdmv.evaluate - loads the library once and the profile once', async () => {
+  const { t, mediaFileId } = setup();
+  const libraryGet = mock(t.ctx.services.libraries.get);
+  t.ctx.services.libraries.get = libraryGet;
+  const profileGet = mock(t.ctx.services.rules.effectiveProfileForLibrary);
+  t.ctx.services.rules.effectiveProfileForLibrary = profileGet;
+  expect((await t.ctx.services.bdmv.evaluate(mediaFileId)).status).toBe('needs_work');
+  expect(libraryGet).toHaveBeenCalledTimes(1);
+  expect(profileGet).toHaveBeenCalledTimes(1);
 });
 
 test('bdmv.evaluate - disabled in settings is ignored', async () => {
