@@ -49,7 +49,7 @@
       kind: 'movies',
       enabled: true,
       roots: [''],
-      profileIds: [],
+      profileIds: profiles.map((profile) => profile.id),
       mode: 'replace',
       keepLanguages: [],
       keepOriginalLanguage: true,
