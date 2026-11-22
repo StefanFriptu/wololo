@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { api } from '#lib/api/client.ts';
+  import { clock } from '#lib/clock.svelte.ts';
   import Async from '#lib/components/Async.svelte';
   import Badge from '#lib/components/Badge.svelte';
   import Icon from '#lib/components/Icon.svelte';
@@ -20,7 +21,6 @@
 
   let pageNumber = $state(1);
   let busy = $state(false);
-  const now = Date.now();
 
   const entries = new Resource((signal) =>
     api('GET /api/v1/recyclebin', { query: { page: pageNumber, pageSize: PAGE_SIZE, sortDir: 'desc' }, signal }),
@@ -119,7 +119,7 @@
                   {:else if entry.purgedAt}
                     <Badge label="Deleted" title={formatDateTime(entry.purgedAt)} />
                   {:else}
-                    <span class="nowrap" title={formatDateTime(entry.expiresAt)}>Deleted {formatRelativeTime(entry.expiresAt, now)}</span>
+                    <span class="nowrap" title={formatDateTime(entry.expiresAt)}>Deleted {formatRelativeTime(entry.expiresAt, clock.now)}</span>
                   {/if}
                 </td>
                 <td class="actions">

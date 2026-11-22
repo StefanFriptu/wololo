@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { api } from '#lib/api/client.ts';
   import { live } from '#lib/api/live.svelte.ts';
+  import { clock } from '#lib/clock.svelte.ts';
   import Async from '#lib/components/Async.svelte';
   import Badge from '#lib/components/Badge.svelte';
   import Icon from '#lib/components/Icon.svelte';
@@ -16,7 +17,6 @@
   import { attempt } from '#lib/attempt.ts';
 
   const tasks = new Resource((signal) => api('GET /api/v1/system/tasks', { signal }));
-  let now = $state(Date.now());
   let editing = $state<ScheduledTaskInfo | null>(null);
   let editOpen = $state(false);
   let interval = $state(60);
@@ -25,11 +25,6 @@
 
   $effect(() => {
     untrack(() => tasks.load());
-  });
-
-  $effect(() => {
-    const timer = setInterval(() => (now = Date.now()), 30_000);
-    return () => clearInterval(timer);
   });
 
   function replace(task: ScheduledTaskInfo): void {
@@ -104,7 +99,7 @@
                 </td>
                 <td class="nowrap">{formatInterval(task.intervalMinutes)}</td>
                 <td>
-                  <span title={formatDateTime(task.lastRunAt)} class="nowrap">{task.lastRunAt ? formatRelativeTime(task.lastRunAt, now) : 'Never'}</span>
+                  <span title={formatDateTime(task.lastRunAt)} class="nowrap">{task.lastRunAt ? formatRelativeTime(task.lastRunAt, clock.now) : 'Never'}</span>
                   {#if task.lastResult}
                     <Badge tone={task.lastResult === 'success' ? 'success' : 'danger'} label={task.lastResult} title={task.lastMessage} />
                   {/if}
@@ -112,7 +107,7 @@
                 </td>
                 <td class="hide-sm nowrap">{task.lastDurationMs === null ? '-' : formatDuration(task.lastDurationMs / 1000)}</td>
                 <td class="nowrap" title={formatDateTime(task.nextRunAt)}>
-                  {task.enabled && task.nextRunAt ? formatRelativeTime(task.nextRunAt, now) : '-'}
+                  {task.enabled && task.nextRunAt ? formatRelativeTime(task.nextRunAt, clock.now) : '-'}
                 </td>
                 <td class="actions">
                   <button class="small" onclick={() => run(task)} disabled={task.running} aria-label="Run {task.label} now" title="Run now">

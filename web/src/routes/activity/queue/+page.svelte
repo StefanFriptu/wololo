@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { api } from '#lib/api/client.ts';
   import { live } from '#lib/api/live.svelte.ts';
+  import { clock } from '#lib/clock.svelte.ts';
   import Async from '#lib/components/Async.svelte';
   import Badge from '#lib/components/Badge.svelte';
   import Icon from '#lib/components/Icon.svelte';
@@ -21,18 +22,12 @@
   const queue = new Resource((signal) => api('GET /api/v1/queue', { signal }));
   const settings = new Resource((signal) => api('GET /api/v1/settings', { signal }));
   let busy = $state(false);
-  let now = $state(Date.now());
 
   $effect(() => {
     untrack(() => {
       queue.load();
       settings.load();
     });
-  });
-
-  $effect(() => {
-    const timer = setInterval(() => (now = Date.now()), 30_000);
-    return () => clearInterval(timer);
   });
 
   const REFILL_DELAY_MS = 1000;
@@ -148,7 +143,7 @@
                   <td class="num hide-sm">{formatSpeed(job.speed)}</td>
                   <td class="num">{job.etaSec === null ? '-' : formatDuration(job.etaSec)}</td>
                   <td class="hide-sm">{JOB_TRIGGER_LABELS[job.trigger]}</td>
-                  <td class="hide-sm nowrap">{formatRelativeTime(job.createdAt, now)}</td>
+                  <td class="hide-sm nowrap">{formatRelativeTime(job.createdAt, clock.now)}</td>
                   <td class="actions">
                     <button class="small" onclick={() => cancel(job)} aria-label="Cancel {job.title}" title="Cancel">
                       <Icon name="close" size={14} />

@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { api } from '#lib/api/client.ts';
   import { live } from '#lib/api/live.svelte.ts';
+  import { clock } from '#lib/clock.svelte.ts';
   import Async from '#lib/components/Async.svelte';
   import Badge from '#lib/components/Badge.svelte';
   import Icon from '#lib/components/Icon.svelte';
@@ -22,7 +23,6 @@
 
   let event = $state<HistoryEventType | undefined>(undefined);
   let pageNumber = $state(1);
-  let now = $state(Date.now());
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
   const history = new Resource((signal) =>
@@ -38,11 +38,6 @@
   $effect(() => {
     const target = history.data ? pageInRange(history.data) : null;
     if (target !== null) pageNumber = target;
-  });
-
-  $effect(() => {
-    const timer = setInterval(() => (now = Date.now()), 30_000);
-    return () => clearInterval(timer);
   });
 
   function refreshSoon(): void {
@@ -126,7 +121,7 @@
                   {#if info?.outputPath}<div class="muted small break">{info.outputPath}</div>{/if}
                   {#if info?.error}<div class="error small">{info.error}</div>{/if}
                 </td>
-                <td class="nowrap" title={formatDateTime(entry.createdAt)}>{formatRelativeTime(entry.createdAt, now)}</td>
+                <td class="nowrap" title={formatDateTime(entry.createdAt)}>{formatRelativeTime(entry.createdAt, clock.now)}</td>
               </tr>
             {/each}
           </tbody>

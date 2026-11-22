@@ -5,6 +5,7 @@
   import { page } from '$app/state';
   import { api } from '#lib/api/client.ts';
   import { live } from '#lib/api/live.svelte.ts';
+  import { clock } from '#lib/clock.svelte.ts';
   import Async from '#lib/components/Async.svelte';
   import Badge from '#lib/components/Badge.svelte';
   import ConvertTargetModal from '#lib/components/ConvertTargetModal.svelte';
@@ -47,7 +48,6 @@
 
   const selected = new SvelteSet<number>();
   let searchText = $state(parseMediaFilters(page.url.searchParams).search ?? '');
-  let now = $state(Date.now());
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
   $effect(() => {
@@ -74,11 +74,6 @@
   $effect(() => {
     void filters.libraryId;
     untrack(() => stats.load({ silent: stats.data !== undefined }));
-  });
-
-  $effect(() => {
-    const timer = setInterval(() => (now = Date.now()), 30_000);
-    return () => clearInterval(timer);
   });
 
   function refreshSoon(): void {
@@ -443,7 +438,7 @@
                   </td>
                   <td class="num">{formatBytes(item.sizeBytes)}</td>
                   <td class="num hide-sm">{formatDuration(item.durationSec)}</td>
-                  <td class="hide-sm nowrap" title={item.updatedAt}>{formatRelativeTime(item.updatedAt, now)}</td>
+                  <td class="hide-sm nowrap" title={item.updatedAt}>{formatRelativeTime(item.updatedAt, clock.now)}</td>
                 </tr>
               {/each}
             </tbody>
