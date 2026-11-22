@@ -113,9 +113,9 @@ export function createWorker(deps: WorkerDeps) {
 
   const refreshGates = async () => {
     windowClosed = !isWithinProcessingWindow(ctx.settings.section('processing').window, now());
-    const due = Date.now() - plexCheckedAt >= PLEX_POLL_INTERVAL_MS;
+    const due = now().getTime() - plexCheckedAt >= PLEX_POLL_INTERVAL_MS;
     if (!due || (active.size === 0 && countJobsInState(ctx.db, 'queued') === 0)) return;
-    plexCheckedAt = Date.now();
+    plexCheckedAt = now().getTime();
     if (!(await plexWantsPause())) {
       plexStreaming = false;
       return;
