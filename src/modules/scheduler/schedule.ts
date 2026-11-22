@@ -1,6 +1,5 @@
+import { MINUTE_MS } from '../../core/time.ts';
 import type { TaskName } from '../../shared/domain.ts';
-
-const MINUTE_MS = 60_000;
 
 /** Pure: next run of an enabled task; overdue runs (e.g. after downtime) are due now. */
 export function nextRunAt(options: {

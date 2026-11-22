@@ -1,8 +1,8 @@
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { DAY_MS } from '../../core/time.ts';
 
 export const RECYCLE_DIR_NAME = '.wololo-recycle';
 const STAMP_PATTERN = /^\d{8}T\d{6}Z(-\d+)?$/;
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Compact UTC stamp used as the per-recycle folder name: "20261115T103000Z". */
 export function recycleStamp(date: Date): string {
