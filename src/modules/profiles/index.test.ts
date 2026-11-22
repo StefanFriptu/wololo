@@ -211,3 +211,25 @@ test('profiles.codecCatalog - lists audio, video and subtitle codecs with the pc
   expect(catalog.video.map((codec) => codec.codec)).toContain('hevc');
   expect(catalog.subtitle.map((codec) => codec.codec)).toContain('hdmv_pgs_subtitle');
 });
+
+test('profiles.codecCatalog - only truehd, flac, alac and pcm are lossless', () => {
+  const catalog = profiles().codecCatalog();
+  const lossless = [...catalog.audio, ...catalog.video, ...catalog.subtitle]
+    .filter((codec) => codec.lossless)
+    .map((codec) => codec.codec);
+  expect(lossless).toEqual(['truehd', 'flac', 'alac', 'pcm_*']);
+  expect(catalog.audio.map((codec) => codec.codec)).toEqual([
+    'ac3',
+    'eac3',
+    'aac',
+    'mp3',
+    'mp2',
+    'dts',
+    'truehd',
+    'flac',
+    'alac',
+    'pcm_*',
+    'opus',
+    'vorbis',
+  ]);
+});

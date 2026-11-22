@@ -44,7 +44,7 @@ src/
     language.ts            normalizeLanguage / sameLanguage (ISO 639-2/B)
     trimTrailingSlashes.ts strip trailing "/" from a URL (callers trim whitespace first where they did)
     paging.ts              DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, resolvePageWindow (clamp page and page size)
-    audioRules.ts          codecAllowed, AC3_MAX_KBPS / MAX_AUDIO_KBPS, maxBitrateKbps (engine, profile schema, web editor)
+    audioRules.ts          codecAllowed, isLosslessAudio, AC3_MAX_KBPS / MAX_AUDIO_KBPS, maxBitrateKbps (engine, probe, codec catalog, profile schema, web editor)
   contracts/               service interfaces + pure function signatures per module
   modules/
     probe/ scan/ scheduler/          probe-scan
