@@ -14,7 +14,13 @@
     DOLBY_VISION_MODES,
     MAX_AUDIO_KBPS,
     maxBitrateKbps,
-    type ProfileInput, type ProfileTemplate, type TargetAudioCodec } from '#lib/shared.ts';
+    type CodecCatalog,
+    type Library,
+    type ProfileInput,
+    type ProfileTemplate,
+    type ProfileWithUsage,
+    type TargetAudioCodec,
+  } from '#lib/shared.ts';
   import { toasts } from '#lib/toast.svelte.ts';
 
   const TARGETS: { value: TargetAudioCodec; label: string }[] = [
@@ -36,17 +42,27 @@
   const rawId = $derived(page.params.id ?? '');
   const isNew = $derived(rawId === 'new');
 
-  const data = new Resource(async (signal) => {
-    const [catalog, templates, libraries] = await Promise.all([
-      api('GET /api/v1/profiles/codecs', { signal }),
-      api('GET /api/v1/profiles/templates', { signal }),
-      api('GET /api/v1/libraries', { signal }),
+  const data: Resource<{
+    catalog: CodecCatalog;
+    templates: ProfileTemplate[];
+    libraries: Library[];
+    existing: ProfileWithUsage | null;
+    input: ProfileInput;
+  }> = new Resource(async (signal) => {
+    const known = data.data;
+    const [reference, existing] = await Promise.all([
+      known ??
+        Promise.all([
+          api('GET /api/v1/profiles/codecs', { signal }),
+          api('GET /api/v1/profiles/templates', { signal }),
+          api('GET /api/v1/libraries', { signal }),
+        ]).then(([catalog, templates, libraries]) => ({ catalog, templates, libraries })),
+      isNew ? null : api('GET /api/v1/profiles/:id', { params: { id: Number(rawId) }, signal }),
     ]);
-    const existing = isNew ? null : await api('GET /api/v1/profiles/:id', { params: { id: Number(rawId) }, signal });
     const input: ProfileInput = existing
       ? { name: existing.name, description: existing.description, definition: existing.definition }
-      : blankInput(templates);
-    return { catalog, libraries, existing, input };
+      : blankInput(reference.templates);
+    return { ...reference, existing, input };
   });
 
   let form = $state<ProfileInput | null>(null);

@@ -58,14 +58,11 @@
       job.reset();
       log.reset();
       job.load();
+      profiles.load({ silent: profiles.data !== undefined });
     });
   });
 
   syncJobLog(job, log, LOG_POLL_MS);
-
-  $effect(() => {
-    if (job.data?.profileId != null) untrack(() => profiles.load({ silent: profiles.data !== undefined }));
-  });
 
   $effect(() => {
     void log.data;
