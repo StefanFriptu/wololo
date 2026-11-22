@@ -1,9 +1,10 @@
 import { constants, existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
-import { access, statfs } from 'node:fs/promises';
+import { access } from 'node:fs/promises';
 import { release, type } from 'node:os';
 import { join } from 'node:path';
 import type { AppContext } from '../../app/context.ts';
 import type { SystemService } from '../../contracts/platform.ts';
+import { freeBytes } from '../../core/freeBytes.ts';
 import { findExecutable, runProcess } from '../../core/process.ts';
 import { MIGRATIONS_DIR } from '../../db/client.ts';
 import type { SystemStatus } from '../../shared/api-types.ts';
@@ -44,11 +45,8 @@ function isWritable(path: string): Promise<boolean> {
   return withTimeout(check, ROOT_PROBE_TIMEOUT_MS, false);
 }
 
-function freeBytes(path: string): Promise<number | null> {
-  const check = statfs(path).then(
-    (stats) => Number(stats.bavail) * Number(stats.bsize),
-    () => null,
-  );
+function freeBytesWithTimeout(path: string): Promise<number | null> {
+  const check = freeBytes(path).catch(() => null);
   return withTimeout(check, ROOT_PROBE_TIMEOUT_MS, null);
 }
 
@@ -112,7 +110,7 @@ export function createSystemService(ctx: AppContext): SystemService {
           .map(async (root): Promise<LibraryRootFact> => ({ ...root, problem: await rootProblem(root.path) })),
       ),
       isWritable(current.configDir),
-      freeBytes(current.configDir),
+      freeBytesWithTimeout(current.configDir),
       toolReport(),
     ]);
     return buildHealthChecks({
