@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { CheckAction } from '../../contracts/probe-scan.ts';
 import type { RadarrWebhookPayload, SonarrWebhookPayload, WebhookResponse } from '../../shared/api-types.ts';
 import type { ArrInstance, ArrKind } from '../../shared/domain.ts';
+import { trimTrailingSlashes } from '../../shared/trimTrailingSlashes.ts';
 import { joinRemotePath } from './path-map.ts';
 
 const optional = <T extends z.ZodType>(schema: T) => schema.nullish().transform((value) => value ?? undefined);
@@ -126,7 +127,7 @@ export function sonarrImport(payload: z.infer<typeof sonarrWebhookSchema>): Webh
 export type InstanceResolution = { ok: true; instance: ArrInstance } | { ok: false; reason: string };
 
 function normalizeUrl(url: string): string {
-  return url.trim().toLowerCase().replace(/\/+$/, '');
+  return trimTrailingSlashes(url.trim().toLowerCase());
 }
 
 /**
