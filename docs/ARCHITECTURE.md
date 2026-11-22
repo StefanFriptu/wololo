@@ -1,6 +1,6 @@
 # Wololo architecture
 
-Wololo is one Bun process: a Hono HTTP server, a SQLite database (bun:sqlite + Drizzle), an in-process job worker and scheduler, and a static SvelteKit SPA, all on one port (default 8585). Requirements live in [SPEC.md](SPEC.md), code conventions in [CONVENTIONS.md](CONVENTIONS.md), settled contract questions in [DECISIONS.md](DECISIONS.md). Where CONVENTIONS.md and a contract in `src/contracts` disagree, the contract wins. Where this file narrows SPEC.md, the decision is listed under [v1 scope decisions](#v1-scope-decisions).
+Wololo is one Bun process: a Hono HTTP server, a SQLite database (bun:sqlite + Drizzle), an in-process job worker and scheduler, and a static SvelteKit SPA, all on one port (default 8585). Requirements live in [SPEC.md](SPEC.md), code conventions in [CONVENTIONS.md](CONVENTIONS.md) and [CONVENTIONS-WEB.md](CONVENTIONS-WEB.md), settled contract questions in [DECISIONS.md](DECISIONS.md). Where CONVENTIONS.md and a contract in `src/contracts` disagree, the contract wins. Where this file narrows SPEC.md, the decision is listed under [v1 scope decisions](#v1-scope-decisions).
 
 ## Module rules
 
