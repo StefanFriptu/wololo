@@ -4,6 +4,7 @@ import type {
   PlanConversion,
   ResolveEffectiveProfile,
   RulesInput,
+  SelectBitrate,
 } from '../../contracts/rules-ffmpeg.ts';
 import { codecAllowed } from '../../shared/audioRules.ts';
 import type {
@@ -21,7 +22,6 @@ import type {
 } from '../../shared/domain.ts';
 import { TARGET_AUDIO_CODECS } from '../../shared/domain.ts';
 import { normalizeLanguage, sameLanguage } from '../../shared/language.ts';
-import { selectBitrate } from '../ffmpeg/args.ts';
 
 const RULES_ENGINE_VERSION = 1;
 
@@ -233,6 +233,12 @@ function samePresentation(track: AudioTrack, other: AudioTrack, mode: LibraryRul
   if (!languageMatches(track.language, other.language)) return false;
   return similarDuration(track.stream.durationSec, other.stream.durationSec);
 }
+
+export const selectBitrate: SelectBitrate = (channels, bitrates) => {
+  if (channels <= 1) return bitrates.mono;
+  if (channels === 2) return bitrates.stereo;
+  return bitrates.surround;
+};
 
 function encodeSpec(stream: AudioStream, audio: DeviceProfileDefinition['audio']): AudioEncodeSpec {
   const sourceChannels = Math.max(1, stream.channels);

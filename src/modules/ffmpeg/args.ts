@@ -1,5 +1,5 @@
 import { normalize } from 'node:path';
-import type { BuildAudioConversionArgs, SelectBitrate } from '../../contracts/rules-ffmpeg.ts';
+import type { BuildAudioConversionArgs } from '../../contracts/rules-ffmpeg.ts';
 import type { MediaStream, PlannedStream, StreamKind } from '../../shared/domain.ts';
 
 type OutputFormat = 'matroska' | 'mp4';
@@ -23,12 +23,6 @@ const STATISTICS_TAGS = [
 ] as const;
 
 const MP4_TEXT_SUBTITLES = new Set(['subrip', 'ass', 'ssa', 'webvtt', 'text']);
-
-export const selectBitrate: SelectBitrate = (channels, bitrates) => {
-  if (channels <= 1) return bitrates.mono;
-  if (channels === 2) return bitrates.stereo;
-  return bitrates.surround;
-};
 
 function outputFormat(path: string): OutputFormat {
   return /\.(mp4|m4v)$/i.test(path) ? 'mp4' : 'matroska';

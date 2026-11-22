@@ -4,7 +4,7 @@ import type { AudioConversionInput } from '../../contracts/rules-ffmpeg.ts';
 import type { LibraryRuleSettings, MediaStream, ProbeResult } from '../../shared/domain.ts';
 import { templateDefinition } from '../profiles/profileTemplates.ts';
 import { planConversion, resolveEffectiveProfile } from '../rules/engine.ts';
-import { buildAudioConversionArgs, selectBitrate } from './args.ts';
+import { buildAudioConversionArgs } from './args.ts';
 
 const LIBRARY: LibraryRuleSettings = {
   mode: 'replace',
@@ -59,18 +59,6 @@ function clearedTags(specifier: string): string[] {
     '_STATISTICS_TAGS',
   ].flatMap((tag) => [`-metadata:s:${specifier}`, `${tag}=`, `-metadata:s:${specifier}`, `${tag}-eng=`]);
 }
-
-test.each([
-  [1, 192],
-  [2, 448],
-  [3, 640],
-  [5, 640],
-  [6, 640],
-  [8, 640],
-  [0, 192],
-])('selectBitrate - %i channels use %i kbps', (channels, kbps) => {
-  expect(selectBitrate(channels, { mono: 192, stereo: 448, surround: 640 })).toBe(kbps);
-});
 
 test('buildAudioConversionArgs - dts 5.1 movie becomes the full ac3 conversion argv', () => {
   const args = buildAudioConversionArgs(

@@ -12,7 +12,7 @@ import type {
   PlannedStream,
 } from '../../shared/domain.ts';
 import { templateDefinition } from '../profiles/profileTemplates.ts';
-import { checkProfiles, computeRulesKey, planConversion, resolveEffectiveProfile } from './engine.ts';
+import { checkProfiles, computeRulesKey, planConversion, resolveEffectiveProfile, selectBitrate } from './engine.ts';
 
 const LIBRARY: LibraryRuleSettings = {
   mode: 'replace',
@@ -90,6 +90,18 @@ function dataStream(): OtherStream {
     mimeType: null,
   };
 }
+
+test.each([
+  [1, 192],
+  [2, 448],
+  [3, 640],
+  [5, 640],
+  [6, 640],
+  [8, 640],
+  [0, 192],
+])('selectBitrate - %i channels use %i kbps', (channels, kbps) => {
+  expect(selectBitrate(channels, { mono: 192, stereo: 448, surround: 640 })).toBe(kbps);
+});
 
 test.each([
   ['dts', null, null],
