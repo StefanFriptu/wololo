@@ -14,10 +14,10 @@ import { audioStream, probeResult, subtitleStream, videoStream } from '../../../
 import { createFakeRunContext } from '../../../test/helpers/run-context.ts';
 import { stubService } from '../../../test/helpers/stubs.ts';
 import type { FfmpegService } from '../../contracts/rules-ffmpeg.ts';
+import { blurayInput, playlistArgs } from '../../core/bluray.ts';
 import type { ConversionPlan, MediaStream, PlannedStream, ProbeResult } from '../../shared/domain.ts';
 import { normalizeLanguage } from '../../shared/language.ts';
 import { parseMpls } from './mpls.ts';
-import { playlistNumber } from './titles.ts';
 
 function ffmpegHasBluray(): boolean {
   if (!ffmpegAvailable()) return false;
@@ -181,7 +181,7 @@ function toProbe(path: string, args: string[]): ProbeResult {
   });
 }
 
-const discProbe = (disc: string) => toProbe(disc, ['-playlist', String(playlistNumber(PLAYLIST)), `bluray:${disc}`]);
+const discProbe = (disc: string) => toProbe(disc, [...playlistArgs(PLAYLIST), blurayInput(disc)]);
 
 /** The probe as if ffmpeg had tagged nothing: languages must then come from the MPLS stream table. */
 const withoutLanguages = (probe: ProbeResult): ProbeResult => ({
