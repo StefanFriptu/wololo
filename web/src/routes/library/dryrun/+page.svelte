@@ -1,5 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { page } from '$app/state';
   import { api } from '#lib/api/client.ts';
   import { live } from '#lib/api/live.svelte.ts';
   import Async from '#lib/components/Async.svelte';
@@ -13,12 +15,13 @@
   import { dryRunGroupQuery } from '#lib/library/dryRunGroupQuery.ts';
   import { parseOptionalNumber } from '#lib/parseOptionalNumber.ts';
   import { href } from '#lib/paths.ts';
+  import { positiveIntParam, queryString } from '#lib/queryParams.ts';
   import { convertTargets } from '#lib/profiles/convertTargets.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import { attempt } from '#lib/attempt.ts';
 
-  let libraryId = $state<number | undefined>(undefined);
-  let profileId = $state<number | undefined>(undefined);
+  const libraryId = $derived(positiveIntParam(page.url.searchParams.get('libraryId')));
+  const profileId = $derived(positiveIntParam(page.url.searchParams.get('profileId')));
 
   const libraries = new Resource((signal) => api('GET /api/v1/libraries', { signal }));
   const profiles = new Resource((signal) => api('GET /api/v1/profiles', { signal }));
@@ -45,6 +48,11 @@
     }),
   );
   $effect(() => live.onReconnect(() => report.load({ silent: true })));
+
+  function update(patch: { libraryId?: number; profileId?: number }): void {
+    const next = { libraryId, profileId, ...patch };
+    goto(href(`/library/dryrun${queryString(next)}`), { replace: true, reset: false });
+  }
 
   let convertOpen = $state(false);
 
@@ -74,14 +82,14 @@
 <div class="toolbar selectors">
   <label>
     <span>Library</span>
-    <select value={libraryId ?? ''} onchange={(event) => (libraryId = parseOptionalNumber(event.currentTarget.value))}>
+    <select value={libraryId ?? ''} onchange={(event) => update({ libraryId: parseOptionalNumber(event.currentTarget.value) })}>
       <option value="">All libraries</option>
       {#each libraries.data ?? [] as library (library.id)}<option value={library.id}>{library.name}</option>{/each}
     </select>
   </label>
   <label>
     <span>Profile</span>
-    <select value={profileId ?? ''} onchange={(event) => (profileId = parseOptionalNumber(event.currentTarget.value))}>
+    <select value={profileId ?? ''} onchange={(event) => update({ profileId: parseOptionalNumber(event.currentTarget.value) })}>
       <option value="">Every assigned profile</option>
       {#each profiles.data ?? [] as profile (profile.id)}<option value={profile.id}>{profile.name}</option>{/each}
     </select>

@@ -24,7 +24,7 @@
   import { needsWorkScope } from '#lib/library/needsWorkScope.ts';
   import { syncSearchText } from '#lib/library/syncSearchText.svelte.ts';
   import { serializeMediaFilters } from '#lib/library/serializeMediaFilters.ts';
-  import { pageInRange } from '#lib/pageInRange.ts';
+  import { clampPage } from '#lib/clampPage.svelte.ts';
   import { convertTargets, type ConvertTarget } from '#lib/profiles/convertTargets.ts';
   import { onlyDiscs } from '#lib/profiles/onlyDiscs.ts';
   import { profileChip } from '#lib/profiles/profileChip.ts';
@@ -67,10 +67,10 @@
     });
   });
 
-  $effect(() => {
-    const target = media.data ? pageInRange(media.data) : null;
-    if (target !== null) untrack(() => update({ page: target }));
-  });
+  clampPage(
+    () => media.data,
+    (target) => update({ page: target }),
+  );
 
   $effect(() => {
     void filters.libraryId;

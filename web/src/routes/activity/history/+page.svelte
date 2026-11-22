@@ -1,5 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { page } from '$app/state';
   import { api } from '#lib/api/client.ts';
   import { live } from '#lib/api/live.svelte.ts';
   import { clock } from '#lib/clock.svelte.ts';
@@ -8,13 +10,14 @@
   import Icon from '#lib/components/Icon.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import Pagination from '#lib/components/Pagination.svelte';
-  import { pageInRange } from '#lib/pageInRange.ts';
+  import { clampPage } from '#lib/clampPage.svelte.ts';
   import { formatBytes } from '#lib/format/formatBytes.ts';
   import { fileName } from '#lib/format/fileName.ts';
   import { formatDateTime } from '#lib/format/formatDateTime.ts';
   import { formatRelativeTime } from '#lib/format/formatRelativeTime.ts';
   import { HISTORY_EVENT_LABELS, HISTORY_EVENT_TONES } from '#lib/labels.ts';
   import { href } from '#lib/paths.ts';
+  import { positiveIntParam, queryString } from '#lib/queryParams.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import type { HistoryEventType } from '#lib/shared.ts';
 
@@ -22,8 +25,8 @@
   const REFRESH_DEBOUNCE_MS = 1000;
   const EVENTS = Object.keys(HISTORY_EVENT_LABELS) as HistoryEventType[];
 
-  let event = $state<HistoryEventType | undefined>(undefined);
-  let pageNumber = $state(1);
+  const event = $derived(EVENTS.find((value) => value === page.url.searchParams.get('event')));
+  const pageNumber = $derived(positiveIntParam(page.url.searchParams.get('page')) ?? 1);
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
   const history = new Resource((signal) =>
@@ -36,10 +39,16 @@
     untrack(() => history.load({ silent: history.data !== undefined }));
   });
 
-  $effect(() => {
-    const target = history.data ? pageInRange(history.data) : null;
-    if (target !== null) pageNumber = target;
-  });
+  clampPage(
+    () => history.data,
+    (target) => update({ page: target }),
+  );
+
+  function update(patch: { event?: HistoryEventType; page?: number }): void {
+    const next = { event, page: 1, ...patch };
+    const query = queryString({ event: next.event, page: next.page > 1 ? next.page : undefined });
+    goto(href(`/activity/history${query}`), { replace: true, reset: false });
+  }
 
   function refreshSoon(): void {
     clearTimeout(refreshTimer);
@@ -62,10 +71,7 @@
       <span class="sr-only">Event</span>
       <select
         value={event ?? ''}
-        onchange={(change) => {
-          event = EVENTS.find((value) => value === change.currentTarget.value);
-          pageNumber = 1;
-        }}
+        onchange={(change) => update({ event: EVENTS.find((value) => value === change.currentTarget.value) })}
       >
         <option value="">All events</option>
         {#each EVENTS as value (value)}<option {value}>{HISTORY_EVENT_LABELS[value]}</option>{/each}
@@ -126,7 +132,7 @@
           </tbody>
         </table>
       </div>
-      <Pagination page={data.page} pageSize={data.pageSize} total={data.total} onpage={(next) => (pageNumber = next)} />
+      <Pagination page={data.page} pageSize={data.pageSize} total={data.total} onpage={(next) => update({ page: next })} />
     {/snippet}
   </Async>
 </section>

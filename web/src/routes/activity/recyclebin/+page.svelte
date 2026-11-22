@@ -1,5 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { page } from '$app/state';
   import { api } from '#lib/api/client.ts';
   import { clock } from '#lib/clock.svelte.ts';
   import Async from '#lib/components/Async.svelte';
@@ -10,15 +12,16 @@
   import { formatBytes } from '#lib/format/formatBytes.ts';
   import { formatDateTime } from '#lib/format/formatDateTime.ts';
   import { formatRelativeTime } from '#lib/format/formatRelativeTime.ts';
-  import { pageInRange } from '#lib/pageInRange.ts';
   import { href } from '#lib/paths.ts';
+  import { positiveIntParam, queryString } from '#lib/queryParams.ts';
+  import { clampPage } from '#lib/clampPage.svelte.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import type { RecycleBinEntry } from '#lib/shared.ts';
   import { attempt, attemptOk } from '#lib/attempt.ts';
 
   const PAGE_SIZE = 50;
 
-  let pageNumber = $state(1);
+  const pageNumber = $derived(positiveIntParam(page.url.searchParams.get('page')) ?? 1);
   let busy = $state(false);
 
   const entries = new Resource((signal) =>
@@ -30,10 +33,11 @@
     untrack(() => entries.load({ silent: entries.data !== undefined }));
   });
 
-  $effect(() => {
-    const target = entries.data ? pageInRange(entries.data) : null;
-    if (target !== null) pageNumber = target;
-  });
+  function showPage(next: number): void {
+    goto(href(`/activity/recyclebin${queryString({ page: next > 1 ? next : undefined })}`), { replace: true, reset: false });
+  }
+
+  clampPage(() => entries.data, showPage);
 
   const isActive = (entry: RecycleBinEntry): boolean => entry.restoredAt === null && entry.purgedAt === null;
 
@@ -129,7 +133,7 @@
           </tbody>
         </table>
       </div>
-      <Pagination page={data.page} pageSize={data.pageSize} total={data.total} onpage={(next) => (pageNumber = next)} />
+      <Pagination page={data.page} pageSize={data.pageSize} total={data.total} onpage={showPage} />
     {/snippet}
   </Async>
 </section>
