@@ -14,8 +14,7 @@
       "!**/*.svelte",
       "!drizzle/meta",
       "!test/.cache",
-      "!docs/SPEC.md",
-      "!docs/CONVENTIONS.md"
+      "!docs/SPEC.md"
     ]
   },
   "formatter": {
