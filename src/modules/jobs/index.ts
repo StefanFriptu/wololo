@@ -60,10 +60,11 @@ function parseStates(value: string | undefined): JobState[] | undefined {
   return states.filter((state): state is JobState => (JOB_STATES as readonly string[]).includes(state));
 }
 
-export function createJobsService(ctx: AppContext): JobsService {
+export function createJobsService(ctx: AppContext, options: { now?: () => Date } = {}): JobsService {
   const log = ctx.logs.logger('jobs');
   const { db } = ctx;
-  const lifecycle = createJobLifecycle(ctx, { log, onChange: () => worker.wake() });
+  const now = options.now ?? (() => new Date());
+  const lifecycle = createJobLifecycle(ctx, { log, now, onChange: () => worker.wake() });
   const audioExecutor = createAudioExecutor({
     services: ctx.services,
     ffmpegPath: () => ctx.config.get().tools.ffmpeg,
@@ -87,6 +88,7 @@ export function createJobsService(ctx: AppContext): JobsService {
         beforeStreams: before,
         rulesKey: plan.rulesKey,
         lostFeatures: plan.lostFeatures,
+        updatedAt: now().toISOString(),
       });
     },
     log,
@@ -95,6 +97,7 @@ export function createJobsService(ctx: AppContext): JobsService {
     ctx,
     log,
     lifecycle,
+    now,
     executorFor: (type) => (type === 'audio' ? audioExecutor : ctx.services.bdmv.execute),
   });
 
@@ -252,7 +255,7 @@ export function createJobsService(ctx: AppContext): JobsService {
     for (const row of idleJobsWithTempPath(db)) {
       try {
         if (deleteTempPath(row.tempPath)) deleted += 1;
-        updateJobRow(db, row.id, { tempPath: null });
+        updateJobRow(db, row.id, { tempPath: null, updatedAt: now().toISOString() });
       } catch (error) {
         log.warn('cannot delete temp path', { jobId: row.id, path: row.tempPath, error: errorMessage(error) });
       }
@@ -297,7 +300,7 @@ export function createJobsService(ctx: AppContext): JobsService {
           continue;
         }
         if (resolution.tempDeleted) counts.tempFilesDeleted += 1;
-        const cleared = updateJobRow(db, row.id, { tempPath: null }) ?? row;
+        const cleared = updateJobRow(db, row.id, { tempPath: null, updatedAt: now().toISOString() }) ?? row;
         if (cleared.attempts >= maxAttempts) {
           await lifecycle.failed(cleared, `interrupted ${cleared.attempts} times, not retrying automatically`);
           continue;
@@ -430,6 +433,7 @@ export function createJobsService(ctx: AppContext): JobsService {
           outputPath: null,
           startedAt: null,
           finishedAt: null,
+          updatedAt: now().toISOString(),
         }) ?? row;
       lifecycle.addHistory({
         event: 'retried',

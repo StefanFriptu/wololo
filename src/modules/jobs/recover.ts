@@ -62,12 +62,12 @@ export function resolveInterruptedJob(
     case 'keep_original': {
       if (binRow && binActive) {
         if (!existsSync(binRow.recyclePath)) {
-          deleteRecycleRow(db, binRow.id);
+          deleteRecycleRow(db, binRow.id, options.now.toISOString());
           notes(`dropped recycle-bin entry ${binRow.id}: the original never reached ${binRow.recyclePath}`);
         } else if (sameInode(binRow.recyclePath, sourcePath)) {
           unlinkSync(binRow.recyclePath);
           removeEmptyRecycleDirs(binRow.recyclePath);
-          deleteRecycleRow(db, binRow.id);
+          deleteRecycleRow(db, binRow.id, options.now.toISOString());
           notes(`dropped recycle-bin link ${binRow.recyclePath}`);
         } else {
           notes(`kept recycle-bin entry ${binRow.recyclePath}: it is not a link of the original`);

@@ -101,7 +101,7 @@ describe.skipIf(!ffmpegAvailable())('crash during the replace step of a real aud
     const row = s.seedJob(source, { step: 'preparing' });
     const run = createFakeRunContext({ job: { id: row.id, sourcePath: source, mediaFileId: row.mediaFileId } });
     run.setStep = (step) => {
-      updateJobRow(s.t.ctx.db, row.id, { step });
+      updateJobRow(s.t.ctx.db, row.id, { step, updatedAt: new Date().toISOString() });
       if (step === 'notifying' && crashAt === 'notifying') throw new Error('simulated power loss while notifying');
     };
     const recycleBin =
@@ -114,7 +114,7 @@ describe.skipIf(!ffmpegAvailable())('crash during the replace step of a real aud
         : s.t.ctx.services.recycleBin;
     run.setTempPath = async (path) => {
       if (path === null && crashAt === 'clear_temp_path') throw new Error('simulated power loss after rename');
-      updateJobRow(s.t.ctx.db, row.id, { tempPath: path });
+      updateJobRow(s.t.ctx.db, row.id, { tempPath: path, updatedAt: new Date().toISOString() });
     };
     const executor = createAudioExecutor({
       services: { ...s.t.ctx.services, recycleBin },
