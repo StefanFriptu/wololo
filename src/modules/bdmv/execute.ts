@@ -21,7 +21,7 @@ import type {
 import { createIsoReader } from './iso.ts';
 import { buildMkvmergeArgs, MKVMERGE_OK_EXIT_CODES, parseMkvmergeIdentify, parseMkvmergeProgress } from './mkvmerge.ts';
 import { type DiscPlanner, loadDiscRow, withPlaylistLanguages } from './planner.ts';
-import { countForcedPgsCompositions } from './titles.ts';
+import { countForcedPgsCompositions, playlistStem } from './titles.ts';
 
 const PGS_CODEC = 'hdmv_pgs_subtitle';
 const DURATION_TOLERANCE_SEC = 0.5;
@@ -510,7 +510,7 @@ export function createBdmvExecutor(
             plan.sourceKind === 'iso'
               ? await isoReader.extractForMux(discPath, title.playlist, join(tempDir, `disc-${index}`), run.signal)
               : join(discPath, 'BDMV', 'PLAYLIST', title.playlist),
-          tempOutput: join(tempDir, `${index}-${basename(title.playlist, '.mpls')}.mkv`),
+          tempOutput: join(tempDir, `${index}-${playlistStem(title.playlist)}.mkv`),
           forced: new Set(),
           sideFiles: new Map(),
           tracks: [],

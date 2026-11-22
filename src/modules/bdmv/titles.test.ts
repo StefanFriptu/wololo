@@ -10,6 +10,7 @@ import {
   detectEncryption,
   hasLoops,
   pickMainTitle,
+  playlistStem,
   titleCandidate,
 } from './titles.ts';
 
@@ -326,4 +327,14 @@ test.each([
   ],
 ] as const)('defaultEditionNames - %j', (input, expected) => {
   expect(defaultEditionNames(input.map(([name, durationSec]) => ({ name, durationSec })))).toEqual(expected);
+});
+
+test.each([
+  ['00800.mpls', '00800'],
+  ['00800.MPLS', '00800'],
+  ['00800.Mpls', '00800'],
+  ['00800', '00800'],
+  ['00800.mpls.mpls', '00800.mpls'],
+])('playlistStem - %s', (name, stem) => {
+  expect(playlistStem(name)).toBe(stem);
 });

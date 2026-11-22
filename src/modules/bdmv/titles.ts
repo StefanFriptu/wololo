@@ -37,6 +37,10 @@ export const dedupePlaylists: DedupePlaylists = (playlists) => {
  * A playlist that plays the same part of a clip twice is a menu/background loop (BDInfo's "filter looping playlists").
  * Disjoint ranges of one clip are seamless branching (an extended cut reusing the feature m2ts), not a loop.
  */
+export function playlistStem(playlist: string): string {
+  return playlist.replace(/\.mpls$/i, '');
+}
+
 export function hasLoops(playlist: MplsPlaylist): boolean {
   const items = playlist.playItems;
   return items.some((a, i) =>

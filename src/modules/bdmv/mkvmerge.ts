@@ -10,6 +10,7 @@ import type {
   ParseMkvmergeIdentify,
 } from '../../contracts/bdmv.ts';
 import { normalizeLanguage } from '../../shared/language.ts';
+import { playlistStem } from './titles.ts';
 
 const identifySchema = z.object({
   tracks: z
@@ -170,7 +171,7 @@ export const buildOutputPaths: BuildOutputPaths = (rootFolder, movie, titles) =>
   const movieDir = join(rootFolder, folder);
   const used = new Set<string>();
   return titles.map((entry) => {
-    const stem = entry.playlist.replace(/\.mpls$/i, '');
+    const stem = playlistStem(entry.playlist);
     const edition = entry.edition ? sanitizeFileName(entry.edition) : '';
     const base =
       entry.role === 'extra'
