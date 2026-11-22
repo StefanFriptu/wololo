@@ -3,7 +3,7 @@ import type { Db } from '../../db/client.ts';
 import { libraries, libraryProfiles, libraryRoots } from '../../db/schema.ts';
 import type { Library } from '../../shared/domain.ts';
 
-/** Libraries with roots (freeBytes/accessible not filled in) and assigned profile ids, ordered by name. */
+/** Libraries with roots (freeBytes/accessible/writable not filled in) and assigned profile ids, ordered by name. */
 export function libraryQuery(db: Db, filter: { id?: number } = {}): Library[] {
   const rows =
     filter.id === undefined
@@ -30,7 +30,7 @@ export function libraryQuery(db: Db, filter: { id?: number } = {}): Library[] {
     enabled: row.enabled,
     roots: roots
       .filter((root) => root.libraryId === row.id)
-      .map((root) => ({ id: root.id, path: root.path, freeBytes: null, accessible: true })),
+      .map((root) => ({ id: root.id, path: root.path, freeBytes: null, accessible: true, writable: true })),
     profileIds: profiles.filter((profile) => profile.libraryId === row.id).map((profile) => profile.profileId),
     mode: row.mode,
     keepLanguages: row.keepLanguages,

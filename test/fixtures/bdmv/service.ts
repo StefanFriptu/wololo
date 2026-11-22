@@ -301,7 +301,7 @@ export function setup(
     name: 'Movies',
     kind: 'movies',
     enabled: true,
-    roots: [{ id: seeded.rootIds[0] as number, path: root, freeBytes: null, accessible: true }],
+    roots: [{ id: seeded.rootIds[0] as number, path: root, freeBytes: null, accessible: true, writable: true }],
     profileIds: [],
     arrInstanceId: null,
     bdmvEnabled: true,

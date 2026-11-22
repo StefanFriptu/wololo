@@ -234,6 +234,8 @@ export interface LibraryRoot {
   /** Free space on the root's filesystem, filled by list/get endpoints, null when the path is unreachable. */
   freeBytes: number | null;
   accessible: boolean;
+  /** Wololo can create files in it (needed to replace files once processing is on). */
+  writable: boolean;
 }
 
 export type StreamOp = 'copy' | 'encode';

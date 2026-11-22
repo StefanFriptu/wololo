@@ -1,4 +1,5 @@
-import { readdir, stat, statfs } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { access, readdir, stat, statfs } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { and, eq, inArray, notInArray, or } from 'drizzle-orm';
 import type { AppContext } from '../../app/context.ts';
@@ -20,11 +21,17 @@ import { normalizeLanguage } from '../../shared/language.ts';
 import { allRootsQuery, libraryQuery } from './libraryQuery.ts';
 import { matchRoot, normalizeRootPath, rootsOverlap } from './paths.ts';
 
-export async function rootDiskInfo(path: string): Promise<Pick<LibraryRoot, 'freeBytes' | 'accessible'>> {
+export async function rootDiskInfo(path: string): Promise<Pick<LibraryRoot, 'freeBytes' | 'accessible' | 'writable'>> {
   const info = await stat(path).catch(() => null);
-  if (!info?.isDirectory()) return { freeBytes: null, accessible: false };
-  const fs = await statfs(path).catch(() => null);
-  return { freeBytes: fs ? Number(fs.bavail) * Number(fs.bsize) : null, accessible: true };
+  if (!info?.isDirectory()) return { freeBytes: null, accessible: false, writable: false };
+  const [fs, writable] = await Promise.all([
+    statfs(path).catch(() => null),
+    access(path, constants.W_OK | constants.X_OK).then(
+      () => true,
+      () => false,
+    ),
+  ]);
+  return { freeBytes: fs ? Number(fs.bavail) * Number(fs.bsize) : null, accessible: true, writable };
 }
 
 async function withDiskInfo(library: Library): Promise<Library> {
