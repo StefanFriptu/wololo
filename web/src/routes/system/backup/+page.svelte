@@ -11,8 +11,7 @@
   import { Resource } from '#lib/resource.svelte.ts';
   import { restarter } from '#lib/restarter.svelte.ts';
   import type { BackupInfo, RestoreResult } from '#lib/shared.ts';
-  import { attempt } from '#lib/attempt.ts';
-  import { toasts } from '#lib/toast.svelte.ts';
+  import { attempt, attemptOk } from '#lib/attempt.ts';
 
   const KIND_LABELS: Record<BackupInfo['kind'], string> = {
     manual: 'Manual',
@@ -37,22 +36,14 @@
   }
 
   async function download(backup: BackupInfo): Promise<void> {
-    try {
-      downloadBlob(await api('GET /api/v1/system/backups/:name', { params: { name: backup.name } }), backup.name);
-    } catch (error) {
-      toasts.error(error);
-    }
+    const blob = await attempt(() => api('GET /api/v1/system/backups/:name', { params: { name: backup.name } }));
+    if (blob !== undefined) downloadBlob(blob, backup.name);
   }
 
   async function remove(backup: BackupInfo): Promise<void> {
     if (!confirm(`Delete the backup ${backup.name}?`)) return;
-    try {
-      await api('DELETE /api/v1/system/backups/:name', { params: { name: backup.name } });
-      toasts.success('Backup deleted');
-      await backups.load({ silent: true });
-    } catch (error) {
-      toasts.error(error);
-    }
+    const removed = await attemptOk(() => api('DELETE /api/v1/system/backups/:name', { params: { name: backup.name } }), 'Backup deleted');
+    if (removed) await backups.load({ silent: true });
   }
 
   function restored(result: RestoreResult | undefined): void {

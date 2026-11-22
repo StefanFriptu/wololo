@@ -3,6 +3,7 @@
   import { beforeNavigate, goto } from '$app/navigation';
   import { page } from '$app/state';
   import { api } from '#lib/api/client.ts';
+  import { attempt, attemptOk } from '#lib/attempt.ts';
   import Async from '#lib/components/Async.svelte';
   import CodecPicker from '#lib/components/CodecPicker.svelte';
   import Icon from '#lib/components/Icon.svelte';
@@ -21,7 +22,6 @@
     type ProfileWithUsage,
     type TargetAudioCodec,
   } from '#lib/shared.ts';
-  import { toasts } from '#lib/toast.svelte.ts';
 
   const TARGETS: { value: TargetAudioCodec; label: string }[] = [
     { value: 'ac3', label: 'AC3 (Dolby Digital)' },
@@ -100,34 +100,29 @@
     if (!form) return;
     const body: ProfileInput = { ...form, name: form.name.trim(), description: form.description?.trim() ?? '' };
     busy = true;
-    try {
-      const result = isNew
-        ? await api('POST /api/v1/profiles', { body })
-        : await api('PUT /api/v1/profiles/:id', { params: { id: Number(rawId) }, body });
+    const result = await attempt(
+      () =>
+        isNew
+          ? api('POST /api/v1/profiles', { body })
+          : api('PUT /api/v1/profiles/:id', { params: { id: Number(rawId) }, body }),
+      isNew ? 'Profile created' : 'Profile saved; affected files are re-checked on the next scan',
+    );
+    if (result) {
       saved = JSON.stringify(form);
-      toasts.success(isNew ? 'Profile created' : 'Profile saved; affected files are re-checked on the next scan');
       if (isNew) await goto(href(`/profiles/${result.id}`), { replace: true });
       else await data.load({ silent: true });
-    } catch (error) {
-      toasts.error(error);
-    } finally {
-      busy = false;
     }
+    busy = false;
   }
 
   async function remove(): Promise<void> {
     if (!confirm('Delete this profile?')) return;
     busy = true;
-    try {
-      await api('DELETE /api/v1/profiles/:id', { params: { id: Number(rawId) } });
-      toasts.success('Profile deleted');
+    if (await attemptOk(() => api('DELETE /api/v1/profiles/:id', { params: { id: Number(rawId) } }), 'Profile deleted')) {
       saved = JSON.stringify(form);
       await goto(href('/profiles'));
-    } catch (error) {
-      toasts.error(error);
-    } finally {
-      busy = false;
     }
+    busy = false;
   }
 </script>
 

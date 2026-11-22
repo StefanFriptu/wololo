@@ -1,10 +1,10 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { api } from '#lib/api/client.ts';
+  import { attemptOk } from '#lib/attempt.ts';
   import Modal from '#lib/components/Modal.svelte';
   import { PATH_SCOPE_LABELS } from '#lib/labels.ts';
   import type { ArrInstance, PathMapping, PathMappingInput, PathMappingScope } from '#lib/shared.ts';
-  import { toasts } from '#lib/toast.svelte.ts';
 
   let {
     open = $bindable(false),
@@ -40,17 +40,14 @@
       localPath: form.localPath.trim(),
     };
     busy = true;
-    try {
+    const saved = await attemptOk(async () => {
       if (mapping) await api('PUT /api/v1/pathmappings/:id', { params: { id: mapping.id }, body });
       else await api('POST /api/v1/pathmappings', { body });
-      toasts.success('Path mapping saved');
-      open = false;
-      onsaved();
-    } catch (error) {
-      toasts.error(error);
-    } finally {
-      busy = false;
-    }
+    }, 'Path mapping saved');
+    busy = false;
+    if (!saved) return;
+    open = false;
+    onsaved();
   }
 </script>
 

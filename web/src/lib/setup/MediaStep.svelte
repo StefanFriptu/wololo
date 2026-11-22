@@ -1,10 +1,10 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { api } from '#lib/api/client.ts';
+  import { attempt } from '#lib/attempt.ts';
   import Icon from '#lib/components/Icon.svelte';
   import LibraryForm from '#lib/components/LibraryForm.svelte';
   import type { ArrInstance, ProfileWithUsage } from '#lib/shared.ts';
-  import { toasts } from '#lib/toast.svelte.ts';
   import CheckList from './CheckList.svelte';
   import { folderChecks } from './checks.ts';
   import type { SetupCheck } from './SetupCheck.ts';
@@ -21,12 +21,10 @@
   }
 
   async function openForm(): Promise<void> {
-    try {
-      [profiles, arrInstances] = await Promise.all([api('GET /api/v1/profiles'), api('GET /api/v1/arr')]);
-      formOpen = true;
-    } catch (error) {
-      toasts.error(error);
-    }
+    const loaded = await attempt(() => Promise.all([api('GET /api/v1/profiles'), api('GET /api/v1/arr')]));
+    if (!loaded) return;
+    [profiles, arrInstances] = loaded;
+    formOpen = true;
   }
 
   $effect(() => {

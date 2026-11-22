@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { auth } from '#lib/api/auth.svelte.ts';
   import { api } from '#lib/api/client.ts';
+  import { attempt } from '#lib/attempt.ts';
   import { errorMessage } from '#lib/api/errorMessage.ts';
   import { subscribeEvents } from '#lib/api/events.ts';
   import Async from '#lib/components/Async.svelte';
@@ -18,7 +19,6 @@
   import { updateLiveLogs } from '#lib/logs/updateLiveLogs.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import type { LogFileInfo, LogLevel } from '#lib/shared.ts';
-  import { toasts } from '#lib/toast.svelte.ts';
 
   const MAX_ENTRIES = 1000;
   const TIME = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -65,20 +65,13 @@
   }
 
   async function view(file: LogFileInfo): Promise<void> {
-    try {
-      openFile = { name: file.name, text: await api('GET /api/v1/system/logs/files/:name', { params: { name: file.name } }) };
-    } catch (error) {
-      toasts.error(error);
-    }
+    const text = await attempt(() => api('GET /api/v1/system/logs/files/:name', { params: { name: file.name } }));
+    if (text !== undefined) openFile = { name: file.name, text };
   }
 
   async function download(name: string): Promise<void> {
-    try {
-      const text = await api('GET /api/v1/system/logs/files/:name', { params: { name } });
-      downloadBlob(new Blob([text], { type: 'text/plain' }), name);
-    } catch (error) {
-      toasts.error(error);
-    }
+    const text = await attempt(() => api('GET /api/v1/system/logs/files/:name', { params: { name } }));
+    if (text !== undefined) downloadBlob(new Blob([text], { type: 'text/plain' }), name);
   }
 </script>
 

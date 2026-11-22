@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { api } from '#lib/api/client.ts';
+  import { attempt, attemptOk } from '#lib/attempt.ts';
   import { testConnection } from '#lib/api/testConnection.ts';
   import Async from '#lib/components/Async.svelte';
   import ConnectionTestAlert from '#lib/components/ConnectionTestAlert.svelte';
@@ -8,7 +9,6 @@
   import { Resource } from '#lib/resource.svelte.ts';
   import { secretForForm, secretForRequest } from '#lib/settings/secretField.ts';
   import { type ConnectionTestResult, type DownloadClientInput, trimTrailingSlashes } from '#lib/shared.ts';
-  import { toasts } from '#lib/toast.svelte.ts';
 
   const BLANK: DownloadClientInput = {
     kind: 'qbittorrent',
@@ -50,30 +50,20 @@
   async function save(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     busy = true;
-    try {
-      const body = { ...requestBody(), url: trimTrailingSlashes(form.url.trim()), category: form.category?.trim() || null };
-      client.set(await api('PUT /api/v1/downloadclient', { body }));
-      toasts.success('qBittorrent saved');
-    } catch (error) {
-      toasts.error(error);
-    } finally {
-      busy = false;
-    }
+    const body = { ...requestBody(), url: trimTrailingSlashes(form.url.trim()), category: form.category?.trim() || null };
+    const saved = await attempt(() => api('PUT /api/v1/downloadclient', { body }), 'qBittorrent saved');
+    if (saved) client.set(saved);
+    busy = false;
   }
 
   async function remove(): Promise<void> {
     if (!confirm('Remove qBittorrent? Seeding checks stop.')) return;
     busy = true;
-    try {
-      await api('DELETE /api/v1/downloadclient');
+    if (await attemptOk(() => api('DELETE /api/v1/downloadclient'), 'qBittorrent removed')) {
       client.set(null);
       test = null;
-      toasts.success('qBittorrent removed');
-    } catch (error) {
-      toasts.error(error);
-    } finally {
-      busy = false;
     }
+    busy = false;
   }
 </script>
 

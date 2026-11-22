@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { api } from '#lib/api/client.ts';
+  import { attemptOk } from '#lib/attempt.ts';
   import FolderPicker from '#lib/components/FolderPicker.svelte';
   import Icon from '#lib/components/Icon.svelte';
   import Modal from '#lib/components/Modal.svelte';
@@ -115,17 +116,14 @@
       discsOnly: form.bdmvEnabled === true && form.discsOnly === true,
     };
     busy = true;
-    try {
+    const saved = await attemptOk(async () => {
       if (library) await api('PUT /api/v1/libraries/:id', { params: { id: library.id }, body });
       else await api('POST /api/v1/libraries', { body });
-      toasts.success(library ? 'Library saved' : 'Library added; run a scan to find its files');
-      open = false;
-      onsaved();
-    } catch (error) {
-      toasts.error(error);
-    } finally {
-      busy = false;
-    }
+    }, library ? 'Library saved' : 'Library added; run a scan to find its files');
+    busy = false;
+    if (!saved) return;
+    open = false;
+    onsaved();
   }
 </script>
 

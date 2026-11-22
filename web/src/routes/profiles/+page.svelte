@@ -10,8 +10,7 @@
   import { href } from '#lib/paths.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import type { ProfileWithUsage } from '#lib/shared.ts';
-  import { attempt } from '#lib/attempt.ts';
-  import { toasts } from '#lib/toast.svelte.ts';
+  import { attempt, attemptOk } from '#lib/attempt.ts';
 
   const profiles = new Resource((signal) => api('GET /api/v1/profiles', { signal }));
   const libraries = new Resource((signal) => api('GET /api/v1/libraries', { signal }));
@@ -62,13 +61,8 @@
 
   async function remove(profile: ProfileWithUsage): Promise<void> {
     if (!confirm(`Delete the profile "${profile.name}"?`)) return;
-    try {
-      await api('DELETE /api/v1/profiles/:id', { params: { id: profile.id } });
-      toasts.success('Profile deleted');
-      await profiles.load({ silent: true });
-    } catch (error) {
-      toasts.error(error);
-    }
+    const removed = await attemptOk(() => api('DELETE /api/v1/profiles/:id', { params: { id: profile.id } }), 'Profile deleted');
+    if (removed) await profiles.load({ silent: true });
   }
 </script>
 
