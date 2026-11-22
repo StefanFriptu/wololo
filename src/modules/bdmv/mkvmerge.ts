@@ -152,9 +152,7 @@ export function parseMkvmergeProgress(line: string): number | null {
 }
 
 /** mkvmerge exits 0 on success, 1 with warnings (output complete), 2 on error. */
-export function mkvmergeSucceeded(exitCode: number | null): boolean {
-  return exitCode === 0 || exitCode === 1;
-}
+export const MKVMERGE_OK_EXIT_CODES = [0, 1] as const;
 
 export function sanitizeFileName(name: string): string {
   return name

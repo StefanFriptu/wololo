@@ -185,3 +185,12 @@ test('createIsoReader - a failing 7z is an upstream error', async () => {
   });
   await expect(reader.list('/broken.iso')).rejects.toThrow('Cannot open the file as archive');
 });
+
+test('createIsoReader - a 7z timeout is reported as a timeout', async () => {
+  const reader = createIsoReader({
+    sevenZip: '7z',
+    run: async (options) => ({ ...result([options.command]), exitCode: null, timedOut: true }),
+    tempRoot: scratch,
+  });
+  await expect(reader.list('/slow.iso')).rejects.toThrow('7z l timed out');
+});

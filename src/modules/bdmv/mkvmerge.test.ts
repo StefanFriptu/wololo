@@ -4,7 +4,6 @@ import {
   buildMkvmergeArgs,
   buildOutputPaths,
   codecFamily,
-  mkvmergeSucceeded,
   parseMkvmergeIdentify,
   parseMkvmergeProgress,
   sanitizeFileName,
@@ -243,15 +242,6 @@ test.each([
   ['Multiplexing took 3 seconds.', null],
 ])('parseMkvmergeProgress - %s', (line, progress) => {
   expect(parseMkvmergeProgress(line)).toBe(progress);
-});
-
-test.each([
-  [0, true],
-  [1, true],
-  [2, false],
-  [null, false],
-])('mkvmergeSucceeded - exit %s', (code, ok) => {
-  expect(mkvmergeSucceeded(code)).toBe(ok);
 });
 
 test.each([
