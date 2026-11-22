@@ -1,17 +1,12 @@
 import { expect, test } from 'bun:test';
+import { mplsStream } from '../../../test/helpers/mplsStream.ts';
 import { audioStream, probeResult, subtitleStream, videoStream } from '../../../test/helpers/probe.ts';
 import type { MplsPlaylist, MplsStream } from '../../contracts/bdmv.ts';
 import { DEFAULT_SETTINGS } from '../../shared/settings.ts';
 import { discLookupName, pickOptions, withPlaylistLanguages } from './planner.ts';
 
-const mpls = (pid: number, kind: MplsStream['kind'], language: string | null): MplsStream => ({
-  kind,
-  pid,
-  codingType: 0,
-  codec: '',
-  language,
-  secondaryVideo: false,
-});
+const mpls = (pid: number, kind: MplsStream['kind'], language: string | null): MplsStream =>
+  mplsStream(kind, { pid, language });
 
 test('withPlaylistLanguages - MPLS languages win by PID, untagged MPLS streams keep the probe value', () => {
   const probe = probeResult([

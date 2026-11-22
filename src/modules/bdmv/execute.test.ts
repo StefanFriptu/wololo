@@ -8,6 +8,7 @@ import { cleanupSetup, conversionPlan, feature, PROBE, STN, setup, T } from '../
 import { writeSup } from '../../../test/fixtures/bdmv/writers.ts';
 import { audioStream, probeResult, subtitleStream, videoStream } from '../../../test/helpers/probe.ts';
 import { createFakeRunContext, type FakeRunContext } from '../../../test/helpers/run-context.ts';
+import { runResult } from '../../../test/helpers/runResult.ts';
 import type { MplsPlaylist } from '../../contracts/bdmv.ts';
 import type { RulesInput } from '../../contracts/rules-ffmpeg.ts';
 import type { RunOptions, RunResult } from '../../core/process.ts';
@@ -261,16 +262,12 @@ const IDENTIFY = JSON.stringify({
 });
 
 function ran(options: RunOptions, stdout = '', exitCode = 0): RunResult {
-  return {
+  return runResult({
     argv: [options.command, ...options.args],
     exitCode,
-    signalCode: null,
     stdout,
     stderr: exitCode === 0 ? '' : 'boom',
-    durationMs: 1,
-    aborted: false,
-    timedOut: false,
-  };
+  });
 }
 
 function touch(path: string, content: string | Uint8Array = 'x'): void {

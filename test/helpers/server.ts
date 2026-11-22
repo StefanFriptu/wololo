@@ -112,7 +112,8 @@ export async function startChildServer(configDir: string, env: Record<string, st
   };
 }
 
-export async function ffprobeJson<T>(path: string): Promise<T> {
+/** `inputArgs` go right before the path (for input options such as `-playlist 800`). */
+export async function ffprobeJson<T>(path: string, inputArgs: readonly string[] = []): Promise<T> {
   const proc = Bun.spawn([
     'ffprobe',
     '-v',
@@ -122,6 +123,7 @@ export async function ffprobeJson<T>(path: string): Promise<T> {
     '-show_chapters',
     '-of',
     'json',
+    ...inputArgs,
     path,
   ]);
   return JSON.parse(await new Response(proc.stdout).text()) as T;

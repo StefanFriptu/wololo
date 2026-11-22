@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { runResult } from '../../../test/helpers/runResult.ts';
 import type { Logger } from '../../core/logger.ts';
 import type { RunOptions, RunResult } from '../../core/process.ts';
 import { probeTools } from './tools.ts';
@@ -6,7 +7,7 @@ import { probeTools } from './tools.ts';
 const PATHS = { ffmpeg: 'ffmpeg', ffprobe: '/opt/ffprobe', mkvmerge: 'mkvmerge', sevenZip: '7z' };
 
 function result(stdout: string, exitCode: number | null = 0): RunResult {
-  return { argv: [], exitCode, signalCode: null, stdout, stderr: '', durationMs: 1, aborted: false, timedOut: false };
+  return runResult({ stdout, exitCode });
 }
 
 const OUTPUTS: Record<string, string> = {

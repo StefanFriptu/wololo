@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { mplsStream } from '../../../test/helpers/mplsStream.ts';
 import type { MkvmergeIdentify, MkvmergeOutputTrack, MplsPlaylist, MplsStream } from '../../contracts/bdmv.ts';
 import {
   buildMkvmergeArgs,
@@ -69,14 +70,8 @@ test.each([
   expect(codecFamily(codec)).toBe(family);
 });
 
-const stream = (pid: number, kind: MplsStream['kind'], secondaryVideo = false): MplsStream => ({
-  kind,
-  pid,
-  codingType: 0,
-  codec: '',
-  language: null,
-  secondaryVideo,
-});
+const stream = (pid: number, kind: MplsStream['kind'], secondaryVideo = false): MplsStream =>
+  mplsStream(kind, { pid, secondaryVideo });
 
 const PLAYLIST: MplsPlaylist = {
   name: '00800.mpls',

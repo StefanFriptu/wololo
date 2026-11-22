@@ -15,6 +15,7 @@ import type {
 import type { HistoryEntry, JobSummary, Library, RecycleBinEntry } from '../../src/shared/domain.ts';
 import { createTemplateProfile } from '../helpers/createTemplateProfile.ts';
 import { ensureFixtureCopy, FIXTURES, type FixtureSpec, ffmpegAvailable } from '../helpers/fixtures.ts';
+import { apiClient, eventually } from '../helpers/server.ts';
 
 const EAC3_MP4: FixtureSpec = {
   name: 'eac3-stereo-mp4',
@@ -31,32 +32,10 @@ let strict: string;
 let dtsPath: string;
 let mp4Path: string;
 
-async function call<T>(path: string, init: RequestInit & { json?: unknown } = {}, status = 200): Promise<T> {
-  const headers = new Headers(init.headers);
-  headers.set('x-api-key', apiKey);
-  const body = init.json === undefined ? init.body : JSON.stringify(init.json);
-  const response = await fetch(`${base}${path}`, { ...init, body, headers });
-  if (response.status !== status)
-    throw new Error(
-      `${init.method ?? 'GET'} ${path}: expected ${status}, got ${response.status}: ${await response.text()}`,
-    );
-  return (status === 204 ? undefined : await response.json()) as T;
-}
-
-async function eventually<T>(what: string, read: () => Promise<T>, done: (value: T) => boolean): Promise<T> {
-  const started = Date.now();
-  let attempts = 0;
-  let last: T;
-  do {
-    attempts += 1;
-    last = await read();
-    if (done(last)) return last;
-    await Bun.sleep(100);
-  } while (Date.now() - started < 60_000);
-  throw new Error(
-    `${what}: not reached after ${attempts} attempts in ${Date.now() - started} ms: ${JSON.stringify(last)}`,
-  );
-}
+const call = apiClient(
+  () => base,
+  () => apiKey,
+);
 
 async function mediaAt(path: string): Promise<MediaFileSummary> {
   const page = await call<Paginated<MediaFileSummary>>(`/api/v1/media?search=${encodeURIComponent(path)}`);
