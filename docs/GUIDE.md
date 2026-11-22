@@ -179,6 +179,7 @@ check free space -> write temp file next to the original -> verify -> link origi
 - **Undo.** The original is hard-linked into the [recycle bin](#recycle-bin) before the swap.
 - **Crash safe.** After a crash or power cut, Wololo looks at which files exist on start, finishes or rolls back the swap, deletes leftover temp files and re-queues the job.
 - **Disk space.** Before writing, a job checks for room for the output plus a 5% margin. If it is short, the queue holds for 15 minutes and retries.
+- **Torrents** are removed only when you ask, per file in **Process now**: keep the torrent (the default), remove it once all its files are converted, or also wait for its seeding goal. The request belongs to the torrent, so a season pack goes only when every episode in it is done; a file in it that is not in your library (a sample) keeps it. Removing deletes the torrent and its downloaded files from qBittorrent; your library files and the recycle bin are untouched. Restoring any of its files cancels the request. The file page shows the torrent and the request's state. Needs qBittorrent connected and the file imported by Radarr or Sonarr (their history names the torrent).
 - **Blu-ray sources** are never deleted on their own. With qBittorrent connected and **Offer to delete a converted disc once its torrent met its seeding goal** on (**Settings > Media**), Wololo asks under **Library > Decisions**, and deletes only after you accept.
 
 ## Recycle bin

@@ -1,17 +1,23 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import Icon from '#lib/components/Icon.svelte';
   import Modal from '#lib/components/Modal.svelte';
   import { STRICTEST_TARGET, type ConvertTarget } from '#lib/profiles/convertTargets.ts';
 
   let {
     open = $bindable(false),
+    title = 'Convert for which player?',
     question,
     targets,
+    extra,
     onconfirm,
   }: {
     open?: boolean;
+    title?: string;
     question: string;
     targets: ConvertTarget[];
+    /** More choices inside the form, above the buttons. */
+    extra?: Snippet;
     onconfirm: (profileId: number | undefined) => void | Promise<void>;
   } = $props();
 
@@ -29,7 +35,7 @@
   }
 </script>
 
-<Modal bind:open title="Convert for which player?">
+<Modal bind:open {title}>
   <form id="{uid}-form" onsubmit={confirm}>
     <p>{question}</p>
     {#if targets.length > 0}
@@ -44,6 +50,7 @@
       </fieldset>
       <p class="hint">Blu-ray discs are always converted for the strictest player.</p>
     {/if}
+    {@render extra?.()}
   </form>
   {#snippet footer()}
     <button onclick={() => (open = false)}>Cancel</button>

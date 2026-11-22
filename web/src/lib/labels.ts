@@ -17,5 +17,7 @@ export * from './labels/pathScopeLabels.ts';
 export * from './labels/pauseReasonLabels.ts';
 export * from './labels/planActionLabels.ts';
 export * from './labels/planActionTones.ts';
+export * from './labels/removalChoiceLabels.ts';
 export type * from './labels/Tone.ts';
+export * from './labels/torrentRemovalStateLabels.ts';
 export * from './labels/verificationLabels.ts';
