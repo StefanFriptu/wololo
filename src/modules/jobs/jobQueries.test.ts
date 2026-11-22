@@ -1,6 +1,6 @@
-import type { SQLQueryBindings } from 'bun:sqlite';
 import { afterEach, expect, test } from 'bun:test';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
+import { queryPlan } from '../../../test/helpers/queryPlan.ts';
 import { insertJob } from '../../../test/helpers/seed.ts';
 import type { JobRow, NewJobRow } from '../../db/schema.ts';
 import {
@@ -62,13 +62,6 @@ test('isTempPathReferenced - true only for paths a job row holds', () => {
   expect(isTempPathReferenced(t.ctx.db, '/m/.wololo-tmp-3')).toBe(true);
   expect(isTempPathReferenced(t.ctx.db, '/m/.wololo-tmp-4')).toBe(false);
 });
-
-function queryPlan(context: TestContext, sql: string, params: readonly unknown[] = []): string[] {
-  return context.ctx.dbHandle.sqlite
-    .query<{ detail: string }, SQLQueryBindings[]>(`EXPLAIN QUERY PLAN ${sql}`)
-    .all(...(params as SQLQueryBindings[]))
-    .map((row) => row.detail);
-}
 
 test('prunableJobIdsQuery - finds media and recycle-bin references through their indexes', () => {
   t = createTestContext();

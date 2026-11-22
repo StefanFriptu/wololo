@@ -56,7 +56,7 @@ src/
 drizzle/                   generated SQL migrations (applied at startup)
 web/                       SvelteKit 3 (Svelte 5) SPA, adapter-static, fallback index.html
 test/
-  helpers/                 context, seed, probe, run-context, stubs, fixtures (ffmpeg lavfi generator), binaries, server (apiClient, eventually, ffprobeJson), runResult, mplsStream
+  helpers/                 context, seed, probe, run-context, stubs, fixtures (ffmpeg lavfi generator), binaries, server (apiClient, eventually, ffprobeJson), runResult, mplsStream, queryPlan
   core/ api/ db/ shared/   tests of the core
   integration/             booted server (createRuntime) with every real service; packaging checks
 docker/                    entrypoint.sh (PUID/PGID/UMASK/TZ), healthcheck.ts, smoke-test.sh
@@ -80,7 +80,7 @@ Every backend module may import `src/shared`, `src/contracts`, `src/core`, `src/
 
 Module tests are co-located: `src/modules/<dir>/<name>.test.ts`. Web unit tests are `web/src/**/*.test.ts`, run by the root `bun test` and type-checked by the root `bun run typecheck` (excluded from svelte-check); they must not import `$app/*`, `.svelte` files or code that reads `import.meta.env`. Cross-module end-to-end tests live under `test/integration/`: `pipeline.test.ts` (dry run -> processing -> recycle-bin restore), `feature1.test.ts` (layouts, keep both, language filter, scoped profile re-checks), `webhooks.test.ts` (Radarr/Sonarr webhooks -> job -> rescan and Plex partial scan against local fakes) and `safety.test.ts` (a child-process server killed mid-job, verification failure, cancel/retry, queue gates and SSE, with ffmpeg behind a wrapper script).
 
-Shared test helpers (`test/helpers/`): `context.ts` (`createTestContext`: temp config + migrated db + full AppContext, `request()` with the key, `restarts()`), `seed.ts` (`insertLibrary`, `insertMediaFile`, `insertJob`, `insertProfile`, `insertArrInstance`), `probe.ts` (`videoStream`, `audioStream`, `subtitleStream`, `probeResult` builders), `run-context.ts` (`createFakeRunContext`, `fakeJob`), `stubs.ts` (`stubService<T>(name, partial)`, throws on unstubbed methods), `fixtures.ts` (`ensureFixture`, `ensureFixtureCopy` for tests that move or replace files), `binaries.ts` (`hasBinary`), `server.ts` (`startInProcessServer`, `startChildServer`, `apiClient`, `eventually`, `ffprobeJson`, `streamHash`).
+Shared test helpers (`test/helpers/`): `context.ts` (`createTestContext`: temp config + migrated db + full AppContext, `request()` with the key, `restarts()`), `seed.ts` (`insertLibrary`, `insertMediaFile`, `insertJob`, `insertProfile`, `insertArrInstance`), `probe.ts` (`videoStream`, `audioStream`, `subtitleStream`, `probeResult` builders), `run-context.ts` (`createFakeRunContext`, `fakeJob`), `stubs.ts` (`stubService<T>(name, partial)`, throws on unstubbed methods), `fixtures.ts` (`ensureFixture`, `ensureFixtureCopy` for tests that move or replace files), `binaries.ts` (`hasBinary`), `server.ts` (`startInProcessServer`, `startChildServer`, `apiClient`, `eventually`, `ffprobeJson`, `streamHash`), `queryPlan.ts` (`queryPlan`: EXPLAIN QUERY PLAN details of a statement, for index assertions).
 
 ### Table ownership (writes)
 
