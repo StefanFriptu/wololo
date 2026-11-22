@@ -1,5 +1,11 @@
 import { expect, test } from 'bun:test';
-import { AC3_MAX_KBPS, codecAllowed, MAX_AUDIO_KBPS, maxBitrateKbps } from '../../src/shared/audioRules.ts';
+import {
+  AC3_MAX_KBPS,
+  codecAllowed,
+  isLosslessAudio,
+  MAX_AUDIO_KBPS,
+  maxBitrateKbps,
+} from '../../src/shared/audioRules.ts';
 import { TARGET_AUDIO_CODECS } from '../../src/shared/domain.ts';
 
 test.each([
@@ -29,4 +35,22 @@ test.each([
 test('audio limits - the AC3 cap is below the overall cap and every target has a limit', () => {
   expect(AC3_MAX_KBPS).toBeLessThan(MAX_AUDIO_KBPS);
   expect(TARGET_AUDIO_CODECS.map(maxBitrateKbps).every((kbps) => kbps > 0)).toBe(true);
+});
+
+test.each([
+  ['truehd', null, true],
+  ['mlp', null, true],
+  ['flac', null, true],
+  ['alac', null, true],
+  ['wavpack', null, true],
+  ['pcm_s24le', null, true],
+  ['pcm_*', null, true],
+  ['dts', null, false],
+  ['dts', 'DTS', false],
+  ['dts', 'DTS-HD MA', true],
+  ['dts', 'dts-hd ma', true],
+  ['ac3', 'DTS-HD MA', false],
+  ['aac', null, false],
+] as const)('isLosslessAudio - %s (%p) is %p', (codec, profile, expected) => {
+  expect(isLosslessAudio(codec, profile)).toBe(expected);
 });

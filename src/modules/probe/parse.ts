@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ParseFfprobeOutput } from '../../contracts/probe-scan.ts';
 import { AppError } from '../../core/errors.ts';
+import { isLosslessAudio } from '../../shared/audioRules.ts';
 import type {
   AudioStream,
   DolbyVisionInfo,
@@ -78,7 +79,6 @@ const STREAM_KINDS: Readonly<Record<string, StreamKind>> = {
 };
 
 const BITMAP_SUBTITLES: ReadonlySet<string> = new Set(['hdmv_pgs_subtitle', 'dvd_subtitle', 'dvb_subtitle', 'xsub']);
-const LOSSLESS_AUDIO: ReadonlySet<string> = new Set(['truehd', 'mlp', 'flac', 'alac', 'wavpack', 'ape', 'tta']);
 
 function toNumber(value: number | string | undefined): number | null {
   if (value == null || value === '' || value === 'N/A') return null;
@@ -160,11 +160,6 @@ function objectAudio(profile: string | null): AudioStream['objectAudio'] {
   if (lower.includes('atmos') || lower.includes('joc')) return 'atmos';
   if (lower.includes('dts:x') || lower.includes('dts-x')) return 'dtsx';
   return null;
-}
-
-function isLosslessAudio(codec: string, profile: string | null): boolean {
-  if (LOSSLESS_AUDIO.has(codec) || codec.startsWith('pcm_')) return true;
-  return codec === 'dts' && (profile?.toUpperCase().includes('DTS-HD MA') ?? false);
 }
 
 function baseFields(raw: RawStream) {
