@@ -1,9 +1,7 @@
 import { z } from 'zod';
 import type { ProfileInput } from '../../shared/api-types.ts';
-import { DOLBY_VISION_MODES } from '../../shared/domain.ts';
-import { codecAllowed } from '../rules/engine.ts';
-
-const AC3_MAX_KBPS = 640;
+import { AC3_MAX_KBPS, codecAllowed, MAX_AUDIO_KBPS } from '../../shared/audioRules.ts';
+import { DOLBY_VISION_MODES, TARGET_AUDIO_CODECS } from '../../shared/domain.ts';
 
 const codecList = z
   .array(
@@ -16,7 +14,7 @@ const codecList = z
   .max(100)
   .transform((codecs) => [...new Set(codecs)]);
 
-const bitrate = z.number().int().min(32).max(1536);
+const bitrate = z.number().int().min(32).max(MAX_AUDIO_KBPS);
 
 export const ProfileInputSchema = z.object({
   name: z.string().trim().min(1).max(100),
@@ -25,7 +23,7 @@ export const ProfileInputSchema = z.object({
     audio: z
       .object({
         allowedCodecs: codecList,
-        targetCodec: z.enum(['ac3', 'eac3', 'aac']),
+        targetCodec: z.enum(TARGET_AUDIO_CODECS),
         bitrates: z.object({ mono: bitrate, stereo: bitrate, surround: bitrate }),
         maxChannels: z.number().int().min(1).max(8),
       })

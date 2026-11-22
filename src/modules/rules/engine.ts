@@ -1,11 +1,11 @@
 import type {
   CheckProfiles,
-  CodecAllowed,
   ComputeRulesKey,
   PlanConversion,
   ResolveEffectiveProfile,
   RulesInput,
 } from '../../contracts/rules-ffmpeg.ts';
+import { codecAllowed } from '../../shared/audioRules.ts';
 import type {
   AudioEncodeSpec,
   AudioStream,
@@ -19,12 +19,11 @@ import type {
   PlannedStream,
   TargetAudioCodec,
 } from '../../shared/domain.ts';
+import { TARGET_AUDIO_CODECS } from '../../shared/domain.ts';
 import { normalizeLanguage, sameLanguage } from '../../shared/language.ts';
 import { selectBitrate } from '../ffmpeg/args.ts';
 
 const RULES_ENGINE_VERSION = 1;
-
-const TARGET_CODECS: readonly TargetAudioCodec[] = ['ac3', 'eac3', 'aac'];
 
 const TARGET_MAX_CHANNELS: Readonly<Record<TargetAudioCodec, number>> = { ac3: 6, eac3: 6, aac: 8 };
 
@@ -77,14 +76,6 @@ const SOURCE_CODEC_LABELS: Readonly<Record<string, string>> = {
   eac3: 'E-AC3',
 };
 
-export const codecAllowed: CodecAllowed = (codec, allowed) => {
-  const name = codec.toLowerCase();
-  return allowed.some((entry) => {
-    const pattern = entry.toLowerCase();
-    return pattern.endsWith('*') ? name.startsWith(pattern.slice(0, -1)) : name === pattern;
-  });
-};
-
 function patternCovered(pattern: string, allowed: readonly string[]): boolean {
   if (!pattern.endsWith('*')) return codecAllowed(pattern, allowed);
   const prefix = pattern.slice(0, -1);
@@ -109,7 +100,7 @@ export const resolveEffectiveProfile: ResolveEffectiveProfile = (profiles) => {
   if (!first) throw new Error('resolveEffectiveProfile needs at least one device profile');
   const definitions = profiles.map((profile) => profile.definition);
   const audioAllowed = intersectCodecs(definitions.map((definition) => definition.audio.allowedCodecs));
-  const preferredTargets = [...definitions.map((definition) => definition.audio.targetCodec), ...TARGET_CODECS];
+  const preferredTargets = [...definitions.map((definition) => definition.audio.targetCodec), ...TARGET_AUDIO_CODECS];
   const targetCodec =
     preferredTargets.find((codec) => codecAllowed(codec, audioAllowed)) ?? first.definition.audio.targetCodec;
   const byId = [...profiles].sort((a, b) => a.id - b.id);

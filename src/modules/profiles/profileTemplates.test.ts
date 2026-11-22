@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { PROFILE_TEMPLATE_IDS } from '../../shared/api-types.ts';
-import { codecAllowed } from '../rules/engine.ts';
+import { codecAllowed } from '../../shared/audioRules.ts';
 import { ProfileInputSchema } from './ProfileInputSchema.ts';
 import { profileTemplates, templateDefinition } from './profileTemplates.ts';
 

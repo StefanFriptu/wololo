@@ -1,9 +1,8 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { parseList } from '#lib/parseList.ts';
-  import { codecAllowedBy } from '#lib/profiles/codecAllowedBy.ts';
   import { partitionCodecs } from '#lib/profiles/partitionCodecs.ts';
-  import type { CodecInfo } from '#lib/shared.ts';
+  import { type CodecInfo, codecAllowed } from '#lib/shared.ts';
 
   let {
     legend,
@@ -33,7 +32,7 @@
   <div class="checks">
     {#each catalog as info (info.codec)}
       {@const checked = partition.known.includes(info.codec)}
-      {@const viaWildcard = !checked && codecAllowedBy(partition.custom, info.codec)}
+      {@const viaWildcard = !checked && codecAllowed(info.codec, partition.custom)}
       <label class="check" title={info.codec}>
         <input
           type="checkbox"

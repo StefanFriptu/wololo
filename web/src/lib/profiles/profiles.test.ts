@@ -1,6 +1,5 @@
 import { expect, test } from 'bun:test';
 import type { CodecInfo } from '#lib/shared.ts';
-import { codecAllowedBy } from './codecAllowedBy.ts';
 import { partitionCodecs } from './partitionCodecs.ts';
 
 const info = (codec: string): CodecInfo => ({ codec, label: codec.toUpperCase(), kind: 'audio', lossless: false });
@@ -14,15 +13,4 @@ test('partitionCodecs - splits catalog codecs from custom entries in their origi
 
 test('partitionCodecs - empty allowed list', () => {
   expect(partitionCodecs([], [info('ac3')])).toEqual({ known: [], custom: [] });
-});
-
-test.each([
-  [['ac3', 'aac'], 'ac3', true],
-  [['ac3', 'aac'], 'eac3', false],
-  [['pcm_*'], 'pcm_s24le', true],
-  [['pcm_*'], 'flac', false],
-  [['*'], 'anything', true],
-  [[], 'ac3', false],
-])('codecAllowedBy - %p allows %p: %p', (allowed, codec, expected) => {
-  expect(codecAllowedBy(allowed, codec)).toBe(expected);
 });
