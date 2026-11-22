@@ -8,7 +8,7 @@ import { DAY_MS } from '../../core/time.ts';
 import { yieldToEventLoop } from '../../core/yieldToEventLoop.ts';
 import type { JobRow } from '../../db/schema.ts';
 import type { EnqueueRequest, EnqueueResponse, MediaFileSummary, PageQuery } from '../../shared/api-types.ts';
-import { JOB_STATES, type JobState, type JobSummary } from '../../shared/domain.ts';
+import { isActiveJobState, JOB_STATES, type JobState, type JobSummary } from '../../shared/domain.ts';
 import { checkRecycleBinLocation, NODE_BIN_TRIAL_FS } from '../recycle-bin/checkRecycleBinLocation.ts';
 import { createAudioExecutor } from './audioExecutor.ts';
 import {
@@ -418,8 +418,7 @@ export function createJobsService(ctx: AppContext): JobsService {
 
     remove: async (id) => {
       const row = mustGet(id);
-      if (row.state === 'queued' || row.state === 'running')
-        throw new AppError('conflict', `job ${id} is ${row.state}; cancel it first`);
+      if (isActiveJobState(row.state)) throw new AppError('conflict', `job ${id} is ${row.state}; cancel it first`);
       const logPath = logPathOf(row);
       if (logPath !== null) rmSync(logPath, { force: true });
       deleteJobRow(db, id);

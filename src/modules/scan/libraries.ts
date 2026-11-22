@@ -16,7 +16,7 @@ import {
   mediaFiles,
 } from '../../db/schema.ts';
 import type { FilesystemEntry, FilesystemListing, FilesystemQuery, LibraryInput } from '../../shared/api-types.ts';
-import type { Library, LibraryRoot, LibraryRuleSettings } from '../../shared/domain.ts';
+import { ACTIVE_JOB_STATES, type Library, type LibraryRoot, type LibraryRuleSettings } from '../../shared/domain.ts';
 import { normalizeLanguage } from '../../shared/language.ts';
 import { allRootsQuery, libraryQuery } from './libraryQuery.ts';
 import { matchRoot, normalizeRootPath, rootsOverlap } from './paths.ts';
@@ -254,7 +254,7 @@ export function createLibraryService(ctx: AppContext): LibraryService {
         .where(
           and(
             or(eq(jobs.libraryId, id), inArray(jobs.mediaFileId, libraryMedia)),
-            inArray(jobs.state, ['queued', 'running']),
+            inArray(jobs.state, [...ACTIVE_JOB_STATES]),
           ),
         )
         .all();
