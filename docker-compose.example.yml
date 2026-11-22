@@ -1,13 +1,13 @@
 # Wololo next to an existing *arr stack. Add the "wololo" service to the compose file that already runs
 # Radarr, Sonarr (and Plex), or start it on its own with: docker compose -f docker-compose.example.yml up -d
 #
-# Replace OWNER with the GitHub user or organisation that publishes the image, and the host paths with yours.
+# Replace the host paths with yours.
 # Use the :main tag until the first release (vX.Y.Z) is tagged; :latest exists only from then on.
 # The one rule that matters: mount media at the SAME container path Radarr and Sonarr use (here /data), from the
 # same host folder, so Wololo's temp file and the original live on one filesystem and the final rename is atomic.
 services:
   wololo:
-    image: ghcr.io/OWNER/wololo:latest
+    image: ghcr.io/stefanfriptu/wololo:latest
     container_name: wololo
     environment:
       - PUID=1000 # same user as Radarr/Sonarr, so converted files keep their owner

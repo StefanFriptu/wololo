@@ -35,7 +35,7 @@ Add Wololo to the compose file that already runs your *arr apps ([docker-compose
 ```yaml
 services:
   wololo:
-    image: ghcr.io/OWNER/wololo:latest
+    image: ghcr.io/stefanfriptu/wololo:latest
     container_name: wololo
     environment:
       - PUID=1000
@@ -51,9 +51,9 @@ services:
     stop_grace_period: 30s
 ```
 
-Replace `OWNER` with the GitHub account that publishes the image. Then run `docker compose up -d wololo`.
+Then run `docker compose up -d wololo`.
 
-- **Image tags:** `latest` (newest release), `X.Y.Z` and `X.Y` (releases), `main` (follows the main branch), `sha-<commit>`. Until the first release is tagged, only `main` exists, so use `ghcr.io/OWNER/wololo:main`. Image names are lowercase.
+- **Image tags:** `latest` (newest release), `X.Y.Z` and `X.Y` (releases), `main` (follows the main branch), `sha-<commit>`. Until the first release is tagged, only `main` exists, so use `ghcr.io/stefanfriptu/wololo:main`. Image names are lowercase.
 - **Keep `restart: unless-stopped`** (or `always`). The **Restart** button stops the process and relies on Docker to start it again. You need it to apply a restore or a URL base change. Without a restart policy, the container stays down.
 - **In Docker, keep Port `8585` and Bind address `*`** in **Settings > General**. To use another host port, change the left side of `ports:` instead. A different port or a host IP makes the UI unreachable after the restart.
 
