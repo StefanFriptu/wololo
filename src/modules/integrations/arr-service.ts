@@ -227,16 +227,18 @@ export function createArrService(ctx: AppContext, deps: IntegrationDeps = {}): A
     localPath: string,
     indexOf: (instance: ArrInstance) => Promise<InstanceIndex | null>,
   ): Promise<PathHit | null> => {
+    const settled = await Promise.allSettled(instances.map(indexOf));
     let best: PathHit | null = null;
-    for (const instance of instances) {
-      try {
-        const index = await indexOf(instance);
-        const entry = index && owningEntry(index.entries, localPath);
-        if (entry && (!best || entry.folder.length > best.entry.folder.length)) best = { instance, entry };
-      } catch (error) {
-        log.warn('arr lookup by path failed', { instance: instance.name, path: localPath, error });
+    instances.forEach((instance, position) => {
+      const result = settled[position];
+      if (result?.status === 'rejected') {
+        log.warn('arr lookup by path failed', { instance: instance.name, path: localPath, error: result.reason });
+        return;
       }
-    }
+      const index = result?.value;
+      const entry = index && owningEntry(index.entries, localPath);
+      if (entry && (!best || entry.folder.length > best.entry.folder.length)) best = { instance, entry };
+    });
     return best;
   };
 

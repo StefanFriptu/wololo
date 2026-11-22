@@ -433,6 +433,70 @@ test('arr.findByPath - unknown path is null, a failing instance is skipped', asy
   expect(await t.ctx.services.arr.findByPath('/elsewhere/a.mkv')).toBeNull();
 });
 
+function movieIn(id: number, path: string) {
+  return { id, title: `Movie ${id}`, path, tmdbId: id, movieFile: { id: id + 1000, path: `${path}/m.mkv` } };
+}
+
+function lookupWarnings() {
+  return t.ctx.logs
+    .entries({ module: 'arr', level: 'warn' })
+    .filter((entry) => entry.message === 'arr lookup by path failed');
+}
+
+test('arr.findByPath - a tie goes to the first instance even when it answers last', async () => {
+  const second = startFakeUpstream({
+    'GET /api/v3/movie': () => [movieIn(77, '/vault/movies/Heat (1995)')],
+  });
+  try {
+    radarr.on('GET /api/v3/movie', async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return [movieIn(11, '/vault/movies/Heat (1995)')];
+    });
+    const first = await addRadarr();
+    await addRadarr({ name: 'Radarr 2', url: second.url });
+    await mapRadarr();
+    const hit = await t.ctx.services.arr.findByPath('/data/movies/Heat (1995)/m.mkv');
+    expect(hit?.ref).toMatchObject({ instanceId: first.id, itemId: 11 });
+    expect(lookupWarnings()).toEqual([]);
+  } finally {
+    second.stop();
+  }
+});
+
+test('arr.findByPath - the deepest folder wins across instances', async () => {
+  const second = startFakeUpstream({
+    'GET /api/v3/movie': () => [movieIn(77, '/vault/movies/Heat (1995)/Extras')],
+  });
+  try {
+    await addRadarr();
+    const other = await addRadarr({ name: 'Radarr 2', url: second.url });
+    await mapRadarr();
+    const hit = await t.ctx.services.arr.findByPath('/data/movies/Heat (1995)/Extras/m.mkv');
+    expect(hit?.ref).toMatchObject({ instanceId: other.id, itemId: 77 });
+  } finally {
+    second.stop();
+  }
+});
+
+test('arr.findByPath - a failing instance is logged once and the other still answers', async () => {
+  const second = startFakeUpstream({
+    'GET /api/v3/movie': () => [movieIn(77, '/vault/movies/Heat (1995)')],
+  });
+  try {
+    radarr.on('GET /api/v3/movie', () => new Response('down', { status: 503 }));
+    await addRadarr();
+    const other = await addRadarr({ name: 'Radarr 2', url: second.url });
+    await mapRadarr();
+    const path = '/data/movies/Heat (1995)/m.mkv';
+    const hit = await t.ctx.services.arr.findByPath(path);
+    expect(hit?.ref).toMatchObject({ instanceId: other.id, itemId: 77 });
+    const warnings = lookupWarnings();
+    expect(warnings.map((entry) => entry.data)).toMatchObject([{ instance: 'Radarr', path }]);
+  } finally {
+    second.stop();
+  }
+});
+
 test('arr.findByPath - caches the library index between calls', async () => {
   await addRadarr();
   await mapRadarr();
