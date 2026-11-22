@@ -19,6 +19,31 @@ export interface PageWindow {
 
 const nowIso = () => new Date().toISOString();
 
+const JOB_SUMMARY_COLUMNS = {
+  id: jobs.id,
+  type: jobs.type,
+  state: jobs.state,
+  step: jobs.step,
+  priority: jobs.priority,
+  trigger: jobs.trigger,
+  mediaFileId: jobs.mediaFileId,
+  libraryId: jobs.libraryId,
+  profileId: jobs.profileId,
+  sourcePath: jobs.sourcePath,
+  outputPath: jobs.outputPath,
+  title: jobs.title,
+  progress: jobs.progress,
+  speed: jobs.speed,
+  etaSec: jobs.etaSec,
+  error: jobs.error,
+  attempts: jobs.attempts,
+  createdAt: jobs.createdAt,
+  startedAt: jobs.startedAt,
+  finishedAt: jobs.finishedAt,
+};
+
+export type JobSummaryRow = Pick<JobRow, keyof typeof JOB_SUMMARY_COLUMNS>;
+
 export function insertJobRow(db: Db, values: NewJobRow): JobRow {
   return db.insert(jobs).values(values).returning().get();
 }
@@ -102,10 +127,15 @@ export function runningAudioJobsBefore(db: Db, jobId: number): Pick<JobRow, 'id'
 }
 
 /** Running jobs first, then queued in pick order. */
-export function queueRows(db: Db, limit: number): JobRow[] {
-  const running = jobsInState(db, 'running');
+export function queueRows(db: Db, limit: number): JobSummaryRow[] {
+  const running = db
+    .select(JOB_SUMMARY_COLUMNS)
+    .from(jobs)
+    .where(eq(jobs.state, 'running'))
+    .orderBy(asc(jobs.id))
+    .all();
   const queued = db
-    .select()
+    .select(JOB_SUMMARY_COLUMNS)
     .from(jobs)
     .where(eq(jobs.state, 'queued'))
     .orderBy(desc(jobs.priority), asc(jobs.id))
@@ -201,7 +231,7 @@ export function listJobRows(
   db: Db,
   filter: { states?: JobState[]; type?: JobType; mediaFileId?: number },
   window: PageWindow,
-): { rows: JobRow[]; total: number } {
+): { rows: JobSummaryRow[]; total: number } {
   const conditions: SQL[] = [];
   if (filter.states?.length) conditions.push(inArray(jobs.state, filter.states));
   if (filter.type) conditions.push(eq(jobs.type, filter.type));
@@ -209,7 +239,7 @@ export function listJobRows(
   const where = conditions.length ? and(...conditions) : undefined;
   const total = db.select({ value: count() }).from(jobs).where(where).get()?.value ?? 0;
   const rows = db
-    .select()
+    .select(JOB_SUMMARY_COLUMNS)
     .from(jobs)
     .where(where)
     .orderBy(window.sortDir === 'asc' ? asc(jobs.id) : desc(jobs.id))
