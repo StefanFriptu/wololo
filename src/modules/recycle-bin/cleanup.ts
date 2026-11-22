@@ -1,6 +1,6 @@
 import { readdirSync, rmdirSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
-import { isRecycleStamp, RECYCLE_DIR_NAME } from './paths.ts';
+import { isRecycleStamp, RECYCLE_DIR_NAME } from '../../core/recyclePaths.ts';
 
 /** Removes now-empty folders between a recycled file and its stamp folder (inclusive); never climbs above the stamp. */
 export function removeEmptyRecycleDirs(recyclePath: string): void {

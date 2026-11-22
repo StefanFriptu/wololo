@@ -1,7 +1,7 @@
 import type { Dirent } from 'node:fs';
 import { readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { RECYCLE_DIR_NAME } from '../recycle-bin/paths.ts';
+import { RECYCLE_DIR_NAME } from '../../core/recyclePaths.ts';
 import { isTempPath } from './paths.ts';
 
 export interface SweepOptions {

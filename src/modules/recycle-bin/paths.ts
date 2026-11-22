@@ -1,8 +1,6 @@
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, join, relative, sep } from 'node:path';
+import { RECYCLE_DIR_NAME } from '../../core/recyclePaths.ts';
 import { DAY_MS } from '../../core/time.ts';
-
-export const RECYCLE_DIR_NAME = '.wololo-recycle';
-const STAMP_PATTERN = /^\d{8}T\d{6}Z(-\d+)?$/;
 
 /** Compact UTC stamp used as the per-recycle folder name: "20261115T103000Z". */
 export function recycleStamp(date: Date): string {
@@ -10,23 +8,6 @@ export function recycleStamp(date: Date): string {
     .toISOString()
     .replace(/[-:]/g, '')
     .replace(/\.\d{3}Z$/, 'Z');
-}
-
-export function isRecycleStamp(name: string): boolean {
-  return STAMP_PATTERN.test(name);
-}
-
-export function isNormalizedAbsolutePath(path: string): boolean {
-  return isAbsolute(path) && resolve(path) === path;
-}
-
-/** Shape check for paths read back from the database: "<bin>/<stamp>[-n]/<rel>", absolute and normalized. */
-export function isRecyclePath(path: string): boolean {
-  if (!isNormalizedAbsolutePath(path)) return false;
-  for (let dir = dirname(path); dir !== dirname(dir); dir = dirname(dir)) {
-    if (isRecycleStamp(basename(dir))) return true;
-  }
-  return false;
 }
 
 /** Configured bin, else "<library root>/.wololo-recycle", else a bin next to the file (always the same filesystem). */
