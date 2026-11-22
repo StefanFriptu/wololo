@@ -26,6 +26,8 @@ Rules for `web/` (SvelteKit SPA, adapter-static, Svelte 5 runes, plain CSS). The
 - Seed a form from loaded data by mounting it once the data exists (`{#if resource.data}<Form initial={resource.data} />{/if}`) or by keying it. If a reset effect cannot be avoided, gate it on the trigger and wrap the writes in `untrack`.
 - Keep shareable view state (filters, search, sort, page) in the query string and read it with `$derived` off `page.url`. Never mirror it into `$state`. Why: back, reload and pasted links keep working.
 - Write query-string state with `goto(href(...), { replace: true, reset: false })` unless the change is a real navigation. Why: filter tweaks should not flood history or reset the page.
+- Parse and build query-string state with `positiveIntParam` and `queryString` (`lib/queryParams.ts`), and keep a page number in range with `clampPage` (`lib/clampPage.svelte.ts`).
+- Read the current time for relative labels from the shared `clock` (`lib/clock.svelte.ts`); never start a per-page ticker. Why: one timer, and no page shows a stale age.
 - Keep transient UI state (modal open, hover, a draft) in component `$state`.
 - Put cross-component state in a `*.svelte.ts` module that exports one instance or class (`toast.svelte.ts`, `theme.svelte.ts`).
 - Wrap every `localStorage` read and write in `try`/`catch` with a default. Why: private windows and blocked storage throw.
@@ -37,6 +39,7 @@ Rules for `web/` (SvelteKit SPA, adapter-static, Svelte 5 runes, plain CSS). The
 - Hold read state in a `Resource` and render it with `Async` (loading, error, empty, data). Pass the `AbortSignal` the resource hands you to `api()`.
 - Refresh after a live event with a silent reload so the view does not flash a spinner.
 - Show failures with `errorMessage(error)`. Never invent client-side wording for a server error code.
+- Run a save or delete through `attempt` (needs the result) or `attemptOk` (only success matters, e.g. a 204) from `lib/attempt.ts` instead of a hand-written try/catch/toast. Run a connection test through `testConnection` (`lib/api/testConnection.ts`).
 - Never recompute in the UI what the API already sends (status, available actions). Tone and label maps for enum values live in `lib/labels/` as exhaustive `Record<Enum, ...>` maps.
 - Build every app link and redirect with `href('/path')` from `lib/paths.ts`, never a bare `'/path'`. Why: it applies the URL base the backend may run under.
 - Make navigation an `<a href>`, not a button that calls `goto`. Why: middle-click and copy-link work.
