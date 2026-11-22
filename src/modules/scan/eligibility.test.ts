@@ -34,6 +34,31 @@ test.each<[string, MediaFileKind, Partial<EligibilityRules>, string | null]>([
   expect(exclusionReason('/r', path, kind, { ...RULES, ...overrides })).toBe(expected);
 });
 
+const SHARED_CASES: [string, MediaFileKind, string | null][] = [
+  ['/r/Movie/Movie.MKV', 'file', null],
+  ['/r/Movie/Sample/sample.mkv', 'file', 'matches an ignore pattern'],
+  ['/r/Movie/movie.sample.mkv', 'file', 'matches an ignore pattern'],
+  ['/r/Movie/notes.txt', 'file', 'not a media file extension'],
+  ['/r/Disc', 'bdmv', null],
+];
+
+test('exclusionReason - one rules object answers every row like a fresh one', () => {
+  const rules: EligibilityRules = { ...RULES, extensions: ['.MKV', '.mp4'] };
+  for (const [path, kind, expected] of [...SHARED_CASES, ...SHARED_CASES].reverse()) {
+    expect(exclusionReason('/r', path, kind, rules)).toBe(expected);
+    expect(exclusionReason('/r', path, kind, { ...rules })).toBe(expected);
+  }
+});
+
+test('exclusionReason - a new rules object picks up changed patterns and extensions', () => {
+  const before: EligibilityRules = { ...RULES, ignorePatterns: [], extensions: ['.mkv'] };
+  const after: EligibilityRules = { ...before, ignorePatterns: ['**/Extras/**'], extensions: ['.mp4'] };
+
+  expect(exclusionReason('/r', '/r/Movie/Extras/a.mkv', 'file', before)).toBeNull();
+  expect(exclusionReason('/r', '/r/Movie/Extras/a.mkv', 'file', after)).toBe('matches an ignore pattern');
+  expect(exclusionReason('/r', '/r/Movie/a.mkv', 'file', after)).toBe('not a media file extension');
+});
+
 test.each<[string | null, string[]]>([
   [null, []],
   ['/data/Recycle/', ['/data/Recycle']],

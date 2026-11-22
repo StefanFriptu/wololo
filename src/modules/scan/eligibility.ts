@@ -59,6 +59,24 @@ export function eligibilityRules(
   };
 }
 
+interface CompiledRules {
+  globs: Bun.Glob[];
+  extensions: ReadonlySet<string>;
+}
+
+const compiledRules = new WeakMap<EligibilityRules, CompiledRules>();
+
+function compile(rules: EligibilityRules): CompiledRules {
+  const cached = compiledRules.get(rules);
+  if (cached) return cached;
+  const compiled = {
+    globs: rules.ignorePatterns.map((pattern) => new Bun.Glob(pattern)),
+    extensions: new Set(rules.extensions.map((ext) => ext.toLowerCase())),
+  };
+  compiledRules.set(rules, compiled);
+  return compiled;
+}
+
 /** Pure: why the scanner would not index this entry of a root, or null when it would. */
 export function exclusionReason(
   root: string,
@@ -73,14 +91,13 @@ export function exclusionReason(
   if (segments.some(skippedName)) return 'hidden or temporary path';
   if (isSkippedPath(path, rules.skipPaths)) return 'inside the recycle bin';
   if (folders.some((folder) => folder.toUpperCase() === 'BDMV')) return 'inside a disc structure';
-  const globs = rules.ignorePatterns.map((pattern) => new Bun.Glob(pattern));
+  const { globs, extensions } = compile(rules);
   for (let depth = 1; depth <= folders.length; depth += 1) {
     if (isIgnored(segments.slice(0, depth).join('/'), true, globs)) return 'matches an ignore pattern';
   }
   if (kind !== 'bdmv' && isIgnored(segments.join('/'), false, globs)) return 'matches an ignore pattern';
   if (kind !== 'file' && !rules.discs) return 'disc handling is disabled';
   if (kind === 'file' && rules.discsOnly) return 'library only converts discs';
-  if (kind !== 'bdmv' && !hasMediaExtension(path, new Set(rules.extensions.map((ext) => ext.toLowerCase()))))
-    return 'not a media file extension';
+  if (kind !== 'bdmv' && !hasMediaExtension(path, extensions)) return 'not a media file extension';
   return null;
 }
