@@ -330,7 +330,8 @@ docker/smoke-test.sh wololo:dev   # starts the image and checks health, PUID/PGI
 Code map:
 
 - [docs/ARCHITECTURE.md](ARCHITECTURE.md): modules, routes and data flow.
-- [docs/CONVENTIONS.md](CONVENTIONS.md): code conventions.
+- [AGENTS.md](../AGENTS.md): start here (checks, hard rules, which doc to read).
+- [docs/CONVENTIONS.md](CONVENTIONS.md) and [docs/CONVENTIONS-WEB.md](CONVENTIONS-WEB.md): code conventions.
 - [docs/SPEC.md](SPEC.md): requirements.
 
 Commits use Conventional Commits (`feat(jobs): ...`). Pull requests must pass CI.
