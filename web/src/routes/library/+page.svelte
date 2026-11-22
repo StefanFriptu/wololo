@@ -247,7 +247,7 @@
     </button>
     {#each MEDIA_FILE_STATUSES as status (status)}
       <button class="small" aria-pressed={filters.status === status} onclick={() => update({ status })}>
-        <span class="badge tone-{MEDIA_STATUS_TONES[status]}">{MEDIA_STATUS_LABELS[status]}</span>
+        <Badge tone={MEDIA_STATUS_TONES[status]} label={MEDIA_STATUS_LABELS[status]} />
         <span class="count">{counts.byStatus[status] ?? 0}</span>
       </button>
     {/each}
