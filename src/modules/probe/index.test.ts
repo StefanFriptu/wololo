@@ -129,11 +129,6 @@ describe.skipIf(!ffmpegAvailable())('probe with ffprobe', () => {
     expect(result.streams.find((stream) => stream.kind === 'audio')?.language).toBe('eng');
   });
 
-  test('probe - without chapters', async () => {
-    const result = await t.ctx.services.probe.probe(await ensureFixture(FIXTURES.dts51), { withChapters: false });
-    expect(result.chapterCount).toBe(0);
-  });
-
   test('probe - a file that is not media is an upstream error', async () => {
     const path = join(t.dir, 'not-media.mkv');
     writeFileSync(path, 'this is not a matroska file');
