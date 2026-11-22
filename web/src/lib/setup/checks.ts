@@ -1,10 +1,10 @@
 import { api } from '#lib/api/client.ts';
 import { errorMessage } from '#lib/api/errorMessage.ts';
 import { testConnection } from '#lib/api/testConnection.ts';
-import { formatBytes } from '#lib/format/formatBytes.ts';
 import { PATH_SCOPE_LABELS } from '#lib/labels.ts';
 import type { ArrInstance, PathMappingInput } from '#lib/shared.ts';
 import { explainWebhookFailure } from './explainWebhookFailure.ts';
+import { libraryFolderChecks } from './libraryFolderChecks.ts';
 import type { SetupCheck } from './SetupCheck.ts';
 
 const REQUIRED_TOOLS = ['ffmpeg', 'ffprobe'] as const;
@@ -91,35 +91,7 @@ export async function folderChecks(): Promise<SetupCheck[]> {
         },
       ];
     }
-    return libraries.flatMap((library) =>
-      library.roots.map((root): SetupCheck => {
-        const key = `folder-${root.id}`;
-        if (!root.accessible) {
-          return {
-            key,
-            state: 'bad',
-            title: `${root.path} is not reachable`,
-            detail: 'Check the folder is mounted into the Wololo container at this path.',
-            fixStep: 'media',
-          };
-        }
-        if (!root.writable) {
-          return {
-            key,
-            state: 'warn',
-            title: `${root.path} is read-only`,
-            detail: 'Wololo can check files here but cannot replace them. Check PUID/PGID and the mount options.',
-            fixStep: 'media',
-          };
-        }
-        return {
-          key,
-          state: 'ok',
-          title: `${library.name}: ${root.path}`,
-          detail: `Writable, ${formatBytes(root.freeBytes)} free`,
-        };
-      }),
-    );
+    return libraryFolderChecks(libraries);
   } catch (error) {
     return [failed('folders', 'Could not read the media folders', error, 'media')];
   }
