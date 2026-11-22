@@ -27,6 +27,7 @@ export function createScheduler(ctx: AppContext, options: SchedulerOptions): Sch
   const running = new Map<TaskName, RunningTask>();
   let timer: ReturnType<typeof setInterval> | null = null;
   let stopping = false;
+  let seeded = false;
 
   const definition = (name: TaskName): TaskDefinition => {
     const task = definitions.get(name);
@@ -35,6 +36,7 @@ export function createScheduler(ctx: AppContext, options: SchedulerOptions): Sch
   };
 
   const ensureRows = () => {
+    if (seeded) return;
     const current = now();
     for (const task of options.tasks) {
       ctx.db
@@ -53,6 +55,7 @@ export function createScheduler(ctx: AppContext, options: SchedulerOptions): Sch
         .onConflictDoNothing()
         .run();
     }
+    seeded = true;
   };
 
   const rows = (): ScheduledTaskRow[] => {
@@ -65,7 +68,8 @@ export function createScheduler(ctx: AppContext, options: SchedulerOptions): Sch
 
   const row = (name: TaskName): ScheduledTaskRow => {
     definition(name);
-    const found = rows().find((candidate) => candidate.name === name);
+    ensureRows();
+    const found = ctx.db.select().from(scheduledTasks).where(eq(scheduledTasks.name, name)).get();
     if (!found) throw new AppError('not_found', `task ${name} not found`);
     return found;
   };
