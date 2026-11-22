@@ -160,7 +160,10 @@ export function createWebhookService(ctx: AppContext, deps: WebhookDeps = {}): W
       return reply('error', 'invalid webhook payload');
     }
     const { eventType } = envelope.data;
-    if (eventType === 'Test') return reply('test', `${kind} test received`);
+    if (eventType === 'Test') {
+      ctx.events.emit('webhook.test', { kind, instanceId });
+      return reply('test', `${kind} test received`);
+    }
     if (eventType !== 'Download') return reply('ignored', `event ${eventType} is not handled`);
     const parsed = schema.safeParse(raw);
     if (!parsed.success) {

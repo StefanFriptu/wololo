@@ -5,6 +5,7 @@ import type {
   ArrInstanceInput,
   ArrLookupQuery,
   ArrTestRequest,
+  ArrWebhookRequest,
   DownloadClientInput,
   PathMappingInput,
   PlexConnectionUpdate,
@@ -29,6 +30,8 @@ const arrInstanceSchema = z.object({
 const arrTestSchema = arrInstanceSchema.extend({
   id: z.number().int().positive().optional(),
 }) satisfies z.ZodType<ArrTestRequest>;
+
+const webhookRequestSchema = z.object({ address: httpUrl }) satisfies z.ZodType<ArrWebhookRequest>;
 
 const lookupQuerySchema = z.object({
   term: z.string().trim().min(1),
@@ -101,6 +104,15 @@ export function registerIntegrationsRoutes(app: ApiApp, ctx: AppContext): void {
   route(app, 'DELETE /api/v1/arr/:id', (c) => noContent(services.arr.remove(parseId(c))), idParams);
   route(app, 'GET /api/v1/arr/:id/rootfolders', (c) => services.arr.rootFolders(parseId(c)), idParams);
   route(app, 'GET /api/v1/arr/:id/qualityprofiles', (c) => services.arr.qualityProfiles(parseId(c)), idParams);
+  route(app, 'GET /api/v1/arr/:id/webhook', (c) => services.arr.webhook(parseId(c)), idParams);
+  route(
+    app,
+    'PUT /api/v1/arr/:id/webhook',
+    async (c) => services.arr.ensureWebhook(parseId(c), (await parseBody(c, webhookRequestSchema)).address),
+    { ...idParams, body: webhookRequestSchema },
+  );
+  route(app, 'POST /api/v1/arr/:id/webhook/test', (c) => services.arr.testWebhook(parseId(c)), idParams);
+  route(app, 'GET /api/v1/arr/:id/pathcheck', (c) => services.arr.checkPaths(parseId(c)), idParams);
   route(
     app,
     'GET /api/v1/arr/:id/lookup',

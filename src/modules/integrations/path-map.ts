@@ -1,6 +1,6 @@
 import type { MapPath } from '../../contracts/integrations.ts';
 
-const WINDOWS_PATH = /^[a-zA-Z]:[\\/]|^\\\\/;
+export const WINDOWS_PATH = /^[a-zA-Z]:[\\/]|^\\\\/;
 
 function isWindowsPath(path: string): boolean {
   return WINDOWS_PATH.test(path) || (path.includes('\\') && !path.includes('/'));

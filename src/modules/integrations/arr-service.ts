@@ -6,6 +6,7 @@ import type { ArrInstanceInput } from '../../shared/api-types.ts';
 import type { ArrInstance, ArrKind, MovieMatchCandidate } from '../../shared/domain.ts';
 import { normalizeLanguage } from '../../shared/language.ts';
 import { type ArrClient, type ArrLookupMovie, createArrClient } from './arr-client.ts';
+import { createArrSetup } from './arr-setup.ts';
 import { movieMatchScore, parseTitleYear } from './movie-match.ts';
 import { isSameOrInside } from './path-map.ts';
 import { maskSecret, resolveSecret } from './secrets.ts';
@@ -444,5 +445,6 @@ export function createArrService(ctx: AppContext, deps: IntegrationDeps = {}): A
       const first = listArrInstances(ctx.db).find((instance) => instance.kind === 'radarr' && instance.enabled);
       return first ? masked(first) : null;
     },
+    ...createArrSetup(ctx, { requireInstance, clientFor, libraryTimeoutMs }),
   };
 }

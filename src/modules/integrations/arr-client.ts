@@ -28,15 +28,22 @@ const movieSchema = z.object({
   path: z.string().nullish(),
   tmdbId: z.number().int().nullish(),
   originalLanguage: languageSchema,
-  movieFile: z.object({ id: z.number().int(), path: z.string().nullish() }).nullish(),
+  movieFile: z
+    .object({ id: z.number().int(), path: z.string().nullish(), relativePath: z.string().nullish() })
+    .nullish(),
 });
 const seriesSchema = z.object({
   id: z.number().int(),
   title: z.string(),
   path: z.string().nullish(),
   originalLanguage: languageSchema,
+  statistics: z.object({ episodeFileCount: z.number().int().nullish() }).nullish(),
 });
-const episodeFileSchema = z.object({ id: z.number().int(), path: z.string().nullish() });
+const episodeFileSchema = z.object({
+  id: z.number().int(),
+  path: z.string().nullish(),
+  relativePath: z.string().nullish(),
+});
 const historySchema = z.object({
   records: z.array(
     z.object({
@@ -46,10 +53,21 @@ const historySchema = z.object({
     }),
   ),
 });
+const notificationFieldSchema = z.looseObject({ name: z.string(), value: z.unknown().optional() });
+const notificationSchema = z.looseObject({
+  id: z.number().int().optional(),
+  name: z.string().nullish(),
+  implementation: z.string().nullish(),
+  onDownload: z.boolean().nullish(),
+  onUpgrade: z.boolean().nullish(),
+  fields: z.array(notificationFieldSchema).default([]),
+});
 const commandSchema = z.object({ id: z.number().int() }).loose();
 const addedMovieSchema = z.object({ id: z.number().int() }).loose();
 
 export type ArrLookupMovie = z.infer<typeof lookupMovieSchema>;
+/** A Settings > Connect entry, kept whole so a PUT sends back every field Radarr/Sonarr returned. */
+export type ArrNotification = z.infer<typeof notificationSchema>;
 export type ArrMovie = z.infer<typeof movieSchema>;
 export type ArrSeries = z.infer<typeof seriesSchema>;
 
@@ -102,7 +120,13 @@ export function createArrClient(options: ArrClientOptions) {
   const call = <T extends z.ZodType>(
     path: string,
     schema: T,
-    init: { method?: string; query?: Record<string, string>; body?: unknown; timeoutMs?: number } = {},
+    init: {
+      method?: string;
+      query?: Record<string, string>;
+      body?: unknown;
+      timeoutMs?: number;
+      keepErrorBody?: boolean;
+    } = {},
   ) => {
     const url = new URL(`${base}/api/v3/${path}`);
     for (const [key, value] of Object.entries(init.query ?? {})) url.searchParams.set(key, value);
@@ -117,6 +141,7 @@ export function createArrClient(options: ArrClientOptions) {
         body: init.body === undefined ? undefined : JSON.stringify(init.body),
         fetch: options.fetch,
         timeoutMs: init.timeoutMs ?? options.timeoutMs,
+        keepErrorBody: init.keepErrorBody,
       },
       schema,
     );
@@ -150,6 +175,14 @@ export function createArrClient(options: ArrClientOptions) {
         return droppedPath && importedPath ? [{ droppedPath, importedPath }] : [];
       });
     },
+    notifications: () => call('notification', z.array(notificationSchema)),
+    notificationTemplates: () => call('notification/schema', z.array(notificationSchema)),
+    createNotification: (notification: ArrNotification) =>
+      call('notification', notificationSchema, { method: 'POST', body: notification }),
+    updateNotification: (notification: ArrNotification & { id: number }) =>
+      call(`notification/${notification.id}`, notificationSchema, { method: 'PUT', body: notification }),
+    testNotification: (notification: ArrNotification) =>
+      call('notification/test', z.unknown(), { method: 'POST', body: notification, keepErrorBody: true }),
     command: (command: ArrCommand) => call('command', commandSchema, { method: 'POST', body: command }),
     addMovie: async (movie: NewRadarrMovie) => {
       const added = await call('movie', addedMovieSchema, {

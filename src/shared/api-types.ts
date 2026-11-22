@@ -482,6 +482,39 @@ export interface ArrRootFolder {
   freeBytes: number | null;
 }
 
+/** Wololo's webhook in Radarr/Sonarr Settings > Connect. */
+export interface ArrWebhookStatus {
+  configured: boolean;
+  /** Webhook URL with the API key masked; null when not configured. */
+  url: string | null;
+  /** Sends On Import and On Upgrade. */
+  triggersOk: boolean;
+}
+
+export interface ArrWebhookRequest {
+  /** Wololo's address as Radarr/Sonarr reach it, e.g. "http://wololo:8585" (the URL base is appended). */
+  address: string;
+}
+
+export interface ArrWebhookTest {
+  /** Radarr/Sonarr accepted the test. */
+  sent: boolean;
+  /** The Test event reached Wololo. */
+  received: boolean;
+  message: string;
+}
+
+/** One real library file of the instance, looked up here through the path mappings. */
+export interface ArrPathCheck {
+  ok: boolean;
+  message: string;
+  /** The file as Radarr/Sonarr name it; null when the instance has no file yet. */
+  remotePath: string | null;
+  localPath: string | null;
+  /** A mapping that would make the file visible here, found under a library folder. */
+  suggestion: PathMappingInput | null;
+}
+
 export interface ArrQualityProfile {
   id: number;
   name: string;
@@ -815,6 +848,14 @@ export interface ApiRoutes {
     params: IdParams;
     response: ArrQualityProfile[];
   };
+  'GET /api/v1/arr/:id/webhook': { params: IdParams; response: ArrWebhookStatus };
+  'PUT /api/v1/arr/:id/webhook': {
+    params: IdParams;
+    body: ArrWebhookRequest;
+    response: ArrWebhookStatus;
+  };
+  'POST /api/v1/arr/:id/webhook/test': { params: IdParams; response: ArrWebhookTest };
+  'GET /api/v1/arr/:id/pathcheck': { params: IdParams; response: ArrPathCheck };
   'GET /api/v1/arr/:id/lookup': {
     params: IdParams;
     query: ArrLookupQuery;

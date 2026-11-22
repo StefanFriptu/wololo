@@ -15,11 +15,16 @@ export interface UpstreamRequest {
   timeoutMs?: number;
   signal?: AbortSignal;
   fetch?: FetchLike;
+  /** Keep the start of a non-2xx body on the error (UpstreamFailure.body), for APIs that explain failures there. */
+  keepErrorBody?: boolean;
 }
 
 export interface UpstreamFailure {
   status: number | null;
+  body?: string;
 }
+
+const MAX_ERROR_BODY_CHARS = 2000;
 
 export interface UpstreamText {
   response: Response;
@@ -106,9 +111,11 @@ async function send(request: UpstreamRequest): Promise<Sent> {
     } satisfies UpstreamFailure);
   }
   if (!response.ok) {
-    await discard(response);
+    const body = request.keepErrorBody ? (await response.text().catch(() => '')).slice(0, MAX_ERROR_BODY_CHARS) : null;
+    if (body == null) await discard(response);
     throw new AppError('upstream', `${describe(request)}: ${statusMessage(response.status)}`, {
       status: response.status,
+      ...(body == null ? {} : { body }),
     } satisfies UpstreamFailure);
   }
   return { response, fail };
@@ -157,6 +164,12 @@ export function upstreamStatus(error: unknown): number | null {
   if (!(error instanceof AppError) || error.code !== 'upstream') return null;
   const details = error.details as Partial<UpstreamFailure> | undefined;
   return typeof details?.status === 'number' ? details.status : null;
+}
+
+export function upstreamErrorBody(error: unknown): string | null {
+  if (!(error instanceof AppError) || error.code !== 'upstream') return null;
+  const details = error.details as Partial<UpstreamFailure> | undefined;
+  return typeof details?.body === 'string' ? details.body : null;
 }
 
 /** Network errors, timeouts, 429 and 5xx: worth another attempt later. Bad credentials, URLs or answers are not. */
