@@ -11,7 +11,7 @@ import type { BdmvEvaluation, BdmvService } from '../../contracts/bdmv.ts';
 import type { ArrService } from '../../contracts/integrations.ts';
 import type { ProbeService } from '../../contracts/probe-scan.ts';
 import type { AppError } from '../../core/errors.ts';
-import { mediaFiles } from '../../db/schema.ts';
+import { libraryProfiles, mediaFiles } from '../../db/schema.ts';
 import type { MediaQuery } from '../../shared/api-types.ts';
 import type { ArrItemRef, BdmvJobPlan, ConversionPlan, Library } from '../../shared/domain.ts';
 import type { EventMap } from '../../shared/events.ts';
@@ -134,7 +134,7 @@ test('media.checkPath - disc folders go through bdmv.evaluate and queue a bdmv j
   });
   expect(arrLookups).toEqual([]);
 
-  t.ctx.settings.update({ processing: { enabled: true } });
+  t.ctx.settings.update({ processing: { enabled: true }, media: { importAction: 'convert_strictest' } });
   discEvaluation = { ...discEvaluation, plan: discPlan(disc) };
   const queued = await media().checkPath(disc, { trigger: 'scan' });
   expect(queued.action).toBe('queued');
@@ -163,7 +163,11 @@ test.each([
   ['Movie/notes.txt', 'not a media file extension'],
   ['Movie/Sample/sample.mkv', 'matches an ignore pattern'],
 ])('media.checkPath - %s is not checked (%s): no row, no probe, no job', async (relativePath, reason) => {
-  t.ctx.settings.update({ processing: { enabled: true }, recycleBin: { path: `${root}/Recycle/` } });
+  t.ctx.settings.update({
+    processing: { enabled: true },
+    media: { importAction: 'convert_strictest' },
+    recycleBin: { path: `${root}/Recycle/` },
+  });
   const path = join(root, relativePath);
   mkdirSync(join(path, '..'), { recursive: true });
   writeFileSync(path, 'x');
@@ -186,7 +190,7 @@ test('media.checkPath - files of a disabled library are not checked', async () =
   });
   const path = join(otherRoot, 'Movie.mkv');
   writeFileSync(path, 'x');
-  t.ctx.settings.update({ processing: { enabled: true } });
+  t.ctx.settings.update({ processing: { enabled: true }, media: { importAction: 'convert_strictest' } });
   const result = await media().checkPath(path, { trigger: 'webhook' });
   expect(result).toMatchObject({ action: 'ignored', message: 'not checked: library is disabled' });
   expect(rowOf(path)).toBeUndefined();
@@ -199,7 +203,7 @@ test('media.checkPath - plain files of a discs-only library are never checked, d
     roots: library.roots.map((r) => r.path),
     discsOnly: true,
   });
-  t.ctx.settings.update({ processing: { enabled: true } });
+  t.ctx.settings.update({ processing: { enabled: true }, media: { importAction: 'convert_strictest' } });
   const path = join(root, 'Movie', 'Movie.mkv');
   mkdirSync(join(path, '..'), { recursive: true });
   writeFileSync(path, 'x');
@@ -265,7 +269,7 @@ describe.skipIf(!ffmpegAvailable())('with ffprobe fixtures', () => {
   });
 
   test('media.checkPath - processing enabled queues an audio job with the plan', async () => {
-    t.ctx.settings.update({ processing: { enabled: true } });
+    t.ctx.settings.update({ processing: { enabled: true }, media: { importAction: 'convert_strictest' } });
     const path = await ensureFixtureCopy(FIXTURES.eac3Stereo, root, 'Show.mkv');
     const result = await media().checkPath(path, { trigger: 'webhook' });
     expect(result.action).toBe('queued');
@@ -281,9 +285,27 @@ describe.skipIf(!ffmpegAvailable())('with ffprobe fixtures', () => {
     ]);
   });
 
+  test('media.checkPath - with processing on, the default check_only setting queues nothing', async () => {
+    t.ctx.settings.update({ processing: { enabled: true } });
+    const path = await ensureFixtureCopy(FIXTURES.eac3Stereo, root, 'Show.mkv');
+    const result = await media().checkPath(path, { trigger: 'webhook' });
+    expect(result.mediaFile?.status).toBe('needs_work');
+    expect(result.action).toBe('dry_run');
+    expect(result.message).toStartWith('needs work, not queued');
+    expect(jobs.calls).toEqual([]);
+  });
+
+  test('media.checkPath - stores one result per assigned profile', async () => {
+    const path = await ensureFixtureCopy(FIXTURES.eac3Stereo, root, 'Show.mkv');
+    const result = await media().checkPath(path, { trigger: 'webhook' });
+    expect(result.mediaFile?.profileResults).toEqual([
+      { profileId: 1, action: 'convert', failingCodecs: ['eac3'], failingStreams: [] },
+    ]);
+  });
+
   test('media.checkPath - a failing queue is reported, the row keeps needs_work', async () => {
     const failing = createTestContext({
-      settings: { processing: { enabled: true } },
+      settings: { processing: { enabled: true }, media: { importAction: 'convert_strictest' } },
       overrides: { rules: fakeRules(), jobs: fakeJobs(() => failing.ctx.db, { fail: true }).service },
     });
     try {
@@ -301,7 +323,7 @@ describe.skipIf(!ffmpegAvailable())('with ffprobe fixtures', () => {
 
   test('media.checkPath - unsupported video is blocked (failed, plan action blocked)', async () => {
     const path = await ensureFixtureCopy(MPEG4_VIDEO, root, 'Old.mkv');
-    t.ctx.settings.update({ processing: { enabled: true } });
+    t.ctx.settings.update({ processing: { enabled: true }, media: { importAction: 'convert_strictest' } });
     const result = await media().checkPath(path, { trigger: 'scan' });
     expect(result.action).toBe('blocked');
     expect(result.mediaFile).toMatchObject({ status: 'blocked', planAction: 'blocked', failingCodecs: ['mpeg4'] });
@@ -530,8 +552,8 @@ describe('media rows without files', () => {
     expect(names(third)).toEqual(['E.mkv']);
   });
 
-  test('media.list - profile filter covers assigned libraries and, for the builtin default, unassigned ones', async () => {
-    const builtin = insertProfile(t.ctx.db, TEST_DEFINITION, { builtin: true });
+  test('media.list - profile filter covers only the libraries that profile is assigned to', async () => {
+    const unused = insertProfile(t.ctx.db, TEST_DEFINITION);
     const custom = insertProfile(t.ctx.db, TEST_DEFINITION);
     const other = await t.ctx.services.libraries.create({
       name: 'Kids',
@@ -548,7 +570,7 @@ describe('media rows without files', () => {
     const paths = async (profileId: number) =>
       (await media().list({ profileId })).items.map((item) => item.relativePath);
     expect(await paths(custom)).toEqual(['K.mkv']);
-    expect(await paths(builtin)).toEqual(['A.mkv']);
+    expect(await paths(unused)).toEqual([]);
   });
 
   test('media.stats - totals, every status present, failing codecs without ignored rows', async () => {
@@ -653,8 +675,11 @@ describe('media rows without files', () => {
     expect(await media().invalidateRules({ libraryId: library.id })).toBe(1);
     expect(rowOf('/x/never')?.status).toBe('pending');
 
+    const profileId = insertProfile(t.ctx.db, TEST_DEFINITION);
+    t.ctx.db.insert(libraryProfiles).values({ libraryId: library.id, profileId }).run();
     rulesState.versionKey = '1@2';
-    expect(await media().invalidateRules({ profileId: 1 })).toBe(1);
+    expect(await media().invalidateRules({ profileId: profileId + 1 })).toBe(0);
+    expect(await media().invalidateRules({ profileId })).toBe(1);
     expect(rowOf('/x/old')).toMatchObject({ status: 'pending', statusReason: 'rules changed, waiting for re-check' });
     expect(rowOf('/x/ignored')?.status).toBe('ignored');
     expect(rowOf('/x/processing')?.status).toBe('processing');

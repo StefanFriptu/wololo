@@ -8,7 +8,7 @@ import { MEDIA_FILE_STATUSES, type MediaFileStatus } from '../../shared/domain.t
 import { statEntry } from './entries.ts';
 import { summarizeProbe } from './evaluation.ts';
 import { libraryQuery } from './libraryQuery.ts';
-import { createMediaEngine } from './mediaEngine.ts';
+import { createMediaEngine, NO_PROFILE_MESSAGE } from './mediaEngine.ts';
 import {
   jobsForMediaQuery,
   listMediaQuery,
@@ -93,8 +93,14 @@ export function createMediaService(ctx: AppContext): MediaService {
       }
       const probe = row.probe ?? (await ctx.services.probe.probe(row.path));
       const library = libraryOf(row.libraryId);
-      const { profile } = await engine.rulesFor(library);
-      return ctx.services.rules.plan({ probe, profile, library, originalLanguage: row.originalLanguage });
+      const rules = await engine.rulesFor(library);
+      if (!rules) throw new AppError('unprocessable', NO_PROFILE_MESSAGE);
+      return ctx.services.rules.plan({
+        probe,
+        profile: rules.profile,
+        library,
+        originalLanguage: row.originalLanguage,
+      });
     },
 
     setIgnored: async (id, ignored, reason) => {
@@ -148,16 +154,14 @@ export function createMediaService(ctx: AppContext): MediaService {
         try {
           const library = libraryOf(row.libraryId);
           const rules = await engine.rulesFor(library);
-          const plan = ctx.services.rules.plan({
-            probe,
-            profile: rules.profile,
-            library,
-            originalLanguage: row.originalLanguage,
-          });
+          if (!rules) throw new Error(NO_PROFILE_MESSAGE);
+          const input = { probe, library, originalLanguage: row.originalLanguage };
+          const plan = ctx.services.rules.plan({ ...input, profile: rules.profile });
           Object.assign(values, {
             plan,
             planAction: plan.action,
             failingCodecs: plan.failingCodecs,
+            profileResults: ctx.services.rules.checkProfiles({ ...input, profiles: rules.profiles }),
             rulesKey: rules.rulesKey,
           });
         } catch (error) {

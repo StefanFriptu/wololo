@@ -21,14 +21,10 @@ import type { ArrKind, DeviceProfileDefinition } from '../../src/shared/domain.t
 let counter = 0;
 const unique = (prefix: string) => `${prefix}-${++counter}`;
 
-export function insertProfile(
-  db: Db,
-  definition: DeviceProfileDefinition,
-  overrides: { name?: string; builtin?: boolean } = {},
-): number {
+export function insertProfile(db: Db, definition: DeviceProfileDefinition, overrides: { name?: string } = {}): number {
   const [row] = db
     .insert(deviceProfiles)
-    .values({ name: overrides.name ?? unique('profile'), builtin: overrides.builtin ?? false, definition })
+    .values({ name: overrides.name ?? unique('profile'), definition })
     .returning({ id: deviceProfiles.id })
     .all();
   return (row as { id: number }).id;

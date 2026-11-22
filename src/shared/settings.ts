@@ -29,6 +29,9 @@ export interface GeneralConfig {
 export const AUTHENTICATION_MODES = ['disabled_for_local_addresses', 'required', 'disabled'] as const;
 export type AuthenticationMode = (typeof AUTHENTICATION_MODES)[number];
 
+export const IMPORT_ACTIONS = ['check_only', 'convert_strictest', 'convert_for_profile'] as const;
+export type ImportAction = (typeof IMPORT_ACTIONS)[number];
+
 /** Runtime settings, stored in the settings KV table, one row per top-level section. */
 export interface Settings {
   processing: {
@@ -64,6 +67,14 @@ export interface Settings {
     ignorePatterns: string[];
     /** Scan new or changed files right after a webhook import. */
     checkOnImport: boolean;
+    /**
+     * What a webhook import or a scan does with a file that needs work. check_only (default): report it, queue
+     * nothing. convert_strictest: queue a job for the strictest combination of the library's profiles.
+     * convert_for_profile: queue a job for importProfileId alone, in libraries that profile is assigned to.
+     */
+    importAction: ImportAction;
+    /** The profile convert_for_profile converts for; null otherwise. */
+    importProfileId: number | null;
   };
   recycleBin: {
     enabled: boolean;
@@ -117,6 +128,8 @@ export const DEFAULT_SETTINGS: Settings = {
     extensions: ['.mkv', '.mp4', '.m4v', '.avi', '.ts', '.m2ts', '.mov', '.iso'],
     ignorePatterns: ['**/Sample/**', '**/*.sample.*', '**/.wololo-recycle/**', '**/@eaDir/**'],
     checkOnImport: true,
+    importAction: 'check_only',
+    importProfileId: null,
   },
   recycleBin: { enabled: true, retentionDays: 7, path: null },
   bdmv: {

@@ -2,7 +2,13 @@ import { isAbsolute } from 'node:path';
 import { z } from 'zod';
 import type { Db } from '../db/client.ts';
 import { settings as settingsTable } from '../db/schema.ts';
-import { DEFAULT_SETTINGS, type DeepPartial, type Settings, type SettingsSection } from '../shared/settings.ts';
+import {
+  DEFAULT_SETTINGS,
+  type DeepPartial,
+  IMPORT_ACTIONS,
+  type Settings,
+  type SettingsSection,
+} from '../shared/settings.ts';
 import { AppError } from './errors.ts';
 import type { EventBus } from './events.ts';
 import type { Logger } from './logger.ts';
@@ -22,11 +28,18 @@ export const settingsSchema = z.object({
     maxAttempts: z.number().int().min(1).max(10),
     jobRetentionDays: z.number().int().min(0).max(3650),
   }),
-  media: z.object({
-    extensions: z.array(z.string().regex(/^\.[a-z0-9]+$/)),
-    ignorePatterns: z.array(z.string().min(1)),
-    checkOnImport: z.boolean(),
-  }),
+  media: z
+    .object({
+      extensions: z.array(z.string().regex(/^\.[a-z0-9]+$/)),
+      ignorePatterns: z.array(z.string().min(1)),
+      checkOnImport: z.boolean(),
+      importAction: z.enum(IMPORT_ACTIONS),
+      importProfileId: z.number().int().positive().nullable(),
+    })
+    .refine((media) => media.importAction !== 'convert_for_profile' || media.importProfileId !== null, {
+      message: 'convert_for_profile needs importProfileId',
+      path: ['importProfileId'],
+    }),
   recycleBin: z.object({
     enabled: z.boolean(),
     retentionDays: z.number().int().min(0).max(365),

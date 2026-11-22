@@ -23,6 +23,7 @@ export function fakeJob(overrides: Partial<JobDetail> = {}): JobDetail {
     trigger: 'manual',
     mediaFileId: 1,
     libraryId: 1,
+    profileId: null,
     sourcePath: '/data/media/movies/Movie (2020)/Movie (2020).mkv',
     outputPath: null,
     title: 'Movie (2020)',

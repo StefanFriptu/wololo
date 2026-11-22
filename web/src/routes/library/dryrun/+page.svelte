@@ -3,6 +3,7 @@
   import { api } from '#lib/api/client.ts';
   import { live } from '#lib/api/live.svelte.ts';
   import Async from '#lib/components/Async.svelte';
+  import ConvertTargetModal from '#lib/components/ConvertTargetModal.svelte';
   import Icon from '#lib/components/Icon.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import ScanPanel from '#lib/components/ScanPanel.svelte';
@@ -11,6 +12,7 @@
   import { formatEstimate } from '#lib/format/formatEstimate.ts';
   import { dryRunGroupQuery } from '#lib/library/dryRunGroupQuery.ts';
   import { href } from '#lib/paths.ts';
+  import { convertTargets } from '#lib/profiles/convertTargets.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import { attempt } from '#lib/attempt.ts';
 
@@ -45,13 +47,20 @@
 
   const toNumber = (value: string): number | undefined => (value === '' ? undefined : Number(value));
 
-  async function processAll(): Promise<void> {
+  let convertOpen = $state(false);
+
+  const scopeLibraries = $derived((libraries.data ?? []).filter((item) => libraryId === undefined || item.id === libraryId));
+  const targets = $derived(convertTargets(scopeLibraries.flatMap((item) => item.profileIds), profiles.data ?? []));
+  const question = $derived.by(() => {
     const library = libraries.data?.find((item) => item.id === libraryId);
     const files = report.data?.totals.needsWork;
     const count = files === undefined ? 'every file' : `all ${files} file(s)`;
-    if (!confirm(`Queue ${count} that need work ${library ? `in ${library.name}` : 'in every library'}?`)) return;
+    return `Queue ${count} that need work ${library ? `in ${library.name}` : 'in every library'}?`;
+  });
+
+  async function processAll(profileId: number | undefined): Promise<void> {
     await attempt(
-      () => api('POST /api/v1/jobs', { body: { filter: { libraryId, status: 'needs_work' } } }),
+      () => api('POST /api/v1/jobs', { body: { filter: { libraryId, status: 'needs_work' }, profileId } }),
       (result) => `Queued ${result.jobs.length} job(s)${result.skipped.length ? `, skipped ${result.skipped.length}` : ''}`,
     );
   }
@@ -80,6 +89,8 @@
   </label>
 </div>
 
+<ConvertTargetModal bind:open={convertOpen} {question} {targets} onconfirm={processAll} />
+
 <ScanPanel {libraryId} onfinished={() => report.load({ silent: true })} />
 
 <Async resource={report}>
@@ -88,7 +99,7 @@
       <div class="alert tone-info">
         <p>Processing is on: files that need work are converted as they are found.</p>
         {#if data.totals.needsWork > 0}
-          <button class="primary small" onclick={processAll}><Icon name="play" size={14} /> Process all needs-work</button>
+          <button class="primary small" onclick={() => (convertOpen = true)}><Icon name="play" size={14} /> Process all needs-work</button>
         {/if}
       </div>
     {:else}

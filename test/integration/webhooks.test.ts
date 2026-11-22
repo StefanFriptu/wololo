@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { type FakeUpstream, startFakeUpstream } from '../../src/modules/integrations/fake-upstream.ts';
 import type { MediaFileSummary, Paginated, WebhookResponse } from '../../src/shared/api-types.ts';
 import type { ArrInstance, JobSummary } from '../../src/shared/domain.ts';
+import { createTemplateProfile } from '../helpers/createTemplateProfile.ts';
 import { ensureFixtureCopy, FIXTURES, ffmpegAvailable } from '../helpers/fixtures.ts';
 import {
   type ApiCall,
@@ -121,14 +122,18 @@ describe.skipIf(!ffmpegAvailable())(
         () => server.base,
         () => server.apiKey,
       );
-      await call('/api/v1/settings', { method: 'PUT', json: { processing: { enabled: true } } });
+      await call('/api/v1/settings', {
+        method: 'PUT',
+        json: { processing: { enabled: true }, media: { importAction: 'convert_strictest' } },
+      });
+      const player = await createTemplateProfile(call, 'basic', 'Living room TV');
       await call('/api/v1/libraries', {
         method: 'POST',
-        json: { name: 'Movies', kind: 'movies', roots: [movies], profileIds: [] },
+        json: { name: 'Movies', kind: 'movies', roots: [movies], profileIds: [player.id] },
       });
       await call('/api/v1/libraries', {
         method: 'POST',
-        json: { name: 'TV', kind: 'series', roots: [tv], profileIds: [] },
+        json: { name: 'TV', kind: 'series', roots: [tv], profileIds: [player.id] },
       });
       radarrId = (
         await call<ArrInstance>('/api/v1/arr', {

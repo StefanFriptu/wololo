@@ -11,6 +11,7 @@ export function jobFixture(overrides: Partial<JobSummary> = {}): JobSummary {
     trigger: 'scan',
     mediaFileId: 10,
     libraryId: 1,
+    profileId: null,
     sourcePath: '/data/media/movies/Movie (2020)/Movie (2020).mkv',
     outputPath: null,
     title: 'Movie (2020)',

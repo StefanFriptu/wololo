@@ -3,10 +3,10 @@
   import { goto } from '$app/navigation';
   import { api } from '#lib/api/client.ts';
   import Async from '#lib/components/Async.svelte';
-  import Badge from '#lib/components/Badge.svelte';
   import Icon from '#lib/components/Icon.svelte';
   import Modal from '#lib/components/Modal.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
+  import PlayerSetup from '#lib/components/PlayerSetup.svelte';
   import { href } from '#lib/paths.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import type { ProfileWithUsage } from '#lib/shared.ts';
@@ -20,6 +20,7 @@
   let cloneOpen = $state(false);
   let cloneName = $state('');
   let busy = $state(false);
+  let adding = $state(false);
 
   $effect(() => {
     untrack(() => {
@@ -27,6 +28,11 @@
       libraries.load();
     });
   });
+
+  async function handleCreated(_profile: ProfileWithUsage, another: boolean): Promise<void> {
+    adding = another;
+    await profiles.load({ silent: true });
+  }
 
   function libraryNames(ids: number[]): string {
     const names = ids.map((id) => libraries.data?.find((library) => library.id === id)?.name ?? `#${id}`);
@@ -68,19 +74,27 @@
 
 <PageHeader title="Profiles" subtitle="What each TV decodes. A library is converted to the strictest of its profiles.">
   {#snippet actions()}
-    <a class="button primary" href={href('/profiles/new')}><Icon name="plus" size={16} /> Add profile</a>
+    {#if (profiles.data?.length ?? 0) > 0}
+      {#if adding}
+        <button onclick={() => (adding = false)}>Cancel</button>
+      {:else}
+        <button class="primary" onclick={() => (adding = true)}><Icon name="plus" size={16} /> Add player</button>
+      {/if}
+    {/if}
   {/snippet}
 </PageHeader>
 
-<Async resource={profiles} isEmpty={(data) => data.length === 0} emptyText="No profiles yet.">
+<Async resource={profiles}>
   {#snippet children(data)}
+    {#if data.length === 0 || adding}
+      <PlayerSetup hasProfiles={data.length > 0} oncreated={handleCreated} />
+    {/if}
     <div class="grid">
       {#each data as profile (profile.id)}
         {@const audio = profile.definition.audio}
         <article class="card profile">
           <header class="card-header">
             <h2><a href={href(`/profiles/${profile.id}`)}>{profile.name}</a></h2>
-            {#if profile.builtin}<Badge tone="info" label="Built-in" />{/if}
           </header>
           {#if profile.description}<p class="muted">{profile.description}</p>{/if}
           <dl class="kv">
@@ -102,8 +116,8 @@
             <button
               class="small"
               onclick={() => remove(profile)}
-              disabled={profile.builtin || profile.libraryIds.length > 0}
-              title={profile.builtin ? 'The built-in profile cannot be deleted' : profile.libraryIds.length > 0 ? 'Assigned to a library' : 'Delete'}
+              disabled={profile.libraryIds.length > 0}
+              title={profile.libraryIds.length > 0 ? 'Assigned to a library' : 'Delete'}
               aria-label="Delete {profile.name}"
             >
               <Icon name="trash" size={14} />

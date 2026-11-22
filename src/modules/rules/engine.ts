@@ -1,4 +1,5 @@
 import type {
+  CheckProfiles,
   CodecAllowed,
   ComputeRulesKey,
   PlanConversion,
@@ -536,3 +537,28 @@ export const planConversion: PlanConversion = (input) => {
   };
   return plan;
 };
+
+function allowedFor(stream: MediaStream, definition: DeviceProfileDefinition): readonly string[] | null {
+  switch (stream.kind) {
+    case 'video':
+      return stream.attachedPicture ? null : definition.video.allowedCodecs;
+    case 'audio':
+      return definition.audio.allowedCodecs;
+    case 'subtitle':
+      return definition.subtitles.allowedCodecs;
+    default:
+      return null;
+  }
+}
+
+export const checkProfiles: CheckProfiles = ({ profiles, ...input }) =>
+  profiles.map((profile) => {
+    const plan = planConversion({ ...input, profile: resolveEffectiveProfile([profile]) });
+    const failingStreams = input.probe.streams
+      .filter((stream) => {
+        const allowed = allowedFor(stream, profile.definition);
+        return allowed !== null && !codecAllowed(stream.codec, allowed);
+      })
+      .map((stream) => stream.index);
+    return { profileId: profile.id, action: plan.action, failingCodecs: plan.failingCodecs, failingStreams };
+  });

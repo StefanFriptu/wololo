@@ -25,6 +25,7 @@ import type {
   PathMappingScope,
   PlanAction,
   ProbeResult,
+  ProfileResult,
   TaskName,
   VerificationResult,
 } from '../shared/domain.ts';
@@ -57,7 +58,6 @@ export const deviceProfiles = sqliteTable('device_profiles', {
   name: text('name').notNull().unique(),
   description: text('description').notNull().default(''),
   version: integer('version').notNull().default(1),
-  builtin: bool('builtin').notNull().default(false),
   definition: json<DeviceProfileDefinition>('definition').notNull(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -133,6 +133,7 @@ export const mediaFiles = sqliteTable(
     streamCodecs: json<string[]>('stream_codecs').notNull().default([]),
     subtitleLanguages: json<string[]>('subtitle_languages').notNull().default([]),
     failingCodecs: json<string[]>('failing_codecs').notNull().default([]),
+    profileResults: json<ProfileResult[]>('profile_results'),
     originalLanguage: text('original_language'),
     arrInstanceId: integer('arr_instance_id').references(() => arrInstances.id, { onDelete: 'set null' }),
     arrKind: text('arr_kind').$type<ArrKind>(),
@@ -167,6 +168,8 @@ export const jobs = sqliteTable(
     libraryId: integer('library_id').references(() => libraries.id, {
       onDelete: 'set null',
     }),
+    /** Convert for this profile alone; null = the strictest combination of the library's profiles. */
+    profileId: integer('profile_id').references(() => deviceProfiles.id, { onDelete: 'set null' }),
     title: text('title').notNull(),
     sourcePath: text('source_path').notNull(),
     outputPath: text('output_path'),

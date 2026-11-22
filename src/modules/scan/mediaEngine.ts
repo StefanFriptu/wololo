@@ -9,12 +9,15 @@ import type {
   ArrItemRef,
   BdmvJobPlan,
   ConversionPlan,
+  DeviceProfile,
   EffectiveProfile,
   Library,
   MediaFileStatus,
   PlanAction,
   ProbeResult,
+  ProfileResult,
 } from '../../shared/domain.ts';
+import { autoConvertTarget } from './autoConvertTarget.ts';
 import { eligibilityRules, exclusionReason } from './eligibility.ts';
 import { statEntry } from './entries.ts';
 import { checkActionFor, statusFromPlan, summarizeProbe } from './evaluation.ts';
@@ -23,8 +26,12 @@ import { type MediaSummaryRow, mediaDetailQuery, toSummary } from './mediaQuery.
 
 const INVALIDATE_CHUNK = 500;
 
+export const NO_PROFILE_MESSAGE = 'the library has no player profile; add one on the Profiles page';
+
 export interface RulesContext {
   profile: EffectiveProfile;
+  /** Every profile assigned to the library, for the per-profile results. */
+  profiles: DeviceProfile[];
   rulesKey: string;
 }
 
@@ -33,7 +40,7 @@ export interface EvaluateOptions {
   forceProbe?: boolean;
   /** Re-evaluate rows that are ignored or being processed (force scans). */
   force?: boolean;
-  /** Queue a job when the row needs work and processing is enabled (default true). */
+  /** Queue a job when Settings.media.importAction asks for one and processing is enabled (default true). */
   enqueue?: boolean;
   /** Already stat-ed by the scanner. */
   entry?: DiscoveredEntry;
@@ -56,6 +63,7 @@ interface Evaluation {
   plan: ConversionPlan | null;
   planAction: PlanAction | null;
   failingCodecs: string[];
+  profileResults?: ProfileResult[] | null;
   decisionId?: number | null;
   probe?: ProbeResult | null;
   bdmvPlan?: BdmvJobPlan | null;
@@ -70,7 +78,7 @@ function messageFor(action: CheckAction, evaluation: Evaluation): string {
     case 'compatible':
       return 'compatible with the profile';
     case 'dry_run':
-      return `needs work (dry run): ${evaluation.reason ?? evaluation.planAction ?? 'see plan'}`;
+      return `needs work, not queued: ${evaluation.reason ?? evaluation.planAction ?? 'see plan'}`;
     case 'decision_required':
       return evaluation.reason ?? 'a decision is required';
     default:
@@ -112,9 +120,12 @@ export function createMediaEngine(ctx: AppContext) {
     return row;
   };
 
-  const rulesFor = async (library: Library): Promise<RulesContext> => {
+  /** null when the library has no profile: its files are not checked. */
+  const rulesFor = async (library: Library): Promise<RulesContext | null> => {
     const profile = await ctx.services.rules.effectiveProfileForLibrary(library.id);
-    return { profile, rulesKey: ctx.services.rules.rulesKey(profile, library) };
+    if (!profile) return null;
+    const profiles = await ctx.services.rules.profilesForLibrary(library.id);
+    return { profile, profiles, rulesKey: ctx.services.rules.rulesKey(profile, library) };
   };
 
   const hasEnabledArr = () =>
@@ -163,12 +174,19 @@ export function createMediaEngine(ctx: AppContext) {
             plan: null,
             planAction: null,
             failingCodecs: [],
+            profileResults: null,
             probe: null,
           },
         };
       }
     }
     const plan = ctx.services.rules.plan({ probe, profile: rules.profile, library, originalLanguage });
+    const profileResults = ctx.services.rules.checkProfiles({
+      probe,
+      profiles: rules.profiles,
+      library,
+      originalLanguage,
+    });
     const { status, reason } = statusFromPlan(plan);
     return {
       probed,
@@ -179,6 +197,7 @@ export function createMediaEngine(ctx: AppContext) {
         plan,
         planAction: plan.action,
         failingCodecs: plan.failingCodecs,
+        profileResults,
         probe,
       },
     };
@@ -198,6 +217,7 @@ export function createMediaEngine(ctx: AppContext) {
       plan,
       planAction: needsWork ? workAction : result.status === 'compatible' ? 'skip' : (plan?.action ?? null),
       failingCodecs: needsWork ? ['bdmv'] : [],
+      profileResults: null,
       decisionId: result.decisionId,
       bdmvPlan: result.plan,
     };
@@ -211,6 +231,7 @@ export function createMediaEngine(ctx: AppContext) {
       plan: evaluation.plan,
       planAction: evaluation.planAction,
       failingCodecs: evaluation.failingCodecs,
+      ...(evaluation.profileResults === undefined ? {} : { profileResults: evaluation.profileResults }),
     };
     if (evaluation.probe !== undefined) {
       const probe = evaluation.probe;
@@ -231,14 +252,15 @@ export function createMediaEngine(ctx: AppContext) {
     return update(row.id, values);
   };
 
-  const enqueue = async (row: MediaFileRow, evaluation: Evaluation, refs: MediaRefs) => {
+  const enqueue = async (row: MediaFileRow, evaluation: Evaluation, refs: MediaRefs, profileId: number | null) => {
     const isFile = row.kind === 'file';
     const job = await ctx.services.jobs.enqueue({
       type: isFile ? 'audio' : 'bdmv',
       trigger: refs.trigger,
       mediaFileId: row.id,
       title: jobTitle(row.path),
-      plan: isFile ? evaluation.plan : null,
+      profileId: isFile ? profileId : null,
+      plan: isFile && profileId === null ? evaluation.plan : null,
       ...(isFile ? {} : { bdmvPlan: evaluation.bdmvPlan ?? null }),
     });
     return job.id;
@@ -296,6 +318,8 @@ export function createMediaEngine(ctx: AppContext) {
         : 'library is disabled';
       if (excluded) return { probed: false, result: outcome('ignored', existing ?? null, `not checked: ${excluded}`) };
     }
+    const rules = options.rules ?? (await rulesFor(library));
+    if (!rules) return { probed: false, result: outcome('ignored', existing ?? null, NO_PROFILE_MESSAGE) };
     if (existing?.status === 'processing' && !options.force)
       return {
         probed: false,
@@ -323,7 +347,6 @@ export function createMediaEngine(ctx: AppContext) {
     let evaluation: Evaluation;
     let probed = false;
     try {
-      const rules = options.rules ?? (await rulesFor(library));
       if (row.kind === 'file') {
         const file = await evaluateFile(row, library, rules, originalLanguage, {
           reuseProbe: unchanged && !options.forceProbe,
@@ -355,10 +378,18 @@ export function createMediaEngine(ctx: AppContext) {
     if (evaluation.decisionId != null)
       return { probed, result: outcome('decision_required', saved, messageFor('decision_required', evaluation)) };
 
-    const wantsJob = saved.status === 'needs_work' && (options.enqueue ?? true);
-    if (wantsJob && ctx.settings.section('processing').enabled) {
+    const target =
+      (options.enqueue ?? true)
+        ? autoConvertTarget({
+            media: ctx.settings.section('media'),
+            libraryProfileIds: library.profileIds,
+            status: saved.status,
+            profileResults: saved.profileResults,
+          })
+        : null;
+    if (target && ctx.settings.section('processing').enabled) {
       try {
-        const jobId = await enqueue(saved, evaluation, refs);
+        const jobId = await enqueue(saved, evaluation, refs, target.profileId);
         return { probed, result: outcome('queued', saved, `queued job ${jobId}`, jobId) };
       } catch (error) {
         log.error('could not queue a job', { path, error: errorMessage(error) });
@@ -371,7 +402,9 @@ export function createMediaEngine(ctx: AppContext) {
 
   /** Marks rows whose rules key differs from the library's current one as pending, in id-ordered chunks. */
   const invalidateLibrary = async (library: Library): Promise<number> => {
-    const { rulesKey } = await rulesFor(library);
+    const rules = await rulesFor(library);
+    if (!rules) return 0;
+    const { rulesKey } = rules;
     const stale = and(
       eq(mediaFiles.libraryId, library.id),
       notInArray(mediaFiles.status, ['ignored', 'processing', 'pending']),
@@ -407,7 +440,7 @@ export function createMediaEngine(ctx: AppContext) {
   const librariesForProfile = (profileId: number | undefined, libraryId: number | undefined): Library[] => {
     const all = libraryQuery(ctx.db, libraryId === undefined ? {} : { id: libraryId });
     if (profileId === undefined) return all;
-    return all.filter((library) => library.profileIds.length === 0 || library.profileIds.includes(profileId));
+    return all.filter((library) => library.profileIds.includes(profileId));
   };
 
   const deleteRows = (ids: readonly number[]) => {

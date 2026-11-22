@@ -142,6 +142,7 @@ export const SUMMARY: MediaFileSummary = {
   subtitleLanguages: [],
   failingCodecs: [],
   planAction: null,
+  profileResults: null,
   lastJobId: null,
   probedAt: null,
   updatedAt: '2026-01-01T00:00:00.000Z',

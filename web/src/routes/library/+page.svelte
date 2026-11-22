@@ -7,6 +7,7 @@
   import { live } from '#lib/api/live.svelte.ts';
   import Async from '#lib/components/Async.svelte';
   import Badge from '#lib/components/Badge.svelte';
+  import ConvertTargetModal from '#lib/components/ConvertTargetModal.svelte';
   import Icon from '#lib/components/Icon.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import Pagination from '#lib/components/Pagination.svelte';
@@ -22,6 +23,9 @@
   import { syncSearchText } from '#lib/library/syncSearchText.svelte.ts';
   import { serializeMediaFilters } from '#lib/library/serializeMediaFilters.ts';
   import { pageInRange } from '#lib/pageInRange.ts';
+  import { convertTargets, type ConvertTarget } from '#lib/profiles/convertTargets.ts';
+  import { onlyDiscs } from '#lib/profiles/onlyDiscs.ts';
+  import { profileChip } from '#lib/profiles/profileChip.ts';
   import { href } from '#lib/paths.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import { MEDIA_FILE_STATUSES, type MediaSortKey } from '#lib/shared.ts';
@@ -157,23 +161,64 @@
     }),
   );
 
-  async function processNeedsWork(): Promise<void> {
+  const profileNames = $derived(new Map((profiles.data ?? []).map((profile) => [profile.id, profile.name])));
+  const profileName = (id: number): string => profileNames.get(id) ?? `#${id}`;
+
+  let convertOpen = $state(false);
+  let convert = $state<{ question: string; targets: ConvertTarget[]; run: (profileId: number | undefined) => Promise<void> }>({
+    question: '',
+    targets: [],
+    run: async () => {},
+  });
+
+  function targetsFor(libraryIds: readonly number[]): ConvertTarget[] {
+    const profileIds = (libraries.data ?? [])
+      .filter((library) => libraryIds.includes(library.id))
+      .flatMap((library) => library.profileIds);
+    return convertTargets(profileIds, profiles.data ?? []);
+  }
+
+  const queuedMessage = (result: { jobs: unknown[]; skipped: { reason: string }[] }): string =>
+    `Queued ${result.jobs.length} job(s)${result.skipped.length ? `, skipped ${result.skipped.length}: ${result.skipped[0]?.reason}` : ''}`;
+
+  function processNeedsWork(): void {
     const scope = bulkScope;
-    if (!confirm(scope.question)) return;
-    await attempt(
-      () => api('POST /api/v1/jobs', { body: { filter: scope.filter } }),
-      (result) => `Queued ${result.jobs.length} job(s)${result.skipped.length ? `, skipped ${result.skipped.length}` : ''}`,
-    );
+    const libraryIds = filters.libraryId === undefined ? (libraries.data ?? []).map((library) => library.id) : [filters.libraryId];
+    convert = {
+      question: scope.question,
+      targets: onlyDiscs(filters.kind?.split(',') ?? []) ? [] : targetsFor(libraryIds),
+      run: async (profileId) => {
+        await attempt(() => api('POST /api/v1/jobs', { body: { filter: scope.filter, profileId } }), queuedMessage);
+      },
+    };
+    convertOpen = true;
+  }
+
+  async function enqueueSelected(items: { id: number; kind: string }[], profileId: number | undefined): Promise<void> {
+    const discs = items.filter((item) => onlyDiscs([item.kind])).map((item) => item.id);
+    const files = items.filter((item) => !onlyDiscs([item.kind])).map((item) => item.id);
+    const batches = profileId === undefined ? [{ ids: [...files, ...discs] }] : [{ ids: files, profileId }, { ids: discs }];
+    const result = await attempt(async () => {
+      const responses = await Promise.all(
+        batches
+          .filter((batch) => batch.ids.length > 0)
+          .map((batch) => api('POST /api/v1/jobs', { body: { mediaFileIds: batch.ids, profileId: batch.profileId } })),
+      );
+      return { jobs: responses.flatMap((response) => response.jobs), skipped: responses.flatMap((response) => response.skipped) };
+    }, queuedMessage);
+    if (result) selected.clear();
   }
 
   async function processSelected(): Promise<void> {
-    const ids = [...selected];
-    const result = await attempt(
-      () => api('POST /api/v1/jobs', { body: { mediaFileIds: ids } }),
-      (response) =>
-        `Queued ${response.jobs.length} job(s)${response.skipped.length ? `, skipped ${response.skipped.length}: ${response.skipped[0]?.reason}` : ''}`,
-    );
-    if (result) selected.clear();
+    const items = (media.data?.items ?? []).filter((item) => selected.has(item.id));
+    const targets = onlyDiscs(items.map((item) => item.kind)) ? [] : targetsFor(items.map((item) => item.libraryId));
+    if (targets.length === 0) return enqueueSelected(items, undefined);
+    convert = {
+      question: `Queue ${items.length} selected file(s)?`,
+      targets,
+      run: (profileId) => enqueueSelected(items, profileId),
+    };
+    convertOpen = true;
   }
 
   function toggleAll(ids: number[], checked: boolean): void {
@@ -194,6 +239,8 @@
     </button>
   {/snippet}
 </PageHeader>
+
+<ConvertTargetModal bind:open={convertOpen} question={convert.question} targets={convert.targets} onconfirm={convert.run} />
 
 <ScanPanel libraryId={filters.libraryId} onfinished={refreshSoon} />
 
@@ -343,6 +390,7 @@
                 {@render sortable('status', 'Status')}
                 <th scope="col" class="hide-sm">Video</th>
                 <th scope="col">Audio</th>
+                <th scope="col">Players</th>
                 {@render sortable('size', 'Size', 'num')}
                 {@render sortable('duration', 'Runtime', 'num hide-sm')}
                 {@render sortable('updatedAt', 'Updated', 'hide-sm')}
@@ -378,6 +426,20 @@
                         <span class="chip" class:failing={item.failingCodecs.includes(codec)}>{codec}</span>
                       {/each}
                     </span>
+                  </td>
+                  <td>
+                    {#if item.profileResults === null}
+                      <span class="muted" title="Not checked against the players yet">—</span>
+                    {:else if item.profileResults.length === 0}
+                      <span class="muted">No profile</span>
+                    {:else}
+                      <span class="chips">
+                        {#each item.profileResults as result (result.profileId)}
+                          {@const chip = profileChip(result, profileName(result.profileId))}
+                          <Badge tone={chip.tone} label={chip.label} />
+                        {/each}
+                      </span>
+                    {/if}
                   </td>
                   <td class="num">{formatBytes(item.sizeBytes)}</td>
                   <td class="num hide-sm">{formatDuration(item.durationSec)}</td>

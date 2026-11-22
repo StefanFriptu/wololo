@@ -10,13 +10,13 @@
   import LibraryForm from '#lib/components/LibraryForm.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { formatBytes } from '#lib/format/formatBytes.ts';
-  import { LIBRARY_KIND_LABELS, LIBRARY_MODE_LABELS } from '#lib/labels.ts';
+  import { IMPORT_ACTION_LABELS, LIBRARY_KIND_LABELS, LIBRARY_MODE_LABELS } from '#lib/labels.ts';
   import { parseLines } from '#lib/parseLines.ts';
   import { parseList } from '#lib/parseList.ts';
   import { href } from '#lib/paths.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import { diffSettings } from '#lib/settings/diffSettings.ts';
-  import type { ArrQualityProfile, ArrRootFolder, Library, Settings } from '#lib/shared.ts';
+  import { IMPORT_ACTIONS, type ArrQualityProfile, type ArrRootFolder, type ImportAction, type Library, type Settings } from '#lib/shared.ts';
   import { toasts } from '#lib/toast.svelte.ts';
 
   const libraries = new Resource((signal) => api('GET /api/v1/libraries', { signal }));
@@ -40,6 +40,9 @@
     const extensions = parseList(extensionsText).map((extension) => (extension.startsWith('.') ? extension : `.${extension}`));
     return { ...form, media: { ...form.media, extensions, ignorePatterns: parseLines(patternsText) } };
   });
+  const importProfileMissing = $derived(
+    form?.media.importAction === 'convert_for_profile' && form.media.importProfileId === null,
+  );
   const patch = $derived(settings.data && edited ? diffSettings(settings.data, edited) : null);
 
   $effect(() => {
@@ -137,6 +140,12 @@
     patternsText = settings.data.media.ignorePatterns.join('\n');
   }
 
+  function chooseImportAction(action: ImportAction): void {
+    if (!form) return;
+    form.media.importAction = action;
+    form.media.importProfileId = action === 'convert_for_profile' ? (form.media.importProfileId ?? profiles.data?.[0]?.id ?? null) : null;
+  }
+
   const profileName = (id: number): string => profiles.data?.find((profile) => profile.id === id)?.name ?? `#${id}`;
 </script>
 
@@ -187,7 +196,7 @@
                     {/each}
                   </ul>
                 </td>
-                <td class="hide-sm">{library.profileIds.length > 0 ? library.profileIds.map(profileName).join(', ') : 'Built-in'}</td>
+                <td class="hide-sm">{library.profileIds.length > 0 ? library.profileIds.map(profileName).join(', ') : 'No profile'}</td>
                 <td class="hide-sm">
                   {LIBRARY_MODE_LABELS[library.mode]}
                   {#if library.keepLanguages.length > 0}<div class="muted small">Keeps {library.keepLanguages.join(', ')}</div>{/if}
@@ -305,6 +314,38 @@
             <span class="label">Imports</span>
             <div class="control">
               <label class="check"><input type="checkbox" bind:checked={form.media.checkOnImport} /> Check files right after a Radarr/Sonarr import</label>
+            </div>
+          </div>
+          <div class="field" role="group" aria-labelledby="on-new-imports-label">
+            <span class="label" id="on-new-imports-label">On new imports</span>
+            <div class="control">
+              {#each IMPORT_ACTIONS as action (action)}
+                <label class="check">
+                  <input
+                    type="radio"
+                    name="import-action"
+                    value={action}
+                    checked={form.media.importAction === action}
+                    disabled={action === 'convert_for_profile' && (profiles.data ?? []).length === 0}
+                    onchange={() => chooseImportAction(action)}
+                  />
+                  {IMPORT_ACTION_LABELS[action]}
+                  {#if action === 'convert_for_profile'}
+                    <select
+                      aria-label="Profile to convert for"
+                      value={form.media.importProfileId ?? ''}
+                      disabled={form.media.importAction !== 'convert_for_profile'}
+                      onchange={(event) => form && (form.media.importProfileId = Number(event.currentTarget.value))}
+                    >
+                      {#each profiles.data ?? [] as profile (profile.id)}<option value={profile.id}>{profile.name}</option>{/each}
+                    </select>
+                  {/if}
+                </label>
+              {/each}
+              <span class="hint">Imports no longer convert files unless you opt in here: by default a file that needs work is only reported.</span>
+              {#if (profiles.data ?? []).length === 0}
+                <span class="hint">Add a player on the <a href={href('/profiles')}>Profiles page</a> to convert for it.</span>
+              {/if}
             </div>
           </div>
         </section>
@@ -453,7 +494,7 @@
           {#if patch}<span class="muted">Unsaved changes</span>{/if}
           <span class="spacer"></span>
           <button type="button" onclick={discard} disabled={!patch || saving}>Discard</button>
-          <button class="primary" type="submit" disabled={!patch || saving}>Save settings</button>
+          <button class="primary" type="submit" disabled={!patch || saving || importProfileMissing}>Save settings</button>
         </div>
       </form>
     {/if}

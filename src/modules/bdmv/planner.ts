@@ -341,6 +341,7 @@ export function createDiscPlanner(ctx: AppContext, deps: { isoReader: SevenZipIs
       mainPlaylist,
     );
     const profile = await services.rules.effectiveProfileForLibrary(disc.row.libraryId);
+    if (!profile) throw new AppError('unprocessable', 'the library has no player profile');
     const audioPlan = services.rules.plan({
       probe,
       profile,

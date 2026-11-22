@@ -1,16 +1,13 @@
 import { eq } from 'drizzle-orm';
 import type { AppContext } from '../../app/context.ts';
-import { DEFAULT_PROFILE_NAME, type ProfileService } from '../../contracts/rules-ffmpeg.ts';
+import type { ProfileService } from '../../contracts/rules-ffmpeg.ts';
 import { AppError, notFound } from '../../core/errors.ts';
 import { deviceProfiles } from '../../db/schema.ts';
 import type { ProfileInput, ProfileWithUsage } from '../../shared/api-types.ts';
 import type { DeviceProfile, DeviceProfileDefinition } from '../../shared/domain.ts';
 import { codecCatalog } from './codecCatalog.ts';
-import { samsungTizenDefinition } from './defaults.ts';
 import { profileQuery } from './profileQuery.ts';
-
-const DEFAULT_PROFILE_DESCRIPTION =
-  'Samsung Tizen TVs: DTS, TrueHD, E-AC3, LPCM, FLAC, Opus and Vorbis are converted to AC3 (640 kbps for 5.1).';
+import { profileTemplates } from './profileTemplates.ts';
 
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
@@ -50,7 +47,6 @@ export function createProfileService(ctx: AppContext): ProfileService {
     name: string;
     description: string;
     definition: DeviceProfileDefinition;
-    builtin: boolean;
   }): DeviceProfile => {
     assertNameFree(values.name);
     const [row] = ctx.db.insert(deviceProfiles).values(values).returning().all();
@@ -58,30 +54,12 @@ export function createProfileService(ctx: AppContext): ProfileService {
     return row;
   };
 
-  const invalidateRules = async (profile: DeviceProfile) => {
-    const isDefault = query.firstBuiltin()?.id === profile.id;
-    const filters = [
-      { profileId: profile.id },
-      ...(isDefault ? query.librariesWithoutProfiles().map((libraryId) => ({ libraryId })) : []),
-    ];
-    for (const filter of filters) {
-      try {
-        await ctx.services.media.invalidateRules(filter);
-      } catch (error) {
-        log.warn('rules invalidation failed; the next scan re-checks these files by rules key', { ...filter, error });
-      }
+  const invalidateRules = async (profileId: number) => {
+    try {
+      await ctx.services.media.invalidateRules({ profileId });
+    } catch (error) {
+      log.warn('rules invalidation failed; the next scan re-checks these files by rules key', { profileId, error });
     }
-  };
-
-  const ensureDefaults = async () => {
-    if (query.count() > 0) return;
-    insert({
-      name: DEFAULT_PROFILE_NAME,
-      description: DEFAULT_PROFILE_DESCRIPTION,
-      definition: samsungTizenDefinition(),
-      builtin: true,
-    });
-    log.info('seeded the default device profile', { name: DEFAULT_PROFILE_NAME });
   };
 
   return {
@@ -103,7 +81,6 @@ export function createProfileService(ctx: AppContext): ProfileService {
           name: input.name,
           description: input.description ?? '',
           definition: input.definition,
-          builtin: false,
         }),
         [],
       ),
@@ -127,14 +104,13 @@ export function createProfileService(ctx: AppContext): ProfileService {
       if (!updated) throw notFound(`profile ${id}`);
       if (definitionChanged) {
         log.info('profile definition changed', { profileId: id, version: updated.version });
-        await invalidateRules(updated);
+        await invalidateRules(updated.id);
       }
       return withUsage(updated);
     },
 
     remove: async (id) => {
       const profile = requireProfile(id);
-      if (profile.builtin) throw new AppError('conflict', `"${profile.name}" is the builtin default profile`);
       const libraryIds = query.libraryIdsOf(id);
       if (libraryIds.length > 0) {
         throw new AppError('conflict', `"${profile.name}" is assigned to ${libraryIds.length} library(ies)`, {
@@ -147,23 +123,10 @@ export function createProfileService(ctx: AppContext): ProfileService {
 
     clone: async (id, name) => {
       const source = requireProfile(id);
-      return withUsage(
-        insert({ name, description: source.description, definition: source.definition, builtin: false }),
-        [],
-      );
-    },
-
-    ensureDefaults,
-
-    getDefault: async () => {
-      const existing = query.firstBuiltin() ?? query.all()[0];
-      if (existing) return existing;
-      await ensureDefaults();
-      const seeded = query.firstBuiltin();
-      if (!seeded) throw new Error('the default device profile could not be seeded');
-      return seeded;
+      return withUsage(insert({ name, description: source.description, definition: source.definition }), []);
     },
 
     codecCatalog,
+    templates: profileTemplates,
   };
 }

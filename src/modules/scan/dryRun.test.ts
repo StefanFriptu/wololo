@@ -16,7 +16,7 @@ const GB = 1024 * MB;
 let t: TestContext;
 let libraryA: SeededLibrary;
 let libraryB: SeededLibrary;
-let builtinId: number;
+let tizenId: number;
 let customId: number;
 let profilesFail: boolean;
 
@@ -45,7 +45,6 @@ function profile(id: number, name: string, definition: DeviceProfileDefinition):
     name,
     description: '',
     version: 1,
-    builtin: id === builtinId,
     definition,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -63,17 +62,18 @@ beforeEach(() => {
     overrides: {
       rules: fakeRules(),
       profiles: stubService<ProfileService>('profiles', {
-        getDefault: async () => {
+        get: async (id) => {
           if (profilesFail) throw new AppError('upstream', 'profiles unavailable');
-          return profile(builtinId, 'Samsung Tizen', TEST_DEFINITION);
+          return id === customId
+            ? profile(id, 'Bedroom TV', CUSTOM_DEFINITION)
+            : profile(id, 'Samsung Tizen', TEST_DEFINITION);
         },
-        get: async (id) => profile(id, id === customId ? 'Bedroom TV' : 'Samsung Tizen', CUSTOM_DEFINITION),
       }),
     },
   });
-  builtinId = insertProfile(t.ctx.db, TEST_DEFINITION, { builtin: true, name: 'Samsung Tizen' });
+  tizenId = insertProfile(t.ctx.db, TEST_DEFINITION, { name: 'Samsung Tizen' });
   customId = insertProfile(t.ctx.db, CUSTOM_DEFINITION, { name: 'Bedroom TV' });
-  libraryA = insertLibrary(t.ctx.db, { name: 'A', roots: ['/data/a'] });
+  libraryA = insertLibrary(t.ctx.db, { name: 'A', roots: ['/data/a'], profileIds: [tizenId] });
   libraryB = insertLibrary(t.ctx.db, { name: 'B', roots: ['/data/b', '/data/b2'], profileIds: [customId] });
   const db = t.ctx.db;
   insertMediaFile(db, libraryA, {
@@ -214,7 +214,7 @@ test('dryRun.report - byProfile re-plans stored probes per assigned profile', as
   const report = await t.ctx.services.dryRun.report({});
   expect(report.byProfile).toEqual([
     {
-      profileId: builtinId,
+      profileId: tizenId,
       name: 'Samsung Tizen',
       files: 5,
       failing: 3,

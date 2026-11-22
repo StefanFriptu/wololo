@@ -8,6 +8,7 @@ interface NavItem {
 }
 
 export const NAV: NavItem[] = [
+  { label: 'Profiles', href: '/profiles', icon: 'profiles' },
   {
     label: 'Library',
     href: '/library',
@@ -28,7 +29,6 @@ export const NAV: NavItem[] = [
       { label: 'Recycle bin', href: '/activity/recyclebin' },
     ],
   },
-  { label: 'Profiles', href: '/profiles', icon: 'profiles' },
   {
     label: 'Settings',
     href: '/settings/media',

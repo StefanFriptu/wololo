@@ -2,7 +2,8 @@
   import Badge from '#lib/components/Badge.svelte';
   import { describeStream } from '#lib/format/describeStream.ts';
   import { formatChannels } from '#lib/format/formatChannels.ts';
-  import { DROP_REASON_LABELS, type Tone } from '#lib/labels.ts';
+  import { DROP_REASON_LABELS, PLAN_ACTION_LABELS, type Tone } from '#lib/labels.ts';
+  import type { PlayerColumn } from '#lib/profiles/PlayerColumn.ts';
   import type { MediaStream, PlannedStream } from '#lib/shared.ts';
   import type { StreamChange } from '#lib/streams/StreamChange.ts';
   import type { StreamRow } from '#lib/streams/StreamRow.ts';
@@ -12,7 +13,8 @@
     beforeLabel = 'Before',
     afterLabel = 'After',
     caption,
-  }: { rows: StreamRow[]; beforeLabel?: string; afterLabel?: string; caption: string } = $props();
+    players = [],
+  }: { rows: StreamRow[]; beforeLabel?: string; afterLabel?: string; caption: string; players?: PlayerColumn[] } = $props();
 
   const CHANGES: Record<StreamChange, { label: string; tone: Tone } | null> = {
     copy: { label: 'Copy', tone: 'neutral' },
@@ -50,6 +52,15 @@
       <tr>
         <th scope="col">Type</th>
         <th scope="col">{beforeLabel}</th>
+        {#each players as player (player.profileId)}
+          <th scope="col" class="player">
+            <div>{player.name}</div>
+            <Badge
+              tone={player.action === 'skip' ? 'success' : 'danger'}
+              label={player.action === 'skip' ? 'Plays as is' : PLAN_ACTION_LABELS[player.action]}
+            />
+          </th>
+        {/each}
         {#if showAfter}
           <th scope="col">Change</th>
           <th scope="col">{afterLabel}</th>
@@ -64,6 +75,18 @@
           <td>
             {#if row.before}{@render streamCell(row.before)}{:else}<span class="muted">-</span>{/if}
           </td>
+          {#each players as player (player.profileId)}
+            {@const index = row.before?.index}
+            <td class="player">
+              {#if index === undefined}
+                <span class="muted">-</span>
+              {:else if player.failingStreams.includes(index)}
+                <span class="fail" role="img" aria-label="Does not play">✗</span>
+              {:else}
+                <span class="ok" role="img" aria-label="Plays">✓</span>
+              {/if}
+            </td>
+          {/each}
           {#if showAfter}
             <td>
               {#if change}<Badge tone={change.tone} label={change.label} />{/if}
@@ -108,6 +131,18 @@
     font-weight: 400;
     color: var(--text-muted);
     margin-left: 0.35rem;
+  }
+  .compare th.player,
+  .compare td.player {
+    min-width: 0;
+    text-align: center;
+  }
+  .ok {
+    color: var(--success-fg);
+  }
+  .fail {
+    color: var(--danger-fg);
+    font-weight: 700;
   }
   .small {
     font-size: 0.88em;

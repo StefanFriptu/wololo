@@ -17,6 +17,7 @@ export function toJobSummary(row: JobRow, live?: LiveProgress): JobSummary {
     trigger: row.trigger,
     mediaFileId: row.mediaFileId,
     libraryId: row.libraryId,
+    profileId: row.profileId,
     sourcePath: row.sourcePath,
     outputPath: row.outputPath,
     title: row.title,

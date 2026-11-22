@@ -3,8 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
 import { ensureFixtureCopy, FIXTURES, ffmpegAvailable } from '../../../test/helpers/fixtures.ts';
-import { stubService } from '../../../test/helpers/stubs.ts';
-import type { ProfileService } from '../../contracts/rules-ffmpeg.ts';
+import { insertProfile } from '../../../test/helpers/seed.ts';
 import type {
   ApiErrorBody,
   DryRunReport,
@@ -27,23 +26,12 @@ beforeAll(async () => {
     overrides: {
       rules: fakeRules(),
       jobs: fakeJobs(() => t.ctx.db).service,
-      profiles: stubService<ProfileService>('profiles', {
-        getDefault: async () => ({
-          id: 1,
-          name: 'Samsung Tizen',
-          description: '',
-          version: 1,
-          builtin: true,
-          definition: TEST_DEFINITION,
-          createdAt: '',
-          updatedAt: '',
-        }),
-      }),
     },
   });
   root = join(t.dir, 'movies');
   mkdirSync(root, { recursive: true });
-  await t.ctx.services.libraries.create({ name: 'Movies', kind: 'movies', roots: [root], profileIds: [] });
+  const profileId = insertProfile(t.ctx.db, TEST_DEFINITION);
+  await t.ctx.services.libraries.create({ name: 'Movies', kind: 'movies', roots: [root], profileIds: [profileId] });
 });
 
 afterAll(() => t.cleanup());

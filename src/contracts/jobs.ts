@@ -60,6 +60,11 @@ export interface NewJob {
   priority?: number;
   title?: string;
   /**
+   * Audio jobs: convert for this profile alone (it must be assigned to the file's library); null or omitted = the
+   * strictest combination of the library's profiles. BDMV jobs always use the strictest combination.
+   */
+  profileId?: number | null;
+  /**
    * Precomputed plan (audio) or BDMV plan (from bdmv.evaluate), stored on the job for the UI. The executors never
    * trust it: the audio executor re-plans from a fresh probe, bdmv.execute re-analyzes the disc in step preparing. The
    * scan backlog enqueues disc rows without a BdmvJobPlan for that reason.

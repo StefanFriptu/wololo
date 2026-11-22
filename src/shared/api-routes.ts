@@ -99,6 +99,7 @@ export const API_ROUTE_META: { readonly [K in RouteKey]: RouteMeta } = {
   'GET /api/v1/profiles': json('rules-ffmpeg', 'List device profiles'),
   'POST /api/v1/profiles': json('rules-ffmpeg', 'Create a device profile'),
   'GET /api/v1/profiles/codecs': json('rules-ffmpeg', 'Known codecs for the profile editor'),
+  'GET /api/v1/profiles/templates': json('rules-ffmpeg', 'Capability templates for new profiles'),
   'GET /api/v1/profiles/:id': json('rules-ffmpeg', 'Get a device profile'),
   'PUT /api/v1/profiles/:id': json('rules-ffmpeg', 'Update a device profile (bumps version)'),
   'DELETE /api/v1/profiles/:id': empty('rules-ffmpeg', 'Delete an unassigned device profile'),

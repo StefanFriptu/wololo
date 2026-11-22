@@ -126,6 +126,7 @@ export function createJobsService(ctx: AppContext): JobsService {
       priority: job.priority ?? 0,
       title: job.title ?? jobTitleFor(media.path, media.kind),
       sourcePath: media.path,
+      profileId: job.type === 'audio' ? (job.profileId ?? null) : null,
       plan: job.plan ?? null,
       bdmvPlan: job.bdmvPlan ?? null,
       rulesKey: job.plan?.rulesKey ?? null,
@@ -151,7 +152,12 @@ export function createJobsService(ctx: AppContext): JobsService {
   ): Promise<{ job: JobSummary } | { reason: string }> => {
     if (!request.force && media.status !== 'needs_work') return { reason: `status is ${media.status}` };
     const base = { trigger: 'manual' as const, mediaFileId: media.id, priority: request.priority };
-    if (media.kind === 'file') return { job: await enqueue({ ...base, type: 'audio', plan }) };
+    if (media.kind === 'file') {
+      const profileId = request.profileId ?? null;
+      if (profileId !== null && !(await ctx.services.libraries.get(media.libraryId)).profileIds.includes(profileId))
+        return { reason: `profile ${profileId} is not assigned to this file's library` };
+      return { job: await enqueue({ ...base, type: 'audio', profileId, plan: profileId === null ? plan : null }) };
+    }
     const evaluation = await ctx.services.bdmv.evaluate(media.id);
     if (!evaluation.plan) return { reason: evaluation.reason ?? `disc is ${evaluation.status}` };
     return { job: await enqueue({ ...base, type: 'bdmv', bdmvPlan: evaluation.plan }) };

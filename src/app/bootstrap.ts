@@ -60,7 +60,6 @@ export function createRuntime(options: RuntimeOptions): Runtime {
 
   const start = async () => {
     const { services } = ctx;
-    await services.profiles.ensureDefaults();
     const recovery = await services.jobs.recover();
     if (recovery.requeued || recovery.completed || recovery.tempFilesDeleted) log.info('crash recovery', recovery);
     await services.scheduler.start();

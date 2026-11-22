@@ -42,3 +42,7 @@ test('NAV - every entry links inside its own section', () => {
     for (const child of item.children ?? []) expect(sectionOf(child.href)).toBe(sectionOf(item.href));
   }
 });
+
+test('NAV - Profiles comes first, so players are set up before anything else', () => {
+  expect(NAV[0]?.href).toBe('/profiles');
+});

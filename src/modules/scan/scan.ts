@@ -7,6 +7,7 @@ import { yieldToEventLoop } from '../../core/yieldToEventLoop.ts';
 import type { ScanRequest, ScanStatus } from '../../shared/api-types.ts';
 import type { Library, LibraryRoot, MediaFileKind, MediaFileStatus } from '../../shared/domain.ts';
 import type { ScanStats } from '../../shared/events.ts';
+import { autoConvertTarget } from './autoConvertTarget.ts';
 import { needsRecheck } from './change-detection.ts';
 import { eligibilityRules, exclusionReason } from './eligibility.ts';
 import { rootDiskInfo } from './libraries.ts';
@@ -19,6 +20,13 @@ import { walkRoot } from './walker.ts';
 const PROGRESS_INTERVAL_MS = 1000;
 const ENQUEUE_SLICE = 50;
 const REMOVAL_PAGE_SIZE = 1000;
+
+interface BacklogRow {
+  id: number;
+  kind: string;
+  path: string;
+  profileId: number | null;
+}
 
 type Presence = 'missing' | 'present' | 'unknown';
 
@@ -77,7 +85,7 @@ export function createScanService(ctx: AppContext): ScanService {
     ctx.events.emit('scan.progress', { scanId: scan.scanId, stats: { ...scan.stats }, currentPath: path });
   };
 
-  const enqueueBacklog = async (scan: ScanStatus, rows: { id: number; kind: string; path: string }[]) => {
+  const enqueueBacklog = async (scan: ScanStatus, rows: BacklogRow[]) => {
     if (rows.length === 0 || !ctx.settings.section('processing').enabled) return;
     const active = activeJobMediaIdsQuery(
       ctx.db,
@@ -92,6 +100,7 @@ export function createScanService(ctx: AppContext): ScanService {
           trigger: 'scan',
           mediaFileId: row.id,
           title: engine.jobTitle(row.path),
+          profileId: row.profileId,
         });
         scan.stats.jobsQueued += 1;
       } catch (error) {
@@ -114,7 +123,8 @@ export function createScanService(ctx: AppContext): ScanService {
     }
     const report = { unreadable: [] as string[] };
     const seen = new Set<number>();
-    const backlog: { id: number; kind: string; path: string }[] = [];
+    const backlog: BacklogRow[] = [];
+    const media = ctx.settings.section('media');
     const storedAt = (path: string) => storedEntryQuery(ctx.db, { rootId: root.id, path }) ?? null;
 
     const eligibility = eligibilityRules(ctx.settings.get(), library);
@@ -126,7 +136,15 @@ export function createScanService(ctx: AppContext): ScanService {
       const row = storedAt(entry.path);
       if (row) seen.add(row.id);
       if (!needsRecheck(entry, row, rules.rulesKey, options.force)) {
-        if (row?.status === 'needs_work') backlog.push({ id: row.id, kind: row.kind, path: row.path });
+        const target =
+          row &&
+          autoConvertTarget({
+            media,
+            libraryProfileIds: library.profileIds,
+            status: row.status,
+            profileResults: row.profileResults,
+          });
+        if (row && target) backlog.push({ id: row.id, kind: row.kind, path: row.path, profileId: target.profileId });
         continue;
       }
       const { result, probed } = await engine.evaluatePath(
@@ -192,12 +210,16 @@ export function createScanService(ctx: AppContext): ScanService {
     const problems: string[] = [];
     for (const library of libraries) {
       if (signal.aborted) break;
-      let rules: RulesContext;
+      let rules: RulesContext | null;
       try {
         rules = await engine.rulesFor(library);
       } catch (error) {
         log.error('library skipped: no effective profile', { library: library.name, error: errorMessage(error) });
         problems.push(`${library.name}: ${errorMessage(error)}`);
+        continue;
+      }
+      if (!rules) {
+        log.info('library skipped: no player profile', { library: library.name });
         continue;
       }
       for (const root of library.roots) {

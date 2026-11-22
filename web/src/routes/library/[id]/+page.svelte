@@ -6,6 +6,7 @@
   import { live } from '#lib/api/live.svelte.ts';
   import Async from '#lib/components/Async.svelte';
   import Badge from '#lib/components/Badge.svelte';
+  import ConvertTargetModal from '#lib/components/ConvertTargetModal.svelte';
   import Icon from '#lib/components/Icon.svelte';
   import JobStreamsCompare from '#lib/components/JobStreamsCompare.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
@@ -28,15 +29,19 @@
   import { convertedByJob } from '#lib/library/convertedByJob.ts';
   import { fileProcessAction } from '#lib/library/fileProcessAction.ts';
   import { href } from '#lib/paths.ts';
+  import { convertTargets } from '#lib/profiles/convertTargets.ts';
+  import type { PlayerColumn } from '#lib/profiles/PlayerColumn.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import { pairStreams } from '#lib/streams/pairStreams.ts';
   import { attempt } from '#lib/attempt.ts';
+  import type { MediaFileDetail, ProfileResult } from '#lib/shared.ts';
   import { toasts } from '#lib/toast.svelte.ts';
 
   const id = $derived(Number(page.params.id));
 
   const detail = new Resource((signal) => api('GET /api/v1/media/:id', { params: { id }, signal }));
   const libraries = new Resource((signal) => api('GET /api/v1/libraries', { signal }));
+  const profiles = new Resource((signal) => api('GET /api/v1/profiles', { signal }));
   const history = new Resource((signal) =>
     api('GET /api/v1/history', { query: { mediaFileId: id, pageSize: 20, sortDir: 'desc' }, signal }),
   );
@@ -51,6 +56,8 @@
     return job?.id === convertingJobId && job.state === 'completed' && job.after ? job : undefined;
   });
   let busy = $state(false);
+  let convertOpen = $state(false);
+  let pendingForce = $state(false);
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
   $effect(() => {
@@ -63,6 +70,7 @@
       detail.load();
       history.load();
       libraries.load();
+      profiles.load();
     });
   });
 
@@ -102,9 +110,30 @@
     busy = false;
   }
 
-  async function process(force: boolean): Promise<void> {
+  const profileName = (profileId: number): string =>
+    profiles.data?.find((profile) => profile.id === profileId)?.name ?? `#${profileId}`;
+
+  function playersOf(results: ProfileResult[] | null): PlayerColumn[] {
+    return (results ?? []).map((result) => ({
+      profileId: result.profileId,
+      name: profileName(result.profileId),
+      action: result.action,
+      failingStreams: result.failingStreams,
+    }));
+  }
+
+  function process(file: MediaFileDetail, force: boolean): Promise<void> {
+    const library = libraries.data?.find((item) => item.id === file.libraryId);
+    const hasChoice = file.kind === 'file' && convertTargets(library?.profileIds ?? [], profiles.data ?? []).length > 0;
+    if (!hasChoice) return enqueue(force, undefined);
+    pendingForce = force;
+    convertOpen = true;
+    return Promise.resolve();
+  }
+
+  async function enqueue(force: boolean, profileId: number | undefined): Promise<void> {
     busy = true;
-    const result = await attempt(() => api('POST /api/v1/jobs', { body: { mediaFileIds: [id], force } }));
+    const result = await attempt(() => api('POST /api/v1/jobs', { body: { mediaFileIds: [id], force, profileId } }));
     if (result?.jobs.length) {
       const [job] = result.jobs;
       if (job) await goto(href(`/activity/jobs/${job.id}`));
@@ -134,7 +163,7 @@
         <button onclick={reprobe} disabled={busy}><Icon name="refresh" size={16} /> Re-check</button>
         {@const action = fileProcessAction(file.status)}
         {#if action}
-          <button class:primary={action.primary} onclick={() => process(action.force)} disabled={busy} title={action.title}>
+          <button class:primary={action.primary} onclick={() => process(file, action.force)} disabled={busy} title={action.title}>
             <Icon name="play" size={16} /> {action.label}
           </button>
         {/if}
@@ -157,6 +186,8 @@
         <dd>
           <a href={href(`/library?libraryId=${file.libraryId}`)}>{library?.name ?? `Library ${file.libraryId}`}</a>
         </dd>
+        <dt>Players</dt>
+        <dd>{library && library.profileIds.length > 0 ? library.profileIds.map(profileName).join(', ') : 'No profile'}</dd>
         <dt>Type</dt>
         <dd>{MEDIA_KIND_LABELS[file.kind]}{file.probe ? ` · ${file.probe.formatName}` : ''}</dd>
         <dt>Size</dt>
@@ -211,6 +242,13 @@
       </section>
     {/if}
 
+    <ConvertTargetModal
+      bind:open={convertOpen}
+      question="Convert this file?"
+      targets={convertTargets(library?.profileIds ?? [], profiles.data ?? [])}
+      onconfirm={(profileId) => enqueue(pendingForce, profileId)}
+    />
+
     <section class="card">
       <h2>Streams</h2>
       {#if convertedJob}
@@ -231,6 +269,7 @@
           beforeLabel="Now"
           afterLabel="After conversion"
           rows={pairStreams({ before: file.probe.streams, plan: file.plan?.action === 'skip' ? null : file.plan })}
+          players={playersOf(file.profileResults)}
         />
         {#if file.lastJobId}
           <p class="hint">

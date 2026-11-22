@@ -8,7 +8,7 @@ import { runProcess } from '../../core/process.ts';
 import { buildAudioConversionArgs } from '../ffmpeg/args.ts';
 import { buildProbeArgs } from '../probe/args.ts';
 import { parseFfprobeOutput } from '../probe/parse.ts';
-import { samsungTizenDefinition } from '../profiles/defaults.ts';
+import { templateDefinition } from '../profiles/profileTemplates.ts';
 import { planConversion, resolveEffectiveProfile } from '../rules/engine.ts';
 import { createVerifier } from './verify.ts';
 
@@ -176,7 +176,7 @@ describe.skipIf(!ffmpegAvailable())('createVerifier on real files', () => {
     ]);
     const probeRun = await runProcess({ command: 'ffprobe', args: buildProbeArgs(mp4) });
     const probe = parseFfprobeOutput(JSON.parse(probeRun.stdout), mp4, statSync(mp4).size, new Date().toISOString());
-    const base = samsungTizenDefinition();
+    const base = templateDefinition('basic');
     const definition = { ...base, audio: { ...base.audio, allowedCodecs: ['ac3'], targetCodec: 'ac3' as const } };
     const plan = planConversion({
       probe,
@@ -186,7 +186,6 @@ describe.skipIf(!ffmpegAvailable())('createVerifier on real files', () => {
           name: 'ac3 only',
           description: '',
           version: 1,
-          builtin: false,
           definition,
           createdAt: '2026-01-01T00:00:00.000Z',
           updatedAt: '2026-01-01T00:00:00.000Z',

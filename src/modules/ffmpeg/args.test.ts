@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { audioStream, probeResult, subtitleStream, videoStream } from '../../../test/helpers/probe.ts';
 import type { AudioConversionInput } from '../../contracts/rules-ffmpeg.ts';
 import type { LibraryRuleSettings, MediaStream, ProbeResult } from '../../shared/domain.ts';
-import { samsungTizenDefinition } from '../profiles/defaults.ts';
+import { templateDefinition } from '../profiles/profileTemplates.ts';
 import { planConversion, resolveEffectiveProfile } from '../rules/engine.ts';
 import { buildAudioConversionArgs, selectBitrate } from './args.ts';
 
@@ -20,8 +20,7 @@ const TIZEN = resolveEffectiveProfile([
     name: 'Samsung Tizen',
     description: '',
     version: 1,
-    builtin: true,
-    definition: samsungTizenDefinition(),
+    definition: templateDefinition('basic'),
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
   },

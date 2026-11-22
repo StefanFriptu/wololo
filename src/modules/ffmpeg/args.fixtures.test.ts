@@ -22,7 +22,7 @@ import type {
   MediaStream,
   ProbeResult,
 } from '../../shared/domain.ts';
-import { samsungTizenDefinition } from '../profiles/defaults.ts';
+import { templateDefinition } from '../profiles/profileTemplates.ts';
 import { planConversion, resolveEffectiveProfile } from '../rules/engine.ts';
 import { buildAudioConversionArgs } from './args.ts';
 import { createProgressParser } from './progress.ts';
@@ -71,7 +71,6 @@ function effective(definition: DeviceProfileDefinition): EffectiveProfile {
       name: 'test',
       description: '',
       version: 1,
-      builtin: false,
       definition,
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
@@ -79,7 +78,7 @@ function effective(definition: DeviceProfileDefinition): EffectiveProfile {
   ]);
 }
 
-const TIZEN = effective(samsungTizenDefinition());
+const TIZEN = effective(templateDefinition('basic'));
 
 async function run(command: string, args: string[], onStdoutLine?: (line: string) => void) {
   const result = await runProcess({ command, args, lowPriority: false, timeoutMs: 60_000, onStdoutLine });
@@ -426,7 +425,7 @@ describe.skipIf(!ffmpegAvailable())('buildAudioConversionArgs with real ffmpeg',
   test(
     'buildAudioConversionArgs - aac target keeps 7.1 when the profile allows 8 channels',
     async () => {
-      const base = samsungTizenDefinition();
+      const base = templateDefinition('basic');
       const profile = effective({ ...base, audio: { ...base.audio, targetCodec: 'aac', maxChannels: 8 } });
       const conversion = await convert(FIXTURES.flac71, { profile });
       await expectSafeOutput(conversion);
@@ -438,7 +437,7 @@ describe.skipIf(!ffmpegAvailable())('buildAudioConversionArgs with real ffmpeg',
   test(
     'buildAudioConversionArgs - eac3 target converts dts to eac3',
     async () => {
-      const base = samsungTizenDefinition();
+      const base = templateDefinition('basic');
       const profile = effective({
         ...base,
         audio: { ...base.audio, allowedCodecs: ['ac3', 'eac3', 'aac'], targetCodec: 'eac3' },
@@ -453,7 +452,7 @@ describe.skipIf(!ffmpegAvailable())('buildAudioConversionArgs with real ffmpeg',
   test(
     'buildAudioConversionArgs - ac3 decoded for an aac-only profile runs without dynamic range compression',
     async () => {
-      const base = samsungTizenDefinition();
+      const base = templateDefinition('basic');
       const profile = effective({ ...base, audio: { ...base.audio, allowedCodecs: ['aac'], targetCodec: 'aac' } });
       const conversion = await convert(singleTrack('ac3', 'stereo'), { profile });
       expect(conversion.args.slice(0, conversion.args.indexOf('-i'))).toContain('-drc_scale');
