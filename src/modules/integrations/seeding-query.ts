@@ -1,4 +1,5 @@
 import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { chunk, IN_LIST_CHUNK_SIZE } from '../../core/chunk.ts';
 import type { Db } from '../../db/client.ts';
 import { jobs, mediaFiles, recycleBin } from '../../db/schema.ts';
 import type { JobType, MediaFileKind } from '../../shared/domain.ts';
@@ -19,25 +20,31 @@ export function mediaFilesWithin(db: Db, path: string): { id: number; path: stri
 
 /** Media file ids with at least one completed job of the given type. */
 export function mediaFilesWithCompletedJob(db: Db, { ids, type }: { ids: number[]; type: JobType }): Set<number> {
-  if (ids.length === 0) return new Set();
-  const rows = db
-    .selectDistinct({ mediaFileId: jobs.mediaFileId })
-    .from(jobs)
-    .where(and(inArray(jobs.mediaFileId, ids), eq(jobs.state, 'completed'), eq(jobs.type, type)))
-    .all();
-  return new Set(rows.flatMap((row) => (row.mediaFileId == null ? [] : [row.mediaFileId])));
+  const found = new Set<number>();
+  for (const part of chunk(ids, IN_LIST_CHUNK_SIZE)) {
+    const rows = db
+      .selectDistinct({ mediaFileId: jobs.mediaFileId })
+      .from(jobs)
+      .where(and(inArray(jobs.mediaFileId, part), eq(jobs.state, 'completed'), eq(jobs.type, type)))
+      .all();
+    for (const row of rows) if (row.mediaFileId != null) found.add(row.mediaFileId);
+  }
+  return found;
 }
 
 /** Those of `paths` that are media_files rows with a completed audio job (their original was replaced). */
 export function pathsReplacedByAudioJob(db: Db, paths: readonly string[]): Set<string> {
-  if (paths.length === 0) return new Set();
-  const rows = db
-    .selectDistinct({ path: mediaFiles.path })
-    .from(mediaFiles)
-    .innerJoin(jobs, eq(jobs.mediaFileId, mediaFiles.id))
-    .where(and(inArray(mediaFiles.path, [...paths]), eq(jobs.type, 'audio'), eq(jobs.state, 'completed')))
-    .all();
-  return new Set(rows.map((row) => row.path));
+  const found = new Set<string>();
+  for (const part of chunk(paths, IN_LIST_CHUNK_SIZE)) {
+    const rows = db
+      .selectDistinct({ path: mediaFiles.path })
+      .from(mediaFiles)
+      .innerJoin(jobs, eq(jobs.mediaFileId, mediaFiles.id))
+      .where(and(inArray(mediaFiles.path, part), eq(jobs.type, 'audio'), eq(jobs.state, 'completed')))
+      .all();
+    for (const row of rows) found.add(row.path);
+  }
+  return found;
 }
 
 /** Recycle-bin copies (hard links) of originals replaced by a completed audio job and not restored or purged. */

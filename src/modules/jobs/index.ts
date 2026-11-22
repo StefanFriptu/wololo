@@ -2,6 +2,7 @@ import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AppContext } from '../../app/context.ts';
 import type { JobsService, NewJob } from '../../contracts/jobs.ts';
+import { chunk, IN_LIST_CHUNK_SIZE } from '../../core/chunk.ts';
 import { AppError, errorMessage, notFound } from '../../core/errors.ts';
 import { yieldToEventLoop } from '../../core/yieldToEventLoop.ts';
 import type { JobRow } from '../../db/schema.ts';
@@ -59,10 +60,6 @@ function parseStates(value: string | undefined): JobState[] | undefined {
   if (!value) return undefined;
   const states = value.split(',').map((state) => state.trim());
   return states.filter((state): state is JobState => (JOB_STATES as readonly string[]).includes(state));
-}
-
-function chunks<T>(items: T[], size: number): T[][] {
-  return Array.from({ length: Math.ceil(items.length / size) }, (_, i) => items.slice(i * size, (i + 1) * size));
 }
 
 export function createJobsService(ctx: AppContext): JobsService {
@@ -329,7 +326,7 @@ export function createJobsService(ctx: AppContext): JobsService {
     }
     const cutoff = new Date(Date.now() - JOB_LOG_RETENTION_DAYS * DAY_MS).toISOString();
     let logs = 0;
-    for (const ids of chunks([...byId.keys()], 500)) {
+    for (const ids of chunk([...byId.keys()], IN_LIST_CHUNK_SIZE)) {
       const existing = existingJobIds(db, ids);
       const expired = finishedJobIdsBefore(db, ids, cutoff);
       for (const id of ids) {

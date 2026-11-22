@@ -2,6 +2,7 @@ import { basename, extname } from 'node:path';
 import { and, asc, eq, gt, inArray, isNull, ne, notInArray, or } from 'drizzle-orm';
 import type { AppContext } from '../../app/context.ts';
 import type { CheckAction, CheckResult, DiscoveredEntry, MediaRefs } from '../../contracts/probe-scan.ts';
+import { chunk, IN_LIST_CHUNK_SIZE } from '../../core/chunk.ts';
 import { errorMessage, notFound } from '../../core/errors.ts';
 import { yieldToEventLoop } from '../../core/yieldToEventLoop.ts';
 import { arrInstances, type MediaFileRow, mediaFiles } from '../../db/schema.ts';
@@ -444,10 +445,9 @@ export function createMediaEngine(ctx: AppContext) {
   };
 
   const deleteRows = (ids: readonly number[]) => {
-    for (let start = 0; start < ids.length; start += 500) {
-      const chunk = ids.slice(start, start + 500);
-      ctx.db.delete(mediaFiles).where(inArray(mediaFiles.id, chunk)).run();
-      for (const id of chunk) ctx.events.emit('media.removed', { mediaFileId: id });
+    for (const part of chunk(ids, IN_LIST_CHUNK_SIZE)) {
+      ctx.db.delete(mediaFiles).where(inArray(mediaFiles.id, part)).run();
+      for (const id of part) ctx.events.emit('media.removed', { mediaFileId: id });
     }
   };
 
