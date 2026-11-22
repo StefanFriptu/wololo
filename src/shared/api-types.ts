@@ -40,6 +40,7 @@ import type {
   QueueState,
   RecycleBinEntry,
   ScheduledTaskInfo,
+  SortDir,
   TaskName,
 } from './domain.ts';
 import type { ScanStats } from './events.ts';
@@ -60,7 +61,7 @@ export interface PageQuery {
   page?: number;
   /** Default 50, max 500. */
   pageSize?: number;
-  sortDir?: 'asc' | 'desc';
+  sortDir?: SortDir;
 }
 
 export interface Paginated<T> {

@@ -23,6 +23,9 @@ export const MEDIA_FILE_STATUSES = [
 ] as const;
 export type MediaFileStatus = (typeof MEDIA_FILE_STATUSES)[number];
 
+export const SORT_DIRS = ['asc', 'desc'] as const;
+export type SortDir = (typeof SORT_DIRS)[number];
+
 export const MEDIA_FILE_KINDS = ['file', 'bdmv', 'iso'] as const;
 export type MediaFileKind = (typeof MEDIA_FILE_KINDS)[number];
 
@@ -476,7 +479,8 @@ export interface RecycleBinEntry {
   purgedAt: IsoDateTime | null;
 }
 
-export type ArrKind = 'radarr' | 'sonarr';
+export const ARR_KINDS = ['radarr', 'sonarr'] as const;
+export type ArrKind = (typeof ARR_KINDS)[number];
 
 export interface ArrInstance {
   id: number;
@@ -500,7 +504,8 @@ export interface ArrItemRef {
   fileId: number | null;
 }
 
-export type PathMappingScope = 'radarr' | 'sonarr' | 'plex' | 'qbittorrent';
+export const PATH_MAPPING_SCOPES = ['radarr', 'sonarr', 'plex', 'qbittorrent'] as const;
+export type PathMappingScope = (typeof PATH_MAPPING_SCOPES)[number];
 
 export interface PathMapping {
   id: number;
@@ -573,7 +578,8 @@ export interface TorrentInfo {
  * delete_source: a converted disc's torrent met its seeding goal and settings.bdmv.deleteSourceWhenSeeded is on.
  */
 export type BdmvDecisionKind = 'main_title' | 'movie_match' | 'delete_source';
-export type BdmvDecisionState = 'pending' | 'resolved' | 'dismissed';
+export const BDMV_DECISION_STATES = ['pending', 'resolved', 'dismissed'] as const;
+export type BdmvDecisionState = (typeof BDMV_DECISION_STATES)[number];
 
 export interface BdmvTitleCandidate {
   playlist: string;
@@ -672,7 +678,8 @@ export interface ScheduledTaskInfo {
   nextRunAt: IsoDateTime | null;
 }
 
-export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
+export const LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error'] as const;
+export type LogLevel = (typeof LOG_LEVELS)[number];
 
 export interface LogEntry {
   id: number;

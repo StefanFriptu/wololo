@@ -3,10 +3,10 @@ import type { ApiApp } from '../../api/http.ts';
 import { idParamSchema, parseBody, parseId, parseQuery, route } from '../../api/http.ts';
 import type { AppContext } from '../../app/context.ts';
 import type { BdmvDecisionQuery } from '../../shared/api-types.ts';
-import type { BdmvDecisionChoice } from '../../shared/domain.ts';
+import { BDMV_DECISION_STATES, type BdmvDecisionChoice } from '../../shared/domain.ts';
 
 const decisionQuerySchema = z.object({
-  state: z.enum(['pending', 'resolved', 'dismissed']).optional(),
+  state: z.enum(BDMV_DECISION_STATES).optional(),
 }) satisfies z.ZodType<BdmvDecisionQuery>;
 
 export const decisionChoiceSchema = z.discriminatedUnion('kind', [

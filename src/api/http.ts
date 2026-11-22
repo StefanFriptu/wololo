@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { AppError } from '../core/errors.ts';
 import { splitRouteKey } from '../shared/api-routes.ts';
 import type { RouteKey, RouteResponse } from '../shared/api-types.ts';
+import { SORT_DIRS } from '../shared/domain.ts';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '../shared/paging.ts';
 
 /** server is passed by Bun.serve (`fetch: (req, server) => app.fetch(req, { server })`); absent in app.request() tests. */
@@ -93,5 +94,5 @@ export async function parseBody<T extends z.ZodType>(c: ApiContext, schema: T): 
 export const pageQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(MAX_PAGE_SIZE).default(DEFAULT_PAGE_SIZE),
-  sortDir: z.enum(['asc', 'desc']).optional(),
+  sortDir: z.enum(SORT_DIRS).optional(),
 });
