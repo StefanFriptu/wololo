@@ -1,12 +1,15 @@
-export type ErrorCode =
-  | 'not_found'
-  | 'validation'
-  | 'unprocessable'
-  | 'conflict'
-  | 'unauthorized'
-  | 'precondition_failed'
-  | 'upstream'
-  | 'internal';
+export const ERROR_CODES = [
+  'not_found',
+  'validation',
+  'unprocessable',
+  'conflict',
+  'unauthorized',
+  'precondition_failed',
+  'upstream',
+  'internal',
+] as const;
+
+export type ErrorCode = (typeof ERROR_CODES)[number];
 
 const STATUS_BY_CODE: Record<ErrorCode, number> = {
   not_found: 404,

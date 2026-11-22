@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { RouteSchemas } from '../../api/http.ts';
-import type { ErrorCode } from '../../core/errors.ts';
+import { ERROR_CODES } from '../../core/errors.ts';
 import { type ModuleKey, type RouteMeta, splitRouteKey } from '../../shared/api-routes.ts';
 import type { RouteKey } from '../../shared/api-types.ts';
 import { type JsonSchema, typeExpressionSchema } from './typeExpressionSchema.ts';
@@ -80,22 +80,11 @@ const SECURITY_SCHEMES = {
   bearer: { type: 'http', scheme: 'bearer' },
 } as const;
 
-const ERROR_CODES: Readonly<Record<ErrorCode, true>> = {
-  not_found: true,
-  validation: true,
-  unprocessable: true,
-  conflict: true,
-  unauthorized: true,
-  precondition_failed: true,
-  upstream: true,
-  internal: true,
-};
-
 const ERROR_SCHEMA: JsonSchema = {
   type: 'object',
   required: ['error', 'message'],
   properties: {
-    error: { type: 'string', enum: Object.keys(ERROR_CODES) },
+    error: { type: 'string', enum: [...ERROR_CODES] },
     message: { type: 'string' },
     details: {},
   },
