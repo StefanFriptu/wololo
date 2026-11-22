@@ -5,6 +5,11 @@ const SVELTE_CLIENT = Bun.resolveSync('svelte/internal/client', import.meta.dir)
   'index-client.js',
 );
 
+const SVELTE_REACTIVITY_CLIENT = Bun.resolveSync('svelte/reactivity', import.meta.dir).replace(
+  /index-server\.js$/,
+  'index-client.js',
+);
+
 let registered = false;
 
 /**
@@ -21,7 +26,10 @@ export function compileRunes(): void {
       build.onLoad({ filter: /\.svelte\.ts$/ }, async ({ path }) => {
         const js = transpiler.transformSync(await Bun.file(path).text());
         const { code } = compileModule(js, { generate: 'client', filename: path }).js;
-        return { contents: code.replaceAll(/from ['"]svelte['"]/g, `from '${SVELTE_CLIENT}'`), loader: 'js' };
+        const contents = code
+          .replaceAll(/from ['"]svelte['"]/g, `from '${SVELTE_CLIENT}'`)
+          .replaceAll(/from ['"]svelte\/reactivity['"]/g, `from '${SVELTE_REACTIVITY_CLIENT}'`);
+        return { contents, loader: 'js' };
       });
     },
   });
