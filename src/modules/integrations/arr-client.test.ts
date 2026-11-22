@@ -25,3 +25,26 @@ test('arr client - a library call can outlast the default timeout', async () => 
   });
   await expect(client.movies()).rejects.toMatchObject({ code: 'upstream' });
 });
+
+test.each([
+  ['radarr', 'GET /api/v3/history/movie', 'movieId'],
+  ['sonarr', 'GET /api/v3/history/series', 'seriesId'],
+] as const)(
+  'arr client itemImports - %s asks its per-item history and keeps imports with a hash',
+  async (kind, key, param) => {
+    upstream = startFakeUpstream({
+      [key]: () => [
+        { eventType: 'downloadFolderImported', downloadId: 'ABC', data: { importedPath: '/movies/A/a.mkv' } },
+        { eventType: 'downloadFolderImported', downloadId: null, data: { importedPath: '/movies/A/manual.mkv' } },
+        { eventType: 'downloadFolderImported', downloadId: 'DEF', data: {} },
+        { eventType: 'grabbed', downloadId: 'GHI', data: { importedPath: '/movies/A/g.mkv' } },
+      ],
+    });
+    const client = createArrClient({ kind, url: upstream.url, apiKey: 'k' });
+
+    expect(await client.itemImports(7)).toEqual([{ downloadId: 'ABC', importedPath: '/movies/A/a.mkv' }]);
+    const [request] = upstream.requestsTo(key);
+    expect(request?.query.get(param)).toBe('7');
+    expect(request?.query.get('eventType')).toBe('3');
+  },
+);
