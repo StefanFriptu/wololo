@@ -1,4 +1,5 @@
 import { isAbsolute, normalize, relative, sep } from 'node:path';
+import { isWithin } from '../../core/isWithin.ts';
 
 /** Absolute, normalised, without a trailing separator (except the filesystem root). */
 export function normalizeRootPath(path: string): string | null {
@@ -6,14 +7,6 @@ export function normalizeRootPath(path: string): string | null {
   if (!trimmed || !isAbsolute(trimmed)) return null;
   const normalized = normalize(trimmed);
   return normalized.length > 1 && normalized.endsWith(sep) ? normalized.slice(0, -1) : normalized;
-}
-
-/** Is path equal to root or inside it (segment-wise, so "/media/movies2" is not inside "/media/movies")? */
-export function isWithin(path: string, root: string): boolean {
-  const base = root.length > 1 && root.endsWith(sep) ? root.slice(0, -1) : root;
-  if (path === base) return true;
-  const prefix = base.endsWith(sep) ? base : `${base}${sep}`;
-  return path.startsWith(prefix);
 }
 
 /** Longest root containing path. */

@@ -1,8 +1,9 @@
 import { extname, relative, resolve, sep } from 'node:path';
 import { TEMP_FILE_MARKER } from '../../contracts/jobs.ts';
+import { isWithin } from '../../core/isWithin.ts';
 import type { MediaFileKind } from '../../shared/domain.ts';
 import type { Settings } from '../../shared/settings.ts';
-import { isWithin, normalizeRootPath } from './paths.ts';
+import { normalizeRootPath } from './paths.ts';
 
 /** What the scanner indexes; the walker and media.checkPath apply the same rules. */
 export interface EligibilityRules {

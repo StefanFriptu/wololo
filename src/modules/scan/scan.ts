@@ -3,6 +3,7 @@ import { stat } from 'node:fs/promises';
 import type { AppContext } from '../../app/context.ts';
 import type { ScanService } from '../../contracts/probe-scan.ts';
 import { errorMessage, notFound } from '../../core/errors.ts';
+import { isWithin } from '../../core/isWithin.ts';
 import { yieldToEventLoop } from '../../core/yieldToEventLoop.ts';
 import type { ScanRequest, ScanStatus } from '../../shared/api-types.ts';
 import type { Library, LibraryRoot, MediaFileKind, MediaFileStatus } from '../../shared/domain.ts';
@@ -14,7 +15,6 @@ import { rootDiskInfo } from './libraries.ts';
 import { libraryQuery } from './libraryQuery.ts';
 import { createMediaEngine, type RulesContext } from './mediaEngine.ts';
 import { activeJobMediaIdsQuery, rootEntriesPageQuery, storedEntryQuery } from './mediaQuery.ts';
-import { isWithin } from './paths.ts';
 import { walkRoot } from './walker.ts';
 
 const PROGRESS_INTERVAL_MS = 1000;

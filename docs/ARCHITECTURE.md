@@ -28,7 +28,7 @@ src/
     router.ts              calls each module's register*Routes()
   core/                    config (config.json + WOLOLO__* env), logger (ring buffer + rotating file),
                            events (typed bus), settings (typed KV store), process (spawn + nice/ionice), errors,
-                           chunk (chunk, IN_LIST_CHUNK_SIZE for inArray lists), time (MINUTE_MS, DAY_MS)
+                           chunk (chunk, IN_LIST_CHUNK_SIZE for inArray lists), time (MINUTE_MS, DAY_MS), isWithin
   db/
     schema.ts              THE complete v1 schema (Drizzle)
     client.ts              openDatabase() (WAL, FKs), runMigrations()
