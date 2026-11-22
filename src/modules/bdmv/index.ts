@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { resolve, sep } from 'node:path';
 import type { AppContext } from '../../app/context.ts';
 import type { BdmvService } from '../../contracts/bdmv.ts';
-import { AppError } from '../../core/errors.ts';
+import { AppError, notFound } from '../../core/errors.ts';
 import { runProcess } from '../../core/process.ts';
 import { MINUTE_MS } from '../../core/time.ts';
 import type { BdmvDecision, BdmvDecisionChoice, TorrentInfo } from '../../shared/domain.ts';
@@ -70,7 +70,7 @@ export function createBdmvService(ctx: AppContext): BdmvService {
 
   const getDecision = async (id: number): Promise<BdmvDecision> => {
     const decision = getDecisionQuery(ctx.db, id);
-    if (!decision) throw new AppError('not_found', `BDMV decision ${id} not found`);
+    if (!decision) throw notFound(`BDMV decision ${id}`);
     return decision;
   };
 
