@@ -1,11 +1,9 @@
 import { positiveIntParam as positiveInt } from '#lib/queryParams.ts';
-import { MEDIA_FILE_STATUSES, type MediaFileStatus, type MediaSortKey, SORT_DIRS } from '#lib/shared.ts';
+import { MEDIA_FILE_STATUSES, MEDIA_SORT_KEYS, type MediaFileStatus, SORT_DIRS } from '#lib/shared.ts';
 import { DEFAULT_MEDIA_FILTERS } from './defaultMediaFilters.ts';
 import type { MediaFilters } from './MediaFilters.ts';
 import { MEDIA_KIND_FILTER_LABELS, type MediaKindFilter } from './mediaKindFilterLabels.ts';
 import { PAGE_SIZES } from './pageSizes.ts';
-
-const MEDIA_SORT_KEYS: readonly MediaSortKey[] = ['path', 'size', 'status', 'updatedAt', 'duration'];
 
 const oneOf = <T extends string>(values: readonly T[], value: string | null): T | undefined =>
   values.find((candidate) => candidate === value);

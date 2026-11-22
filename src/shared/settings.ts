@@ -29,6 +29,12 @@ export interface GeneralConfig {
 export const AUTHENTICATION_MODES = ['disabled_for_local_addresses', 'required', 'disabled'] as const;
 export type AuthenticationMode = (typeof AUTHENTICATION_MODES)[number];
 
+export const IONICE_CLASSES = ['idle', 'best-effort'] as const;
+export type IoniceClass = (typeof IONICE_CLASSES)[number];
+
+export const AMBIGUITY_MODES = ['ask', 'editions'] as const;
+export type AmbiguityMode = (typeof AMBIGUITY_MODES)[number];
+
 export const IMPORT_ACTIONS = ['check_only', 'convert_strictest', 'convert_for_profile'] as const;
 export type ImportAction = (typeof IMPORT_ACTIONS)[number];
 
@@ -57,7 +63,7 @@ export interface Settings {
     /** nice level for child processes (0-19). Default 10. */
     niceLevel: number;
     /** ionice class for child processes. Default "idle". */
-    ioniceClass: 'idle' | 'best-effort';
+    ioniceClass: IoniceClass;
     window: { enabled: boolean; start: string; end: string };
     /** Multiple of real time used for dry-run time estimates (Pi 4 baseline 7.7). */
     estimatedSpeedFactor: number;
@@ -99,7 +105,7 @@ export interface Settings {
     enabled: boolean;
     /** Candidates within this percentage of the longest playlist trigger a decision. Default 5. */
     ambiguityPercent: number;
-    onAmbiguous: 'ask' | 'editions';
+    onAmbiguous: AmbiguityMode;
     /** Radarr lookup score below which a decision is required. 0..1, default 0.8. */
     minMatchScore: number;
     extras: { enabled: boolean; minMinutes: number };

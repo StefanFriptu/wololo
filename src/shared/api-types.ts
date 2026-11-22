@@ -28,6 +28,7 @@ import type {
   LogLevel,
   MediaFileKind,
   MediaFileStatus,
+  MediaSortKey,
   MovieMatchCandidate,
   PathMapping,
   PathMappingScope,
@@ -204,8 +205,6 @@ export interface FilesystemListing {
   parent: string | null;
   entries: FilesystemEntry[];
 }
-
-export type MediaSortKey = 'path' | 'size' | 'status' | 'updatedAt' | 'duration';
 
 export interface MediaQuery extends PageQuery {
   sortKey?: MediaSortKey;

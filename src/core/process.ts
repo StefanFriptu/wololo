@@ -1,8 +1,9 @@
+import type { IoniceClass } from '../shared/settings.ts';
 import { AppError, type ErrorCode } from './errors.ts';
 
 export interface LowPriority {
   niceLevel: number;
-  ioniceClass: 'idle' | 'best-effort';
+  ioniceClass: IoniceClass;
 }
 
 export interface PriorityTools {

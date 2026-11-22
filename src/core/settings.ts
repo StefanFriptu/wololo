@@ -3,9 +3,11 @@ import { z } from 'zod';
 import type { Db } from '../db/client.ts';
 import { settings as settingsTable } from '../db/schema.ts';
 import {
+  AMBIGUITY_MODES,
   DEFAULT_SETTINGS,
   type DeepPartial,
   IMPORT_ACTIONS,
+  IONICE_CLASSES,
   SETUP_STEPS,
   type Settings,
   type SettingsSection,
@@ -22,7 +24,7 @@ export const settingsSchema = z.object({
     paused: z.boolean(),
     concurrency: z.number().int().min(1).max(8),
     niceLevel: z.number().int().min(0).max(19),
-    ioniceClass: z.enum(['idle', 'best-effort']),
+    ioniceClass: z.enum(IONICE_CLASSES),
     window: z.object({ enabled: z.boolean(), start: hhmm, end: hhmm }),
     estimatedSpeedFactor: z.number().positive().max(1000),
     freeSpaceMarginPercent: z.number().min(0).max(100),
@@ -49,7 +51,7 @@ export const settingsSchema = z.object({
   bdmv: z.object({
     enabled: z.boolean(),
     ambiguityPercent: z.number().min(0).max(50),
-    onAmbiguous: z.enum(['ask', 'editions']),
+    onAmbiguous: z.enum(AMBIGUITY_MODES),
     minMatchScore: z.number().min(0).max(1),
     extras: z.object({
       enabled: z.boolean(),

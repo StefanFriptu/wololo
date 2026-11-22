@@ -23,6 +23,9 @@ export const MEDIA_FILE_STATUSES = [
 ] as const;
 export type MediaFileStatus = (typeof MEDIA_FILE_STATUSES)[number];
 
+export const MEDIA_SORT_KEYS = ['path', 'size', 'status', 'updatedAt', 'duration'] as const;
+export type MediaSortKey = (typeof MEDIA_SORT_KEYS)[number];
+
 export const SORT_DIRS = ['asc', 'desc'] as const;
 export type SortDir = (typeof SORT_DIRS)[number];
 
