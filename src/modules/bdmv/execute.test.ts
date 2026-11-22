@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, mock, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -411,6 +411,19 @@ test('bdmv.execute - encodes, muxes, verifies, renames, imports and records the 
     message: `converted to ${output}`,
   });
   expect(outcome.after).toEqual(PROBE.streams);
+});
+
+test('bdmv.execute - loads the library and the profile once for the whole job', async () => {
+  const s = setup({ plan: FEATURE_PLAN, probe: (path) => (path.endsWith('.mkv') ? { ...PROBE, path } : PROBE) });
+  const fake = job(s);
+  fakeTools(fake, []);
+  const libraryGet = mock(s.t.ctx.services.libraries.get);
+  s.t.ctx.services.libraries.get = libraryGet;
+  const profileGet = mock(s.t.ctx.services.rules.effectiveProfileForLibrary);
+  s.t.ctx.services.rules.effectiveProfileForLibrary = profileGet;
+  await s.t.ctx.services.bdmv.execute(fake);
+  expect(libraryGet).toHaveBeenCalledTimes(1);
+  expect(profileGet).toHaveBeenCalledTimes(1);
 });
 
 test('bdmv.execute - failed verification deletes the temp dir and writes nothing', async () => {
