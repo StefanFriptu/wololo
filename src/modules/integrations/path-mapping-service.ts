@@ -1,6 +1,7 @@
 import type { AppContext } from '../../app/context.ts';
 import type { PathMappingService } from '../../contracts/integrations.ts';
 import { AppError, notFound } from '../../core/errors.ts';
+import type { Db } from '../../db/client.ts';
 import type { PathMappingInput } from '../../shared/api-types.ts';
 import type { PathMapping, PathMappingScope } from '../../shared/domain.ts';
 import { mapPath, trimTrailingSeparators } from './path-map.ts';
@@ -23,6 +24,25 @@ export function applicableMappings(
   const ofScope = mappings.filter((mapping) => mapping.scope === scope);
   const specific = instanceId == null ? [] : ofScope.filter((mapping) => mapping.instanceId === instanceId);
   return [...specific, ...ofScope.filter((mapping) => mapping.instanceId == null)];
+}
+
+export interface PathTranslator {
+  toLocal: (remotePath: string) => string;
+  toRemote: (localPath: string) => string;
+}
+
+/** Reads the applicable mappings once; use it inside loops that translate many paths. */
+export function pathTranslator(
+  db: Db,
+  { scope, instanceId }: { scope: PathMappingScope; instanceId: number | null },
+): PathTranslator {
+  const mappings = applicableMappings(listPathMappings(db, scope), scope, instanceId);
+  const toLocalPairs = mappings.map((mapping) => ({ from: mapping.remotePath, to: mapping.localPath }));
+  const toRemotePairs = mappings.map((mapping) => ({ from: mapping.localPath, to: mapping.remotePath }));
+  return {
+    toLocal: (remotePath) => mapPath(remotePath, toLocalPairs),
+    toRemote: (localPath) => mapPath(localPath, toRemotePairs),
+  };
 }
 
 export function createPathMappingService(ctx: AppContext): PathMappingService {
@@ -52,18 +72,6 @@ export function createPathMappingService(ctx: AppContext): PathMappingService {
     return values;
   };
 
-  const translate = (
-    direction: 'toLocal' | 'toRemote',
-    { scope, path, instanceId }: { scope: PathMappingScope; path: string; instanceId: number | null },
-  ) => {
-    const pairs = applicableMappings(listPathMappings(ctx.db, scope), scope, instanceId).map((mapping) =>
-      direction === 'toLocal'
-        ? { from: mapping.remotePath, to: mapping.localPath }
-        : { from: mapping.localPath, to: mapping.remotePath },
-    );
-    return mapPath(path, pairs);
-  };
-
   return {
     list: async () => listPathMappings(ctx.db),
     create: async (input) => insertPathMapping(ctx.db, validate(input, null)),
@@ -75,8 +83,8 @@ export function createPathMappingService(ctx: AppContext): PathMappingService {
       if (!deletePathMapping(ctx.db, id)) throw notFound(`path mapping ${id}`);
     },
     toLocal: async (scope, remotePath, instanceId) =>
-      translate('toLocal', { scope, path: remotePath, instanceId: instanceId ?? null }),
+      pathTranslator(ctx.db, { scope, instanceId: instanceId ?? null }).toLocal(remotePath),
     toRemote: async (scope, localPath, instanceId) =>
-      translate('toRemote', { scope, path: localPath, instanceId: instanceId ?? null }),
+      pathTranslator(ctx.db, { scope, instanceId: instanceId ?? null }).toRemote(localPath),
   };
 }

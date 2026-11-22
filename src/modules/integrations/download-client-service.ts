@@ -9,6 +9,7 @@ import { trimTrailingSlashes } from '../../shared/trimTrailingSlashes.ts';
 import { createArrClient } from './arr-client.ts';
 import type { IntegrationDeps } from './arr-service.ts';
 import { isSameOrInside, joinRemotePath } from './path-map.ts';
+import { type PathTranslator, pathTranslator } from './path-mapping-service.ts';
 import { createQbittorrentClient, type QbittorrentClient } from './qbittorrent-client.ts';
 import { redactUrl } from './redact-url.ts';
 import { maskSecret, resolveSecret } from './secrets.ts';
@@ -51,10 +52,12 @@ export function createDownloadClientService(ctx: AppContext, deps: IntegrationDe
     return connection?.enabled ? connection : null;
   };
 
-  const withLocalPaths = async (torrent: TorrentInfo): Promise<TorrentInfo> => ({
+  const qbittorrentPaths = () => pathTranslator(ctx.db, { scope: 'qbittorrent', instanceId: null });
+
+  const withLocalPaths = (torrent: TorrentInfo, paths: PathTranslator): TorrentInfo => ({
     ...torrent,
-    savePath: await ctx.services.pathMappings.toLocal('qbittorrent', torrent.savePath),
-    contentPath: await ctx.services.pathMappings.toLocal('qbittorrent', torrent.contentPath),
+    savePath: paths.toLocal(torrent.savePath),
+    contentPath: paths.toLocal(torrent.contentPath),
   });
 
   const torrentsOf = async (connection: DownloadClientConnection): Promise<TorrentInfo[]> =>
@@ -77,13 +80,13 @@ export function createDownloadClientService(ctx: AppContext, deps: IntegrationDe
   };
 
   /** The torrent's own files (qBittorrent's file list), as local paths; never its neighbours in a shared folder. */
-  const localFilesOf = async (connection: DownloadClientConnection, remote: TorrentInfo): Promise<string[]> => {
+  const localFilesOf = async (
+    connection: DownloadClientConnection,
+    remote: TorrentInfo,
+    paths: PathTranslator,
+  ): Promise<string[]> => {
     const names = await clientFor(connection).files(remote.hash);
-    return Promise.all(
-      names.map(async (name) =>
-        posix.normalize(await ctx.services.pathMappings.toLocal('qbittorrent', joinRemotePath(remote.savePath, name))),
-      ),
-    );
+    return names.map((name) => posix.normalize(paths.toLocal(joinRemotePath(remote.savePath, name))));
   };
 
   /** Radarr/Sonarr import history of a download: local dropped path -> local imported library path. */
@@ -92,10 +95,10 @@ export function createDownloadClientService(ctx: AppContext, deps: IntegrationDe
     for (const instance of listArrInstances(ctx.db).filter((candidate) => candidate.enabled)) {
       try {
         const client = createArrClient({ ...instance, fetch: deps.fetch, timeoutMs: deps.timeoutMs });
-        for (const record of await client.imports(hash)) {
-          const dropped = await ctx.services.pathMappings.toLocal(instance.kind, record.droppedPath, instance.id);
-          const imported = await ctx.services.pathMappings.toLocal(instance.kind, record.importedPath, instance.id);
-          imports.set(posix.normalize(dropped), posix.normalize(imported));
+        const records = await client.imports(hash);
+        const { toLocal } = pathTranslator(ctx.db, { scope: instance.kind, instanceId: instance.id });
+        for (const record of records) {
+          imports.set(posix.normalize(toLocal(record.droppedPath)), posix.normalize(toLocal(record.importedPath)));
         }
       } catch (error) {
         log.warn('import history unavailable; relying on the recycle bin', { instance: instance.name, hash, error });
@@ -157,9 +160,9 @@ export function createDownloadClientService(ctx: AppContext, deps: IntegrationDe
     findTorrentByPath: async (localPath) => {
       const connection = active();
       if (!connection) return null;
-      const remotePath = await ctx.services.pathMappings.toRemote('qbittorrent', localPath);
-      const match = matchTorrent(await torrentsOf(connection), remotePath);
-      return match ? withLocalPaths(match) : null;
+      const paths = qbittorrentPaths();
+      const match = matchTorrent(await torrentsOf(connection), paths.toRemote(localPath));
+      return match ? withLocalPaths(match, paths) : null;
     },
     deleteTorrent,
     checkSeedingGoals: async () => {
@@ -174,10 +177,11 @@ export function createDownloadClientService(ctx: AppContext, deps: IntegrationDe
       const bin = connection.removeWhenGoalMet ? await replacedInodes() : new Set<string>();
       let removed = 0;
       let offered = 0;
+      const paths = qbittorrentPaths();
       for (const remote of met) {
-        const torrent = await withLocalPaths(remote);
+        const torrent = withLocalPaths(remote, paths);
         try {
-          const files = await localFilesOf(connection, remote);
+          const files = await localFilesOf(connection, remote, paths);
           const owns = (rowPath: string) => files.some((file) => isSameOrInside(file, rowPath));
           const rows = mediaFilesWithin(ctx.db, torrent.contentPath).filter((row) => owns(row.path));
           const discs = rows.filter((row) => row.kind !== 'file');

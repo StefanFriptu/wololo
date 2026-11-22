@@ -10,6 +10,7 @@ import { type ArrClient, type ArrLookupMovie, createArrClient } from './arr-clie
 import { createArrSetup } from './arr-setup.ts';
 import { movieMatchScore, parseTitleYear } from './movie-match.ts';
 import { isSameOrInside } from './path-map.ts';
+import { pathTranslator } from './path-mapping-service.ts';
 import { maskSecret, resolveSecret } from './secrets.ts';
 import {
   deleteArrInstance,
@@ -108,6 +109,9 @@ export function createArrService(ctx: AppContext, deps: IntegrationDeps = {}): A
     return instance;
   };
 
+  const translatorFor = (instance: ArrInstance) =>
+    pathTranslator(ctx.db, { scope: instance.kind, instanceId: instance.id });
+
   const toLocal = (instance: ArrInstance, path: string) =>
     ctx.services.pathMappings.toLocal(instance.kind, path, instance.id);
 
@@ -115,23 +119,27 @@ export function createArrService(ctx: AppContext, deps: IntegrationDeps = {}): A
     const client = clientFor(instance);
     const entries: IndexEntry[] = [];
     if (instance.kind === 'radarr') {
-      for (const movie of await client.movies(libraryTimeoutMs)) {
+      const movies = await client.movies(libraryTimeoutMs);
+      const { toLocal } = translatorFor(instance);
+      for (const movie of movies) {
         if (!movie.path) continue;
         entries.push({
           itemId: movie.id,
-          folder: await toLocal(instance, movie.path),
+          folder: toLocal(movie.path),
           fileId: movie.movieFile?.id ?? null,
-          filePath: movie.movieFile?.path ? await toLocal(instance, movie.movieFile.path) : null,
+          filePath: movie.movieFile?.path ? toLocal(movie.movieFile.path) : null,
           tmdbId: movie.tmdbId ?? null,
           originalLanguage: movie.originalLanguage?.name ?? null,
         });
       }
     } else {
-      for (const series of await client.series(libraryTimeoutMs)) {
+      const allSeries = await client.series(libraryTimeoutMs);
+      const { toLocal } = translatorFor(instance);
+      for (const series of allSeries) {
         if (!series.path) continue;
         entries.push({
           itemId: series.id,
-          folder: await toLocal(instance, series.path),
+          folder: toLocal(series.path),
           fileId: null,
           filePath: null,
           tmdbId: null,
@@ -247,8 +255,10 @@ export function createArrService(ctx: AppContext, deps: IntegrationDeps = {}): A
     const current = () => loadingSeries.get(key) === load;
     const load: Promise<SeriesFiles> = (async () => {
       const byPath = new Map<string, number>();
-      for (const file of await clientFor(instance).episodeFiles(seriesId)) {
-        if (file.path) byPath.set(await toLocal(instance, file.path), file.id);
+      const files = await clientFor(instance).episodeFiles(seriesId);
+      const { toLocal } = translatorFor(instance);
+      for (const file of files) {
+        if (file.path) byPath.set(toLocal(file.path), file.id);
       }
       return { builtAt: now(), byPath };
     })()
