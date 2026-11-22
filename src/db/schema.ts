@@ -100,7 +100,10 @@ export const libraryProfiles = sqliteTable(
       .notNull()
       .references(() => deviceProfiles.id, { onDelete: 'restrict' }),
   },
-  (t) => [primaryKey({ columns: [t.libraryId, t.profileId] })],
+  (t) => [
+    primaryKey({ columns: [t.libraryId, t.profileId] }),
+    index('library_profiles_profile_idx').on(t.profileId, t.libraryId),
+  ],
 );
 
 export const mediaFiles = sqliteTable(
@@ -147,6 +150,7 @@ export const mediaFiles = sqliteTable(
   (t) => [
     uniqueIndex('media_files_path_idx').on(t.path),
     index('media_files_library_idx').on(t.libraryId),
+    index('media_files_root_idx').on(t.rootId),
     index('media_files_status_idx').on(t.status),
     index('media_files_rules_key_idx').on(t.rulesKey),
     index('media_files_last_job_idx').on(t.lastJobId),
@@ -199,6 +203,10 @@ export const jobs = sqliteTable(
   (t) => [
     index('jobs_state_idx').on(t.state, t.priority, t.id),
     index('jobs_media_file_idx').on(t.mediaFileId),
+    index('jobs_library_idx').on(t.libraryId),
+    index('jobs_profile_idx').on(t.profileId),
+    index('jobs_temp_path_idx').on(t.tempPath),
+    index('jobs_recycle_bin_entry_idx').on(t.recycleBinEntryId),
     index('jobs_finished_idx').on(t.state, t.finishedAt),
   ],
 );
