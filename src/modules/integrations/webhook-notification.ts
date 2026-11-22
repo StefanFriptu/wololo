@@ -1,4 +1,5 @@
 import type { ArrKind } from '../../shared/domain.ts';
+import { trimTrailingSlashes } from '../../shared/trimTrailingSlashes.ts';
 import type { ArrNotification } from './arr-client.ts';
 
 const WEBHOOK_NAME = 'Wololo';
@@ -27,7 +28,7 @@ export function isWololoWebhook(notification: ArrNotification, target: WebhookTa
   try {
     const url = new URL(value);
     return (
-      url.pathname.replace(/\/+$/, '').endsWith(`/api/v1/webhook/${target.kind}`) &&
+      trimTrailingSlashes(url.pathname).endsWith(`/api/v1/webhook/${target.kind}`) &&
       url.searchParams.get('instance') === String(target.instanceId)
     );
   } catch {
