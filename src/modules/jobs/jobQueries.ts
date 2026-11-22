@@ -9,9 +9,7 @@ import {
   type NewJobRow,
   recycleBin,
 } from '../../db/schema.ts';
-import type { HistoryEventType, JobState, JobType } from '../../shared/domain.ts';
-
-const ACTIVE_STATES: JobState[] = ['queued', 'running'];
+import { ACTIVE_JOB_STATES, type HistoryEventType, type JobState, type JobType } from '../../shared/domain.ts';
 
 export interface PageWindow {
   page: number;
@@ -50,7 +48,7 @@ export function findActiveJobForMedia(db: Db, mediaFileId: number): JobRow | und
   return db
     .select()
     .from(jobs)
-    .where(and(eq(jobs.mediaFileId, mediaFileId), inArray(jobs.state, ACTIVE_STATES)))
+    .where(and(eq(jobs.mediaFileId, mediaFileId), inArray(jobs.state, [...ACTIVE_JOB_STATES])))
     .orderBy(asc(jobs.id))
     .get();
 }
@@ -137,7 +135,7 @@ export function finishedJobIdsBeforeQuery(db: Db, options: { ids: number[]; befo
     .where(
       and(
         inArray(jobs.id, options.ids),
-        notInArray(jobs.state, ACTIVE_STATES),
+        notInArray(jobs.state, [...ACTIVE_JOB_STATES]),
         isNotNull(jobs.finishedAt),
         lt(jobs.finishedAt, options.beforeIso),
       ),
@@ -160,7 +158,7 @@ export function prunableJobIdsQuery(db: Db, options: { beforeIso: string; limit:
     .from(jobs)
     .where(
       and(
-        notInArray(jobs.state, ACTIVE_STATES),
+        notInArray(jobs.state, [...ACTIVE_JOB_STATES]),
         lt(jobs.finishedAt, options.beforeIso),
         notExists(db.select({ id: recycleBin.id }).from(recycleBin).where(eq(recycleBin.jobId, jobs.id))),
         notExists(db.select({ id: mediaFiles.id }).from(mediaFiles).where(eq(mediaFiles.lastJobId, jobs.id))),

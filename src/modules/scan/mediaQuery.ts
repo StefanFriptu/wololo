@@ -3,7 +3,7 @@ import { chunk, IN_LIST_CHUNK_SIZE } from '../../core/chunk.ts';
 import type { Db } from '../../db/client.ts';
 import { type JobRow, jobs, libraryProfiles, libraryRoots, mediaFiles } from '../../db/schema.ts';
 import type { MediaFileSummary, MediaQuery, MediaSortKey } from '../../shared/api-types.ts';
-import type { JobSummary, MediaFileStatus } from '../../shared/domain.ts';
+import { ACTIVE_JOB_STATES, type JobSummary, type MediaFileStatus } from '../../shared/domain.ts';
 import { relativeToRoot } from './paths.ts';
 import { parseKindList, parseStatusList } from './schemas.ts';
 
@@ -275,7 +275,7 @@ export function activeJobMediaIdsQuery(db: Db, mediaFileIds: readonly number[]):
     const rows = db
       .select({ mediaFileId: jobs.mediaFileId })
       .from(jobs)
-      .where(and(inArray(jobs.mediaFileId, part), inArray(jobs.state, ['queued', 'running'])))
+      .where(and(inArray(jobs.mediaFileId, part), inArray(jobs.state, [...ACTIVE_JOB_STATES])))
       .all();
     for (const row of rows) if (row.mediaFileId !== null) ids.add(row.mediaFileId);
   }

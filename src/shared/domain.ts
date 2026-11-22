@@ -317,6 +317,13 @@ export type JobType = (typeof JOB_TYPES)[number];
 export const JOB_STATES = ['queued', 'running', 'completed', 'failed', 'cancelled'] as const;
 export type JobState = (typeof JOB_STATES)[number];
 
+export const ACTIVE_JOB_STATES = ['queued', 'running'] as const satisfies readonly JobState[];
+export type ActiveJobState = (typeof ACTIVE_JOB_STATES)[number];
+
+export function isActiveJobState(state: JobState): state is ActiveJobState {
+  return (ACTIVE_JOB_STATES as readonly JobState[]).includes(state);
+}
+
 export const JOB_STEPS = [
   'waiting',
   'preparing',

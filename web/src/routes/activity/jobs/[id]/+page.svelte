@@ -31,7 +31,7 @@
   } from '#lib/labels.ts';
   import { href } from '#lib/paths.ts';
   import { Resource } from '#lib/resource.svelte.ts';
-  import type { JobLogChunk } from '#lib/shared.ts';
+  import { isActiveJobState, type JobLogChunk } from '#lib/shared.ts';
   import { attempt } from '#lib/attempt.ts';
   import { toasts } from '#lib/toast.svelte.ts';
 
@@ -50,7 +50,7 @@
   let busy = $state(false);
   let logElement = $state<HTMLPreElement>();
 
-  const active = $derived(job.data?.state === 'running' || job.data?.state === 'queued');
+  const active = $derived(job.data !== undefined && isActiveJobState(job.data.state));
 
   $effect(() => {
     void id;
