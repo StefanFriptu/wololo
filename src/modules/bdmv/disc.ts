@@ -2,7 +2,7 @@ import type { Dirent } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import type { MainTitlePick, MplsPlaylist } from '../../contracts/bdmv.ts';
-import { errorMessage } from '../../core/errors.ts';
+import { errnoCode, errorMessage } from '../../core/errors.ts';
 import { type DiscEntry, findEntry, type SevenZipIsoReader } from './iso.ts';
 import { parseClpi, parseMpls, withClipLanguages } from './mpls.ts';
 import { dedupePlaylists, detectEncryption, pickMainTitle } from './titles.ts';
@@ -20,14 +20,14 @@ export interface DiscSource {
 const MAX_FOLDER_DEPTH = 6;
 
 function isNotFound(error: unknown): boolean {
-  return (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT';
+  return errnoCode(error) === 'ENOENT';
 }
 
 async function listDir(path: string): Promise<Dirent[]> {
   try {
     return await readdir(path, { withFileTypes: true });
   } catch (error) {
-    if (isNotFound(error) || (error as NodeJS.ErrnoException).code === 'ENOTDIR') return [];
+    if (isNotFound(error) || errnoCode(error) === 'ENOTDIR') return [];
     throw error;
   }
 }

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AppError, errorMessage } from '../../core/errors.ts';
+import { AppError, errnoCode, errorMessage } from '../../core/errors.ts';
 
 export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -45,8 +45,8 @@ const UNTRUSTED_CERT_CODES: ReadonlySet<string> = new Set([
 ]);
 
 function untrustedCertHint(error: unknown): string {
-  const code = error instanceof Error && 'code' in error ? error.code : null;
-  return typeof code === 'string' && UNTRUSTED_CERT_CODES.has(code)
+  const code = errnoCode(error);
+  return code !== undefined && UNTRUSTED_CERT_CODES.has(code)
     ? '; to trust a self-signed or private CA certificate, set NODE_EXTRA_CA_CERTS (see README)'
     : '';
 }

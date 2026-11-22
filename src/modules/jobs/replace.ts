@@ -12,7 +12,7 @@ import {
   unlinkSync,
 } from 'node:fs';
 import { dirname } from 'node:path';
-import { AppError, errorMessage } from '../../core/errors.ts';
+import { AppError, errnoCode, errorMessage } from '../../core/errors.ts';
 import { isLinkUnsupported } from './isLinkUnsupported.ts';
 
 /** The filesystem calls of the swap; tests swap single calls to simulate a crash at an exact point. */
@@ -64,16 +64,12 @@ function outputAppeared(outputPath: string): AppError {
   return new AppError('conflict', `output path appeared during the job, not overwriting it: ${outputPath}`);
 }
 
-function errorCode(error: unknown): string | undefined {
-  return typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : undefined;
-}
-
 /** Moves temp to a new output path without ever replacing a file that is already there. */
 function moveWithoutClobber(fs: ReplaceFs, tempPath: string, outputPath: string): void {
   try {
     fs.link(tempPath, outputPath);
   } catch (error) {
-    if (errorCode(error) === 'EEXIST') throw outputAppeared(outputPath);
+    if (errnoCode(error) === 'EEXIST') throw outputAppeared(outputPath);
     if (!isLinkUnsupported(error)) throw error;
     if (fs.exists(outputPath)) throw outputAppeared(outputPath);
     fs.rename(tempPath, outputPath);

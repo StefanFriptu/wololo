@@ -38,3 +38,9 @@ export const notFound = (what: string) => new AppError('not_found', `${what} not
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+/** The Node errno code ("ENOENT", "EEXIST") of a thrown value, undefined when it has none. */
+export function errnoCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return undefined;
+  return typeof error.code === 'string' ? error.code : undefined;
+}
