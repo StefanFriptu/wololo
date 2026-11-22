@@ -5,7 +5,7 @@ import { AppError, errorMessage, notFound } from '../../core/errors.ts';
 import type { PlexConnectionRow } from '../../db/schema.ts';
 import type { PlexConnection, PlexSection, PlexServer } from '../../shared/domain.ts';
 import { trimTrailingSlashes } from '../../shared/trimTrailingSlashes.ts';
-import type { IntegrationDeps } from './arr-service.ts';
+import type { IntegrationDeps } from './IntegrationDeps.ts';
 import { createPlexServerClient, createPlexTvClient, PLEX_PRODUCT, type PlexResource } from './plex-client.ts';
 import { findSectionForPath, isPublishedConnection, pickConnection, toSession } from './plex-select.ts';
 import { redactUrl } from './redact-url.ts';
