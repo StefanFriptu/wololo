@@ -114,7 +114,7 @@ export function discLookupName(path: string, volumeLabel: string | null): string
   return volumeLabel ?? own;
 }
 
-export function isWithin(path: string, folder: string): boolean {
+function isWithin(path: string, folder: string): boolean {
   const base = folder.endsWith(sep) ? folder : `${folder}${sep}`;
   return path === folder || path.startsWith(base);
 }
