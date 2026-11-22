@@ -5,6 +5,7 @@
   import FolderPicker from '#lib/components/FolderPicker.svelte';
   import Icon from '#lib/components/Icon.svelte';
   import Modal from '#lib/components/Modal.svelte';
+  import { parseOptionalNumber } from '#lib/parseOptionalNumber.ts';
   import { LIBRARY_KIND_LABELS, LIBRARY_MODE_LABELS } from '#lib/labels.ts';
   import { parseList } from '#lib/parseList.ts';
   import {
@@ -231,7 +232,7 @@
         <select
           id="{uid}-arr"
           value={form.arrInstanceId ?? ''}
-          onchange={(event) => (form.arrInstanceId = event.currentTarget.value === '' ? null : Number(event.currentTarget.value))}
+          onchange={(event) => (form.arrInstanceId = parseOptionalNumber(event.currentTarget.value) ?? null)}
         >
           <option value="">None</option>
           {#each arrInstances as instance (instance.id)}<option value={instance.id}>{instance.name} ({instance.kind})</option>{/each}

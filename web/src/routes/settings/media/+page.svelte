@@ -11,6 +11,8 @@
   import LibraryForm from '#lib/components/LibraryForm.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { formatBytes } from '#lib/format/formatBytes.ts';
+  import { parseOptionalNumber } from '#lib/parseOptionalNumber.ts';
+  import { nameById } from '#lib/nameById.ts';
   import { IMPORT_ACTION_LABELS, LIBRARY_KIND_LABELS, LIBRARY_MODE_LABELS } from '#lib/labels.ts';
   import { parseLines } from '#lib/parseLines.ts';
   import { parseList } from '#lib/parseList.ts';
@@ -136,7 +138,7 @@
     form.media.importProfileId = action === 'convert_for_profile' ? (form.media.importProfileId ?? profiles.data?.[0]?.id ?? null) : null;
   }
 
-  const profileName = (id: number): string => profiles.data?.find((profile) => profile.id === id)?.name ?? `#${id}`;
+  const profileName = (id: number): string => nameById(profiles.data, id);
 </script>
 
 <PageHeader title="Media" subtitle="Libraries, processing and file handling.">
@@ -458,7 +460,7 @@
                   id="quality-profile"
                   value={form.bdmv.qualityProfileId ?? ''}
                   onchange={(event) =>
-                    form && (form.bdmv.qualityProfileId = event.currentTarget.value === '' ? null : Number(event.currentTarget.value))}
+                    form && (form.bdmv.qualityProfileId = parseOptionalNumber(event.currentTarget.value) ?? null)}
                 >
                   <option value="">The instance's first profile</option>
                   {#each qualityProfiles as profile (profile.id)}<option value={profile.id}>{profile.name}</option>{/each}
@@ -470,7 +472,7 @@
                   min="1"
                   value={form.bdmv.qualityProfileId ?? ''}
                   oninput={(event) =>
-                    form && (form.bdmv.qualityProfileId = event.currentTarget.value === '' ? null : Number(event.currentTarget.value))}
+                    form && (form.bdmv.qualityProfileId = parseOptionalNumber(event.currentTarget.value) ?? null)}
                   placeholder="First profile"
                 />
               {/if}

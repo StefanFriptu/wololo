@@ -30,6 +30,7 @@
   } from '#lib/labels.ts';
   import { convertedByJob } from '#lib/library/convertedByJob.ts';
   import { fileProcessAction } from '#lib/library/fileProcessAction.ts';
+  import { nameById } from '#lib/nameById.ts';
   import { href } from '#lib/paths.ts';
   import { convertTargets } from '#lib/profiles/convertTargets.ts';
   import type { PlayerColumn } from '#lib/profiles/PlayerColumn.ts';
@@ -110,8 +111,7 @@
     busy = false;
   }
 
-  const profileName = (profileId: number): string =>
-    profiles.data?.find((profile) => profile.id === profileId)?.name ?? `#${profileId}`;
+  const profileName = (profileId: number): string => nameById(profiles.data, profileId);
 
   function playersOf(results: ProfileResult[] | null): PlayerColumn[] {
     return (results ?? []).map((result) => ({

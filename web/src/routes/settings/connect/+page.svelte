@@ -9,6 +9,7 @@
   import Icon from '#lib/components/Icon.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import PathMappingForm from '#lib/components/PathMappingForm.svelte';
+  import { nameById } from '#lib/nameById.ts';
   import { PATH_SCOPE_LABELS } from '#lib/labels.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import { runtimeConfig } from '#lib/runtime.ts';
@@ -75,7 +76,7 @@
 
   function instanceName(id: number | null): string {
     if (id === null) return 'All instances';
-    return instances.data?.find((instance) => instance.id === id)?.name ?? `#${id}`;
+    return nameById(instances.data, id);
   }
 </script>
 
