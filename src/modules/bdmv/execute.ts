@@ -316,7 +316,7 @@ export function createBdmvExecutor(
     const verification = await run.verify({
       sourcePath: disc,
       outputPath: work.tempOutput,
-      expectedDurationSec: work.probe.durationSec,
+      expectedDurationSec: work.playlist.durationSec,
       durationToleranceSec: DURATION_TOLERANCE_SEC,
       expectedStreamCount: work.tracks.length,
       compareVideoHash: false,

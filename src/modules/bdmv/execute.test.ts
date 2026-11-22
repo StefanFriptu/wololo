@@ -579,7 +579,7 @@ test('bdmv.execute - two editions: one probe, plan, mux and verification per tit
   ]);
   expect(muxes[0]?.args).toContain(join(s.disc, 'BDMV', 'PLAYLIST', '00800.mpls'));
   expect(muxes[1]?.args).toContain(join(s.disc, 'BDMV', 'PLAYLIST', '00801.mpls'));
-  expect(fake.verifyRequests.map((request) => request.expectedDurationSec)).toEqual([5706, 5706]);
+  expect(fake.verifyRequests.map((request) => request.expectedDurationSec)).toEqual([6000, 5800]);
   expect(existsSync(extended)).toBe(true);
   expect(existsSync(theatrical)).toBe(true);
   expect(s.calls.importMovieFolder).toEqual([[7, folder, 99]]);
