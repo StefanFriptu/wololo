@@ -1,3 +1,5 @@
+import { AppError, type ErrorCode } from './errors.ts';
+
 export interface LowPriority {
   niceLevel: number;
   ioniceClass: 'idle' | 'best-effort';
@@ -34,6 +36,34 @@ export interface RunResult {
   durationMs: number;
   aborted: boolean;
   timedOut: boolean;
+}
+
+export interface AssertRanOkOptions {
+  /** Names the process in the cancelled message. */
+  label: string;
+  /** Names the process in the timed out and failed messages. Defaults to label. */
+  failureLabel?: string;
+  /** Exit codes that count as success. Default [0]. */
+  okExitCodes?: readonly number[];
+  /** Code of the timed out and failed errors. Default 'internal'. */
+  failureCode?: ErrorCode;
+  /** Characters of stderr kept in the failed message. Default 800. */
+  stderrTail?: number;
+}
+
+const DEFAULT_STDERR_TAIL = 800;
+
+/** Throws unless the child was neither cancelled nor timed out and exited with an accepted code. */
+export function assertRanOk(result: RunResult, options: AssertRanOkOptions): void {
+  const failureLabel = options.failureLabel ?? options.label;
+  const failureCode = options.failureCode ?? 'internal';
+  if (result.aborted) throw new AppError('internal', `${options.label} was cancelled`);
+  if (result.timedOut) throw new AppError(failureCode, `${failureLabel} timed out`);
+  if (result.exitCode === null || !(options.okExitCodes ?? [0]).includes(result.exitCode))
+    throw new AppError(
+      failureCode,
+      `${failureLabel} failed (exit ${result.exitCode}): ${result.stderr.trim().slice(-(options.stderrTail ?? DEFAULT_STDERR_TAIL))}`,
+    );
 }
 
 let cachedPriorityTools: PriorityTools | null = null;

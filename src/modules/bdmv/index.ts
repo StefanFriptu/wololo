@@ -5,6 +5,7 @@ import type { AppContext } from '../../app/context.ts';
 import type { BdmvService } from '../../contracts/bdmv.ts';
 import { AppError } from '../../core/errors.ts';
 import { runProcess } from '../../core/process.ts';
+import { MINUTE_MS } from '../../core/time.ts';
 import type { BdmvDecision, BdmvDecisionChoice, TorrentInfo } from '../../shared/domain.ts';
 import {
   closeDecision,
@@ -49,13 +50,20 @@ export function mainTitleChoiceError(
   return null;
 }
 
+const SEVEN_ZIP_TIMEOUT_MS = 5 * MINUTE_MS;
+
 export function createBdmvService(ctx: AppContext): BdmvService {
   const log = ctx.logs.logger('bdmv');
   const tempRoot = tmpdir();
   const isoReader = createIsoReader({
     sevenZip: ctx.config.get().tools.sevenZip,
     run: (options) =>
-      runProcess({ ...options, signal: options.signal ?? ctx.shutdownSignal, lowPriority: false, timeoutMs: 300_000 }),
+      runProcess({
+        ...options,
+        signal: options.signal ?? ctx.shutdownSignal,
+        lowPriority: false,
+        timeoutMs: SEVEN_ZIP_TIMEOUT_MS,
+      }),
     tempRoot,
   });
   const planner = createDiscPlanner(ctx, { isoReader, log });

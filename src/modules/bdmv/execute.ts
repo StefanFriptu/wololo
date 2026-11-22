@@ -7,7 +7,7 @@ import { TEMP_FILE_MARKER } from '../../contracts/jobs.ts';
 import { blurayInput, playlistArgs } from '../../core/bluray.ts';
 import { AppError, errnoCode, errorMessage } from '../../core/errors.ts';
 import type { Logger } from '../../core/logger.ts';
-import type { RunResult } from '../../core/process.ts';
+import { assertRanOk } from '../../core/process.ts';
 import type {
   BdmvJobPlan,
   BdmvOutputTitle,
@@ -19,7 +19,7 @@ import type {
   VerificationResult,
 } from '../../shared/domain.ts';
 import { createIsoReader } from './iso.ts';
-import { buildMkvmergeArgs, mkvmergeSucceeded, parseMkvmergeIdentify, parseMkvmergeProgress } from './mkvmerge.ts';
+import { buildMkvmergeArgs, MKVMERGE_OK_EXIT_CODES, parseMkvmergeIdentify, parseMkvmergeProgress } from './mkvmerge.ts';
 import { type DiscPlanner, loadDiscRow, withPlaylistLanguages } from './planner.ts';
 import { countForcedPgsCompositions } from './titles.ts';
 
@@ -172,13 +172,6 @@ function reportStep(
   run.reportProgress({ progress: (position.index + within) / position.of, ...extra });
 }
 
-function ensureRan(result: RunResult, what: string, ok: (code: number | null) => boolean = (code) => code === 0): void {
-  if (result.aborted) throw new AppError('internal', `${what} was cancelled`);
-  if (result.timedOut) throw new AppError('internal', `${what} timed out`);
-  if (!ok(result.exitCode))
-    throw new AppError('internal', `${what} failed (exit ${result.exitCode}): ${result.stderr.trim().slice(-800)}`);
-}
-
 async function exists(path: string): Promise<boolean> {
   return stat(path).then(
     () => true,
@@ -226,7 +219,7 @@ export function createBdmvExecutor(
       command: tools().ffmpeg,
       args: buildSupExtractArgs(disc, work.title.playlist, targets),
     });
-    ensureRan(result, 'PGS extraction');
+    assertRanOk(result, { label: 'PGS extraction' });
     for (const target of targets) {
       const counts = countForcedPgsCompositions(new Uint8Array(await readFile(target.path)));
       run.log.line(`PGS stream ${target.sourceIndex}: ${counts.forced}/${counts.compositions} forced compositions`);
@@ -261,7 +254,7 @@ export function createBdmvExecutor(
           });
         },
       });
-      ensureRan(result, `ffmpeg (audio stream ${stream.sourceIndex})`);
+      assertRanOk(result, { label: `ffmpeg (audio stream ${stream.sourceIndex})` });
       work.sideFiles.set(stream.sourceIndex, outputPath);
     }
   }
@@ -269,7 +262,7 @@ export function createBdmvExecutor(
   async function muxTitle(run: JobRunContext, work: TitleWork, movie: BdmvJobPlan['movie'], of: number) {
     run.setStep('muxing', `mkvmerge ${work.title.playlist}`);
     const identifyRun = await run.run({ command: tools().mkvmerge, args: ['-J', work.playlistPath] });
-    ensureRan(identifyRun, 'mkvmerge -J', mkvmergeSucceeded);
+    assertRanOk(identifyRun, { label: 'mkvmerge -J', okExitCodes: MKVMERGE_OK_EXIT_CODES });
     const secondary = new Set(work.playlist.streams.filter((s) => s.secondaryVideo).map((s) => s.pid));
     work.tracks = outputTracks({
       plan: work.plan,
@@ -295,13 +288,13 @@ export function createBdmvExecutor(
         if (fraction !== null) reportStep(run, { index: work.index, of }, 'muxing', fraction);
       },
     });
-    ensureRan(result, 'mkvmerge', mkvmergeSucceeded);
+    assertRanOk(result, { label: 'mkvmerge', okExitCodes: MKVMERGE_OK_EXIT_CODES });
   }
 
   async function verifyTitle(run: JobRunContext, work: TitleWork, disc: string): Promise<VerificationResult> {
     run.setStep('verifying', `verifying ${basename(work.title.outputPath)}`);
     const packets = await run.run({ command: tools().ffprobe, args: buildPacketCountArgs(disc, work.title.playlist) });
-    ensureRan(packets, 'ffprobe packet count');
+    assertRanOk(packets, { label: 'ffprobe packet count' });
     const expectedVideoPackets = parsePacketCount(packets.stdout);
     if (expectedVideoPackets === null)
       throw new AppError(

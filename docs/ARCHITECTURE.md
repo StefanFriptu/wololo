@@ -27,7 +27,7 @@ src/
     core-routes.ts         /health, SSE /api/v1/events, settings, logs
     router.ts              calls each module's register*Routes()
   core/                    config (config.json + WOLOLO__* env), logger (ring buffer + rotating file),
-                           events (typed bus), settings (typed KV store), process (spawn + nice/ionice), errors,
+                           events (typed bus), settings (typed KV store), process (spawn + nice/ionice, assertRanOk), errors,
                            chunk (chunk, IN_LIST_CHUNK_SIZE for inArray lists), time (MINUTE_MS, DAY_MS), withTimeout (settle with a fallback after a budget), isWithin,
                            freeBytes (statfs bavail * bsize, async + sync),
                            recyclePaths (RECYCLE_DIR_NAME, isRecycleStamp, isRecyclePath, isNormalizedAbsolutePath),

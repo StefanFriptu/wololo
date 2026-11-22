@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { IsoReader } from '../../contracts/bdmv.ts';
 import { AppError } from '../../core/errors.ts';
-import type { RunOptions, RunResult } from '../../core/process.ts';
+import { assertRanOk, type RunOptions, type RunResult } from '../../core/process.ts';
 import { parseMpls } from './mpls.ts';
 
 export interface DiscEntry {
@@ -60,19 +60,18 @@ export interface SevenZipIsoReader extends IsoReader {
   readFiles(isoPath: string, innerPaths: readonly string[]): Promise<Map<string, Uint8Array>>;
 }
 
-function sevenZipSucceeded(result: RunResult): boolean {
-  return result.exitCode === 0 || result.exitCode === 1;
-}
+const SEVEN_ZIP_OK_EXIT_CODES = [0, 1] as const;
 
 export function createIsoReader(deps: { sevenZip: string; run: ProcessRunner; tempRoot: string }): SevenZipIsoReader {
   const run = async (args: string[], signal?: AbortSignal): Promise<RunResult> => {
     const result = await deps.run({ command: deps.sevenZip, args, signal });
-    if (result.aborted) throw new AppError('internal', '7z was cancelled');
-    if (!sevenZipSucceeded(result))
-      throw new AppError(
-        'upstream',
-        `7z ${args[0]} failed (exit ${result.exitCode}): ${result.stderr.trim().slice(-500)}`,
-      );
+    assertRanOk(result, {
+      label: '7z',
+      failureLabel: `7z ${args[0]}`,
+      okExitCodes: SEVEN_ZIP_OK_EXIT_CODES,
+      failureCode: 'upstream',
+      stderrTail: 500,
+    });
     return result;
   };
 
