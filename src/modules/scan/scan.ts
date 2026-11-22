@@ -150,7 +150,14 @@ export function createScanService(ctx: AppContext): ScanService {
       const { result, probed } = await engine.evaluatePath(
         entry.path,
         { trigger: 'scan' },
-        { entry, rules, force: options.force, forceProbe: options.force, signal: options.signal },
+        {
+          entry,
+          rules,
+          root: { library, rootId: root.id, rootPath: root.path },
+          force: options.force,
+          forceProbe: options.force,
+          signal: options.signal,
+        },
       );
       const saved = row ?? storedAt(entry.path);
       if (saved) seen.add(saved.id);

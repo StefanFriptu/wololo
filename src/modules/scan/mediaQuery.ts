@@ -165,12 +165,24 @@ export function mediaAfterPathQuery(
     .all();
 }
 
+const mediaKeyCondition = (where: { id: number } | { path: string }) =>
+  'id' in where ? eq(mediaFiles.id, where.id) : eq(mediaFiles.path, where.path);
+
 export function mediaDetailQuery(db: Db, where: { id: number } | { path: string }) {
   return db
     .select(DETAIL_COLUMNS)
     .from(mediaFiles)
     .leftJoin(libraryRoots, eq(libraryRoots.id, mediaFiles.rootId))
-    .where('id' in where ? eq(mediaFiles.id, where.id) : eq(mediaFiles.path, where.path))
+    .where(mediaKeyCondition(where))
+    .get();
+}
+
+export function mediaSummaryQuery(db: Db, where: { id: number } | { path: string }): MediaSummaryRow | undefined {
+  return db
+    .select(SUMMARY_COLUMNS)
+    .from(mediaFiles)
+    .leftJoin(libraryRoots, eq(libraryRoots.id, mediaFiles.rootId))
+    .where(mediaKeyCondition(where))
     .get();
 }
 

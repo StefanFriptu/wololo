@@ -12,7 +12,7 @@ import type { JobsService } from '../../contracts/jobs.ts';
 import type { ProbeService } from '../../contracts/probe-scan.ts';
 import type { RulesService } from '../../contracts/rules-ffmpeg.ts';
 import { AppError } from '../../core/errors.ts';
-import { jobs as jobsTable, mediaFiles } from '../../db/schema.ts';
+import { jobs as jobsTable, libraryRoots, mediaFiles } from '../../db/schema.ts';
 import type { Library } from '../../shared/domain.ts';
 import type { EventMap, ScanStats } from '../../shared/events.ts';
 import { removable } from './scan.ts';
@@ -267,6 +267,37 @@ test('scan - a probe failure is retried by the next scan', async () => {
   const second = await runScan();
   expect(second.stats).toMatchObject({ filesProbed: 1, probeErrors: 0 });
   expect(rowOf(path)).toMatchObject({ status: 'compatible', rulesKey: '1@1|replace|' });
+});
+
+test('scan - evaluates files with the walked root instead of looking it up per file', async () => {
+  fakeProbe();
+  const lookups = spyOn(t.ctx.services.libraries, 'findRootForPath');
+  const a = file('A/A.mkv');
+  const b = file('B/B.mkv');
+
+  const finished = await runScan();
+
+  expect(finished.stats).toMatchObject({ filesNew: 2, filesProbed: 2, probeErrors: 0 });
+  expect(lookups).not.toHaveBeenCalled();
+  expect(rowOf(a)).toMatchObject({ libraryId: library.id, rootId: library.roots[0]?.id, status: 'compatible' });
+  expect(rowOf(b)).toMatchObject({ libraryId: library.id, rootId: library.roots[0]?.id, status: 'compatible' });
+});
+
+test('scan - a root removed mid-scan stops being evaluated instead of failing the insert', async () => {
+  let removedRoot = false;
+  fakeProbe(async () => {
+    if (removedRoot) return;
+    removedRoot = true;
+    t.ctx.db.delete(libraryRoots).where(eq(libraryRoots.libraryId, library.id)).run();
+  });
+  file('A/A.mkv');
+  const second = file('B/B.mkv');
+
+  const finished = await runScan();
+
+  expect(probeCalls).toBe(1);
+  expect(rowOf(second)).toBeUndefined();
+  expect(finished.stats.probeErrors).toBe(0);
 });
 
 test('scan - cancelling during a probe leaves the row for the next scan', async () => {
