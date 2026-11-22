@@ -4,6 +4,7 @@ import type { PlexService } from '../../contracts/integrations.ts';
 import { AppError, errorMessage, notFound } from '../../core/errors.ts';
 import type { PlexConnectionRow } from '../../db/schema.ts';
 import type { PlexConnection, PlexSection, PlexServer } from '../../shared/domain.ts';
+import { trimTrailingSlashes } from '../../shared/trimTrailingSlashes.ts';
 import type { IntegrationDeps } from './arr-service.ts';
 import { createPlexServerClient, createPlexTvClient, PLEX_PRODUCT, type PlexResource } from './plex-client.ts';
 import { findSectionForPath, isPublishedConnection, pickConnection, toSession } from './plex-select.ts';
@@ -59,7 +60,7 @@ export function plexAuthUrl(appUrl: string, { clientIdentifier, code }: { client
     code,
     'context[device][product]': PLEX_PRODUCT,
   });
-  return `${appUrl.replace(/\/+$/, '')}/auth#?${params.toString()}`;
+  return `${trimTrailingSlashes(appUrl)}/auth#?${params.toString()}`;
 }
 
 export function createPlexService(ctx: AppContext, deps: PlexDeps = {}): PlexService {

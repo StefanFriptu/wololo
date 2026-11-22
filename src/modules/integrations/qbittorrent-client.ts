@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AppError } from '../../core/errors.ts';
+import { trimTrailingSlashes } from '../../shared/trimTrailingSlashes.ts';
 import { type FetchLike, type UpstreamRequest, type UpstreamText, upstreamStatus, upstreamText } from './upstream.ts';
 
 const SERVICE = 'qBittorrent';
@@ -50,7 +51,7 @@ function sessionCookie(response: Response): string | null {
 
 /** qBittorrent Web API v2 with cookie login; a 403 (expired session) logs in again once. */
 export function createQbittorrentClient(options: QbittorrentOptions) {
-  const base = options.url.trim().replace(/\/+$/, '');
+  const base = trimTrailingSlashes(options.url.trim());
   let cookie: string | null = null;
   let loggedIn = false;
 

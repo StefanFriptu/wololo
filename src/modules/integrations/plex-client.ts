@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { trimTrailingSlashes } from '../../shared/trimTrailingSlashes.ts';
 import { type FetchLike, upstreamFetch, upstreamJson } from './upstream.ts';
 
 export const PLEX_PRODUCT = 'Wololo';
@@ -92,7 +93,7 @@ function plexHeaders(clientIdentifier: string, token?: string | null): Record<st
 
 /** plex.tv account API v2 (PIN sign-in, user, resources). */
 export function createPlexTvClient(options: ClientBase & { baseUrl: string }) {
-  const base = options.baseUrl.replace(/\/+$/, '');
+  const base = trimTrailingSlashes(options.baseUrl);
   const get = <T extends z.ZodType>(path: string, schema: T, init: { method?: string; token?: string } = {}) =>
     upstreamJson(
       {
@@ -115,7 +116,7 @@ export function createPlexTvClient(options: ClientBase & { baseUrl: string }) {
 
 /** One Plex Media Server, authenticated with X-Plex-Token. */
 export function createPlexServerClient(options: ClientBase & { url: string; token: string | null }) {
-  const base = options.url.replace(/\/+$/, '');
+  const base = trimTrailingSlashes(options.url);
   const request = { service: 'Plex', fetch: options.fetch, timeoutMs: options.timeoutMs };
   const headers = plexHeaders(options.clientIdentifier, options.token);
   const get = <T extends z.ZodType>(path: string, schema: T) =>
