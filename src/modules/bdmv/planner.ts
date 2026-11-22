@@ -2,7 +2,7 @@ import { basename, dirname, resolve, sep } from 'node:path';
 import { and, desc, eq } from 'drizzle-orm';
 import type { AppContext } from '../../app/context.ts';
 import type { BdmvEvaluation, MplsPlaylist } from '../../contracts/bdmv.ts';
-import { AppError, errorMessage } from '../../core/errors.ts';
+import { AppError, errorMessage, notFound } from '../../core/errors.ts';
 import type { Logger } from '../../core/logger.ts';
 import { jobs, libraryRoots, type MediaFileRow, mediaFiles } from '../../db/schema.ts';
 import type { BdmvPlaylistView } from '../../shared/api-types.ts';
@@ -38,7 +38,7 @@ export function loadDiscRow(ctx: AppContext, mediaFileId: number): DiscRow {
     .leftJoin(libraryRoots, eq(libraryRoots.id, mediaFiles.rootId))
     .where(eq(mediaFiles.id, mediaFileId))
     .get();
-  if (!found) throw new AppError('not_found', `media file ${mediaFileId} not found`);
+  if (!found) throw notFound(`media file ${mediaFileId}`);
   const { row } = found;
   if (row.kind !== 'bdmv' && row.kind !== 'iso')
     throw new AppError('unprocessable', `media file ${mediaFileId} is not a Blu-ray disc (${row.kind})`);
