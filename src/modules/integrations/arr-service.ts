@@ -8,6 +8,7 @@ import { normalizeLanguage } from '../../shared/language.ts';
 import { trimTrailingSlashes } from '../../shared/trimTrailingSlashes.ts';
 import { type ArrClient, type ArrLookupMovie, createArrClient } from './arr-client.ts';
 import { createArrSetup } from './arr-setup.ts';
+import type { IntegrationDeps } from './IntegrationDeps.ts';
 import { movieMatchScore, parseTitleYear } from './movie-match.ts';
 import { isSameOrInside } from './path-map.ts';
 import { pathTranslator } from './path-mapping-service.ts';
@@ -20,7 +21,6 @@ import {
   listArrInstances,
   updateArrInstance,
 } from './store.ts';
-import type { FetchLike } from './upstream.ts';
 
 const INDEX_TTL_MS = 5 * 60_000;
 const INDEX_MISS_REFRESH_MS = 30_000;
@@ -31,12 +31,6 @@ const MAX_FAILURE_BACKOFF_MS = 10 * 60_000;
 const MAX_CACHED_SERIES = 256;
 const MAX_LOOKUP_RESULTS = 20;
 const TMDB_TERM = /^tmdb:\s*(\d+)$/i;
-
-export interface IntegrationDeps {
-  fetch?: FetchLike;
-  timeoutMs?: number;
-  now?: () => number;
-}
 
 interface IndexEntry {
   itemId: number;

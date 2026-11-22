@@ -7,7 +7,7 @@ import type { DownloadClientInput } from '../../shared/api-types.ts';
 import type { ArrInstance, DownloadClientConnection, TorrentInfo } from '../../shared/domain.ts';
 import { trimTrailingSlashes } from '../../shared/trimTrailingSlashes.ts';
 import { type ArrClient, createArrClient } from './arr-client.ts';
-import type { IntegrationDeps } from './arr-service.ts';
+import type { IntegrationDeps } from './IntegrationDeps.ts';
 import { isSameOrInside, joinRemotePath } from './path-map.ts';
 import { type PathTranslator, pathTranslator } from './path-mapping-service.ts';
 import { createQbittorrentClient, type QbittorrentClient } from './qbittorrent-client.ts';
