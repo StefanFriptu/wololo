@@ -315,7 +315,7 @@ describe.skipIf(!READY)('bdmv end to end (tsMuxeR + mkvmerge + ffmpeg/libbluray)
     expect(Math.abs((audioStarts[0] ?? 0) - (audioStarts[1] ?? 0))).toBeLessThan(0.05);
     expect(result.chapters?.length).toBe(3);
     expect(request?.expectedChapterCount).toBe(3);
-    expect(Math.abs(Number(result.format.duration) - probe.durationSec)).toBeLessThan(0.5);
+    expect(Math.abs(Number(result.format.duration) - (request?.expectedDurationSec ?? 0))).toBeLessThan(0.5);
     const outputPackets = Number.parseInt(
       exec([
         'ffprobe',
