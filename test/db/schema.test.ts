@@ -28,6 +28,7 @@ describe('migrations', () => {
       'recycle_bin',
       'scheduled_tasks',
       'settings',
+      'torrent_removals',
     ]);
   });
 

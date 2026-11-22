@@ -1,7 +1,13 @@
 import { expect, test } from 'bun:test';
 import type { TorrentInfo } from '../../shared/domain.ts';
 import type { RawTorrent } from './qbittorrent-client.ts';
-import { matchTorrent, torrentContentReplaced, toTorrentInfo } from './torrent.ts';
+import {
+  matchTorrent,
+  type TorrentFileCopy,
+  torrentContentReplaced,
+  torrentConversionProgress,
+  toTorrentInfo,
+} from './torrent.ts';
 
 function raw(overrides: Partial<RawTorrent> = {}): RawTorrent {
   return {
@@ -119,4 +125,43 @@ test.each([
   ],
 ] as const)('%s', (_name, files, expected) => {
   expect(torrentContentReplaced(files, REPLACED)).toBe(expected);
+});
+
+const copy = (path: string, status: TorrentFileCopy['status'], converted = false): TorrentFileCopy => ({
+  path,
+  status,
+  converted,
+});
+
+test.each([
+  ['a converted single file', [copy('a.mkv', 'compatible', true)], { done: 1, unaccounted: [], allConverted: true }],
+  [
+    'a pack still in progress',
+    [copy('e1.mkv', 'compatible', true), copy('e2.mkv', 'needs_work'), copy('e3.mkv', 'processing')],
+    { done: 1, unaccounted: [], allConverted: false },
+  ],
+  [
+    'a pack where the rest needed no work or cannot be done',
+    [copy('e1.mkv', 'compatible', true), copy('e2.mkv', 'compatible'), copy('e3.mkv', 'blocked')],
+    { done: 3, unaccounted: [], allConverted: true },
+  ],
+  [
+    'a sample Radarr never imported keeps it',
+    [copy('a.mkv', 'compatible', true), copy('sample.mkv', null)],
+    { done: 1, unaccounted: ['sample.mkv'], allConverted: false },
+  ],
+  [
+    'a converted original known only through the recycle bin',
+    [copy('a.mkv', null, true)],
+    { done: 1, unaccounted: [], allConverted: true },
+  ],
+  ['a failed job keeps it', [copy('a.mkv', 'failed')], { done: 0, unaccounted: [], allConverted: false }],
+  [
+    'nothing converted by Wololo keeps it',
+    [copy('a.mkv', 'compatible'), copy('b.mkv', 'ignored')],
+    { done: 2, unaccounted: [], allConverted: false },
+  ],
+  ['no media files', [], { done: 0, unaccounted: [], allConverted: false }],
+] as const)('torrentConversionProgress - %s', (_name, files, expected) => {
+  expect(torrentConversionProgress(files)).toEqual({ total: files.length, ...expected });
 });

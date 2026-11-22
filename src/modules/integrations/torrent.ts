@@ -1,4 +1,4 @@
-import type { TorrentInfo } from '../../shared/domain.ts';
+import type { MediaFileStatus, TorrentInfo } from '../../shared/domain.ts';
 import { isSameOrInside, joinRemotePath } from './path-map.ts';
 import type { RawTorrent } from './qbittorrent-client.ts';
 
@@ -73,4 +73,42 @@ export function torrentContentReplaced(
     if (file.inRecycleBin || (file.importedTo != null && replacedLibraryPaths.has(file.importedTo))) replaced = true;
   }
   return replaced;
+}
+
+/** A media file of a torrent and what Wololo knows about its library copy. */
+export interface TorrentFileCopy {
+  /** Local path of the torrent's file. */
+  path: string;
+  /** Status of its library copy; null when no library copy is known. */
+  status: MediaFileStatus | null;
+  /** A completed audio job replaced its library copy (by import history or by the recycle-bin hard link). */
+  converted: boolean;
+}
+
+export interface TorrentConversionProgress {
+  total: number;
+  done: number;
+  unaccounted: readonly string[];
+  allConverted: boolean;
+}
+
+const NOTHING_LEFT_TO_DO: ReadonlySet<MediaFileStatus> = new Set(['compatible', 'ignored', 'blocked']);
+
+/**
+ * A torrent counts as converted when every media file has a library copy Wololo is done with (converted, or needing no
+ * work it can do) and at least one was converted. A file without a known library copy keeps the torrent.
+ */
+export function torrentConversionProgress(files: readonly TorrentFileCopy[]): TorrentConversionProgress {
+  const unaccounted = files.filter((file) => file.status == null && !file.converted).map((file) => file.path);
+  const done = files.filter((file) => file.converted || (file.status != null && NOTHING_LEFT_TO_DO.has(file.status)));
+  return {
+    total: files.length,
+    done: done.length,
+    unaccounted,
+    allConverted:
+      files.length > 0 &&
+      unaccounted.length === 0 &&
+      done.length === files.length &&
+      files.some((file) => file.converted),
+  };
 }

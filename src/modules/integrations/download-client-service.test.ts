@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { linkSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { eq } from 'drizzle-orm';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
 import { insertArrInstance, insertJob, insertLibrary, insertMediaFile } from '../../../test/helpers/seed.ts';
+import { eventually } from '../../../test/helpers/server.ts';
 import { stubService } from '../../../test/helpers/stubs.ts';
 import type { BdmvService } from '../../contracts/bdmv.ts';
-import { recycleBin } from '../../db/schema.ts';
+import { type MediaFileRow, mediaFiles, recycleBin, torrentRemovals } from '../../db/schema.ts';
 import type { DownloadClientInput } from '../../shared/api-types.ts';
-import type { BdmvDecision, TorrentInfo } from '../../shared/domain.ts';
+import type { BdmvDecision, MediaFileStatus, TorrentInfo } from '../../shared/domain.ts';
 import { type FakeUpstream, type RecordedRequest, startFakeUpstream } from './fake-upstream.ts';
 import { SECRET_MASK } from './secrets.ts';
 
@@ -550,4 +552,243 @@ test('downloadClient routes - save, read, test and delete', async () => {
   expect((await t.request('/api/v1/downloadclient', { method: 'DELETE' })).status).toBe(204);
   expect(await (await t.request('/api/v1/downloadclient')).json()).toBeNull();
   expect((await t.request('/api/v1/downloadclient', { method: 'PUT', body: '{"url":"nope"}' })).status).toBe(400);
+});
+
+interface PackFixture {
+  sonarr: FakeUpstream;
+  episodes: [MediaFileRow, MediaFileRow];
+}
+
+/**
+ * Sonarr imported the pack torrent /downloads/Pack (e1.mkv, e2.mkv) as two library episodes of series 9. Episode 1
+ * was converted by an audio job; episode 2 still needs work.
+ */
+async function packFixture(options: { libraryInDownloads?: boolean } = {}): Promise<PackFixture> {
+  const downloads = join(t.dir, 'downloads');
+  const library = join(t.dir, 'tv');
+  mkdirSync(join(downloads, 'Pack'), { recursive: true });
+  mkdirSync(join(library, 'Show'), { recursive: true });
+  for (const episode of ['e1', 'e2']) writeFileSync(join(downloads, 'Pack', `${episode}.mkv`), episode);
+  const imported = (episode: string) => ({
+    eventType: 'downloadFolderImported',
+    downloadId: 'PACK',
+    data: { droppedPath: `/downloads/Pack/${episode}.mkv`, importedPath: `/tv/Show/${episode}.mkv` },
+  });
+  const sonarr = startFakeUpstream({
+    'GET /api/v3/history/series': () => [imported('e1'), imported('e2')],
+    'GET /api/v3/history': (request) => ({
+      page: 1,
+      pageSize: 250,
+      totalRecords: 2,
+      records: request.query.get('downloadId') === 'PACK' ? [imported('e1'), imported('e2')] : [],
+    }),
+  });
+  const instanceId = insertArrInstance(t.ctx.db, { kind: 'sonarr', name: 'Sonarr', url: sonarr.url });
+  await t.ctx.services.downloadClient.save(input({ removeWhenGoalMet: false }));
+  await t.ctx.services.pathMappings.create({ scope: 'qbittorrent', remotePath: '/downloads', localPath: downloads });
+  for (const [remotePath, localPath] of [
+    ['/downloads', downloads],
+    ['/tv', library],
+  ] as const) {
+    await t.ctx.services.pathMappings.create({ scope: 'sonarr', instanceId, remotePath, localPath });
+  }
+  const lib = insertLibrary(t.ctx.db, { roots: options.libraryInDownloads ? [library, downloads] : [library] });
+  const episode = (name: string, status: MediaFileStatus) =>
+    insertMediaFile(t.ctx.db, lib, {
+      path: join(library, 'Show', `${name}.mkv`),
+      status,
+      arrInstanceId: instanceId,
+      arrKind: 'sonarr',
+      arrItemId: 9,
+    });
+  const episodes: [MediaFileRow, MediaFileRow] = [episode('e1', 'compatible'), episode('e2', 'needs_work')];
+  insertJob(t.ctx.db, { sourcePath: episodes[0].path, type: 'audio', state: 'completed', mediaFileId: episodes[0].id });
+  if (options.libraryInDownloads) insertMediaFile(t.ctx.db, lib, { path: join(downloads, 'Pack', 'e2.mkv') });
+  torrents = [torrent('pack', '/downloads/Pack', { ratio: 1 }, ['Pack/e1.mkv', 'Pack/e2.mkv'])];
+  return { sonarr, episodes };
+}
+
+function convert(row: MediaFileRow) {
+  t.ctx.db.update(mediaFiles).set({ status: 'compatible' }).where(eq(mediaFiles.id, row.id)).run();
+  return insertJob(t.ctx.db, { sourcePath: row.path, type: 'audio', state: 'completed', mediaFileId: row.id });
+}
+
+function removalRow(hash = 'pack') {
+  return t.ctx.db.select().from(torrentRemovals).where(eq(torrentRemovals.hash, hash)).get();
+}
+
+test('downloadClient.torrentForMedia - finds the pack through the Sonarr series history', async () => {
+  const { sonarr, episodes } = await packFixture();
+  try {
+    const found = await t.ctx.services.downloadClient.torrentForMedia(episodes[1].id);
+    expect(found).toEqual({
+      hash: 'pack',
+      name: 'pack',
+      goalMet: false,
+      total: 2,
+      done: 1,
+      unaccounted: [],
+      allConverted: false,
+      removal: null,
+    });
+    expect(sonarr.requestsTo('GET /api/v3/history/series')[0]?.query.get('seriesId')).toBe('9');
+  } finally {
+    sonarr.stop();
+  }
+});
+
+test('downloadClient.torrentForMedia - null without a client or a matching import', async () => {
+  const { sonarr, episodes } = await packFixture();
+  try {
+    torrents = [];
+    expect(await t.ctx.services.downloadClient.torrentForMedia(episodes[0].id)).toBeNull();
+    await t.ctx.services.downloadClient.remove();
+    expect(await t.ctx.services.downloadClient.torrentForMedia(episodes[0].id)).toBeNull();
+    await expect(t.ctx.services.downloadClient.requestRemoval(episodes[0].id, 'converted')).rejects.toMatchObject({
+      code: 'not_found',
+    });
+  } finally {
+    sonarr.stop();
+  }
+});
+
+test('downloadClient.processRemovals - waits for every file of the torrent, then removes it with its files', async () => {
+  const { sonarr, episodes } = await packFixture();
+  try {
+    const removal = await t.ctx.services.downloadClient.requestRemoval(episodes[0].id, 'converted');
+    expect(removal).toMatchObject({ hash: 'pack', condition: 'converted', state: 'pending' });
+    await t.ctx.services.downloadClient.processRemovals();
+    expect(removalRow()).toMatchObject({ state: 'pending', reason: '1 of 2 file(s) converted' });
+    expect(deletedHashes()).toEqual([]);
+
+    const job = convert(episodes[1]);
+    t.ctx.events.emit('job.finished', { job: await t.ctx.services.jobs.get(job.id), state: 'completed' });
+    await eventually(
+      'torrent removed',
+      async () => removalRow()?.state,
+      (state) => state === 'removed',
+      5_000,
+    );
+    const deleted = qbit.requestsTo('POST /api/v2/torrents/delete').map((request) => new URLSearchParams(request.body));
+    expect(deleted.map((form) => [form.get('hashes'), form.get('deleteFiles')])).toEqual([['pack', 'true']]);
+  } finally {
+    sonarr.stop();
+  }
+});
+
+test('downloadClient.processRemovals - converted_and_seeded also waits for the seeding goal', async () => {
+  const { sonarr, episodes } = await packFixture();
+  try {
+    convert(episodes[1]);
+    await t.ctx.services.downloadClient.requestRemoval(episodes[0].id, 'converted_and_seeded');
+    await t.ctx.services.downloadClient.processRemovals();
+    expect(removalRow()).toMatchObject({ state: 'pending', reason: 'waiting for the seeding goal' });
+
+    torrents = [torrent('pack', '/downloads/Pack', { ratio: 3 }, ['Pack/e1.mkv', 'Pack/e2.mkv'])];
+    expect(await t.ctx.services.downloadClient.checkSeedingGoals()).toContain(
+      '1 torrent removal(s) checked: 1 removed',
+    );
+    expect(deletedHashes()).toEqual(['pack']);
+  } finally {
+    sonarr.stop();
+  }
+});
+
+test('downloadClient.processRemovals - a restore since the request cancels it', async () => {
+  const { sonarr, episodes } = await packFixture();
+  try {
+    await t.ctx.services.downloadClient.requestRemoval(episodes[0].id, 'converted');
+    convert(episodes[1]);
+    t.ctx.db
+      .insert(recycleBin)
+      .values({
+        originalPath: episodes[0].path,
+        recyclePath: join(t.dir, 'tv', '.wololo-recycle', 'e1.mkv'),
+        sizeBytes: 1,
+        mediaFileId: episodes[0].id,
+        expiresAt: '2999-01-01T00:00:00.000Z',
+        restoredAt: '2999-01-01T00:00:00.000Z',
+      })
+      .run();
+    await t.ctx.services.downloadClient.processRemovals();
+    expect(removalRow()).toMatchObject({ state: 'cancelled', reason: expect.stringContaining('restored') });
+    expect(deletedHashes()).toEqual([]);
+  } finally {
+    sonarr.stop();
+  }
+});
+
+test('downloadClient.processRemovals - never removes a torrent holding a library file', async () => {
+  const { sonarr, episodes } = await packFixture({ libraryInDownloads: true });
+  try {
+    convert(episodes[1]);
+    await t.ctx.services.downloadClient.requestRemoval(episodes[0].id, 'converted');
+    await t.ctx.services.downloadClient.processRemovals();
+    expect(removalRow()).toMatchObject({ state: 'pending', reason: 'a library file lives inside this torrent' });
+    expect(deletedHashes()).toEqual([]);
+  } finally {
+    sonarr.stop();
+  }
+});
+
+test('downloadClient.processRemovals - a torrent gone from qBittorrent ends as missing', async () => {
+  const { sonarr, episodes } = await packFixture();
+  try {
+    await t.ctx.services.downloadClient.requestRemoval(episodes[0].id, 'converted');
+    torrents = [];
+    await t.ctx.services.downloadClient.processRemovals();
+    expect(removalRow()).toMatchObject({ state: 'missing' });
+  } finally {
+    sonarr.stop();
+  }
+});
+
+test('downloadClient.processRemovals - overlapping runs remove a torrent once', async () => {
+  const { sonarr, episodes } = await packFixture();
+  try {
+    convert(episodes[1]);
+    await t.ctx.services.downloadClient.requestRemoval(episodes[0].id, 'converted');
+    await Promise.all([
+      t.ctx.services.downloadClient.processRemovals(),
+      t.ctx.services.downloadClient.processRemovals(),
+    ]);
+    expect(deletedHashes()).toEqual(['pack']);
+  } finally {
+    sonarr.stop();
+  }
+});
+
+test('downloadClient.cancelRemoval - keeps the torrent; a new request starts over', async () => {
+  const { sonarr, episodes } = await packFixture();
+  try {
+    await t.ctx.services.downloadClient.requestRemoval(episodes[0].id, 'converted');
+    await t.ctx.services.downloadClient.cancelRemoval(episodes[1].id);
+    expect(removalRow()).toMatchObject({ state: 'cancelled', reason: 'kept' });
+    await t.ctx.services.downloadClient.requestRemoval(episodes[1].id, 'converted_and_seeded');
+    expect(removalRow()).toMatchObject({ state: 'pending', condition: 'converted_and_seeded', finishedAt: null });
+  } finally {
+    sonarr.stop();
+  }
+});
+
+test('downloadClient routes - torrent lookup, removal request and validation', async () => {
+  const { sonarr, episodes } = await packFixture();
+  try {
+    const found = await t.request(`/api/v1/media/${episodes[0].id}/torrent`);
+    expect(await found.json()).toMatchObject({ hash: 'pack', done: 1, total: 2 });
+    const bad = await t.request(`/api/v1/media/${episodes[0].id}/torrent/removal`, {
+      method: 'PUT',
+      body: '{"condition":"now"}',
+    });
+    expect(bad.status).toBe(400);
+    const saved = await t.request(`/api/v1/media/${episodes[0].id}/torrent/removal`, {
+      method: 'PUT',
+      body: '{"condition":"converted"}',
+    });
+    expect(await saved.json()).toMatchObject({ hash: 'pack', state: 'pending' });
+    const kept = await t.request(`/api/v1/media/${episodes[0].id}/torrent/removal`, { method: 'DELETE' });
+    expect(kept.status).toBe(204);
+  } finally {
+    sonarr.stop();
+  }
 });

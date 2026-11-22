@@ -57,6 +57,13 @@
       "when": 1795380676824,
       "tag": "0007_foreign_key_and_filter_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1795384713872,
+      "tag": "0008_far_hitman",
+      "breakpoints": true
     }
   ]
 }

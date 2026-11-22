@@ -84,14 +84,14 @@ Shared test helpers (`test/helpers/`): `context.ts` (`createTestContext`: temp c
 
 ### Table ownership (writes)
 
-| Table                                                                              | Writer                |
-| ---------------------------------------------------------------------------------- | --------------------- |
-| `settings`                                                                         | core (`ctx.settings`) |
-| `libraries`, `library_roots`, `library_profiles`, `media_files`, `scheduled_tasks` | probe-scan            |
-| `device_profiles`                                                                  | rules-ffmpeg          |
-| `jobs`, `job_history`, `recycle_bin`                                               | jobs                  |
-| `arr_instances`, `plex_connection`, `download_client`, `path_mappings`             | integrations          |
-| `bdmv_decisions`                                                                   | bdmv                  |
+| Table                                                                                      | Writer                |
+| ------------------------------------------------------------------------------------------ | --------------------- |
+| `settings`                                                                                 | core (`ctx.settings`) |
+| `libraries`, `library_roots`, `library_profiles`, `media_files`, `scheduled_tasks`         | probe-scan            |
+| `device_profiles`                                                                          | rules-ffmpeg          |
+| `jobs`, `job_history`, `recycle_bin`                                                       | jobs                  |
+| `arr_instances`, `plex_connection`, `download_client`, `path_mappings`, `torrent_removals` | integrations          |
+| `bdmv_decisions`                                                                           | bdmv                  |
 
 Other modules change these rows only through the owner's service (e.g. jobs calls `media.setStatus` / `media.recordJobResult`; profiles calls `media.invalidateRules`; jobs stores the user's queue pause through `ctx.settings.update({ processing: { paused } })`).
 
@@ -165,6 +165,17 @@ importing: arr.addMovie when Radarr does not know the movie -> arr.importMovieFo
 Track identity across tools: ffprobe on `bluray:` gives each stream's PID (`MediaStream.streamId`), the MPLS stream table gives the same PIDs in disc order, `mkvmerge -J` maps PID -> mkvmerge track id. The rules engine plans on the `bluray:` probe, so every planned stream maps to an mkvmerge track. Audio side files carry `delayMs` (audio start - video start) and are muxed with `--sync`.
 
 The source disc is never modified. When its torrent meets the seeding goal and `settings.bdmv.deleteSourceWhenSeeded` is on, `downloadClient.checkSeedingGoals` asks `bdmv.offerSourceDeletion` (torrent paths already local), which creates a `delete_source` decision; only a confirmed decision deletes the source (`bdmv.deleteSource`).
+
+Torrent removal on request (file page, **Process now**): the dialog shows the file's torrent from `GET /api/v1/media/:id/torrent` (Radarr `history/movie` or Sonarr `history/series` for the file's item -> the import whose `importedPath` is the file, or the source path of its completed audio job -> its `downloadId` among qBittorrent's torrents). A choice other than keep is stored per torrent hash in `torrent_removals` (`PUT .../torrent/removal`), never per file, so a season pack has one request whichever episode asked. `downloadClient.processRemovals` runs after each completed audio job (`job.finished`) and in `seeding_check`, one run at a time:
+
+```
+pending request -> torrent gone from qBittorrent: missing
+  -> a file of it restored since the request: cancelled
+  -> a torrent file is a media_files row: keep (reason)
+  -> torrentConversionProgress not allConverted (a file needs work, failed, or has no library copy): keep (reason)
+  -> converted_and_seeded and not goalMet: keep (reason)
+  -> deleteTorrent(hash, deleteFiles: true) -> removed
+```
 
 Recycle-bin restore ("undo for a bad rule"): moves the current file (e.g. the new `.mkv`) into the bin and the original back, moves the media row back to the original path and sets it `ignored` ("restored from recycle bin") so the next scan does not convert it again, notifies Radarr/Sonarr/Plex and writes a `restored` history entry.
 
@@ -291,6 +302,9 @@ Calling a route (web): `api('GET /api/v1/jobs/:id', { params: { id } })` from `w
 | `PUT /api/v1/downloadclient`                | integrations | apikey | body `DownloadClientInput`                        | `DownloadClientConnection`         |
 | `DELETE /api/v1/downloadclient`             | integrations | apikey | -                                                 | 204 No Content                     |
 | `POST /api/v1/downloadclient/test`          | integrations | apikey | body `DownloadClientInput`                        | `ConnectionTestResult`             |
+| `GET /api/v1/media/:id/torrent`             | integrations | apikey | params `IdParams`                                 | `MediaTorrent \| null`             |
+| `PUT /api/v1/media/:id/torrent/removal`     | integrations | apikey | params `IdParams`, body `TorrentRemovalRequest`   | `TorrentRemoval`                   |
+| `DELETE /api/v1/media/:id/torrent/removal`  | integrations | apikey | params `IdParams`                                 | 204 No Content                     |
 | `GET /api/v1/pathmappings`                  | integrations | apikey | -                                                 | `PathMapping[]`                    |
 | `POST /api/v1/pathmappings`                 | integrations | apikey | body `PathMappingInput`                           | `PathMapping`                      |
 | `PUT /api/v1/pathmappings/:id`              | integrations | apikey | params `IdParams`, body `PathMappingInput`        | `PathMapping`                      |
@@ -329,14 +343,14 @@ Publish with `ctx.events.emit(name, payload)`; subscribe with `ctx.events.on(nam
 
 Defined by `TaskName` (`src/shared/domain.ts`) with defaults in `DEFAULT_TASK_INTERVALS` (`src/contracts/probe-scan.ts`). The scheduler (probe-scan) owns the table and dispatches through services:
 
-| Task                | Default | Handler                              |
-| ------------------- | ------- | ------------------------------------ |
-| `library_scan`      | 360 min | `scan.start({})`                     |
-| `recycle_bin_purge` | 60 min  | `recycleBin.purge({})`               |
-| `seeding_check`     | 30 min  | `downloadClient.checkSeedingGoals()` |
-| `backup`            | 7 days  | `system.createBackup('scheduled')`   |
-| `housekeeping`      | 1 day   | `jobs.housekeeping()`                |
-| `log_cleanup`       | 1 day   | `system.cleanupLogs()`               |
+| Task                | Default | Handler                                                                                  |
+| ------------------- | ------- | ---------------------------------------------------------------------------------------- |
+| `library_scan`      | 360 min | `scan.start({})`                                                                         |
+| `recycle_bin_purge` | 60 min  | `recycleBin.purge({})`                                                                   |
+| `seeding_check`     | 30 min  | `downloadClient.checkSeedingGoals()`, then `processRemovals()` when a request is pending |
+| `backup`            | 7 days  | `system.createBackup('scheduled')`                                                       |
+| `housekeeping`      | 1 day   | `jobs.housekeeping()`                                                                    |
+| `log_cleanup`       | 1 day   | `system.cleanupLogs()`                                                                   |
 
 ## Conventions
 
