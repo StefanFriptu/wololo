@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { auth } from '#lib/api/auth.svelte.ts';
   import { api } from '#lib/api/client.ts';
+  import { attemptOk } from '#lib/attempt.ts';
   import ArrForm from '#lib/components/ArrForm.svelte';
   import CopyButton from '#lib/components/CopyButton.svelte';
   import Icon from '#lib/components/Icon.svelte';
@@ -61,13 +62,11 @@
   });
 
   async function addMapping(instance: ArrInstance, mapping: PathMappingInput): Promise<void> {
-    try {
-      await api('POST /api/v1/pathmappings', { body: mapping });
-      toasts.success(`Mapped ${mapping.remotePath} → ${mapping.localPath}`);
-      await checkOne(instance);
-    } catch (error) {
-      toasts.error(error);
-    }
+    const mapped = await attemptOk(
+      () => api('POST /api/v1/pathmappings', { body: mapping }),
+      `Mapped ${mapping.remotePath} → ${mapping.localPath}`,
+    );
+    if (mapped) await checkOne(instance);
   }
 
   function add(kind: ArrKind): void {

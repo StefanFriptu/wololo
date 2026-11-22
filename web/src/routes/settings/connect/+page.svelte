@@ -13,8 +13,7 @@
   import { Resource } from '#lib/resource.svelte.ts';
   import { runtimeConfig } from '#lib/runtime.ts';
   import { type ArrInstance, type ArrKind, type PathMapping, webhookUrl } from '#lib/shared.ts';
-  import { attempt } from '#lib/attempt.ts';
-  import { toasts } from '#lib/toast.svelte.ts';
+  import { attempt, attemptOk } from '#lib/attempt.ts';
   import { isLoopbackAddress, loadWebhookAddress, saveWebhookAddress } from '#lib/webhookAddress.ts';
 
   const instances = new Resource((signal) => api('GET /api/v1/arr', { signal }));
@@ -59,24 +58,14 @@
 
   async function removeArr(instance: ArrInstance): Promise<void> {
     if (!confirm(`Remove ${instance.name}? Its webhook stops working.`)) return;
-    try {
-      await api('DELETE /api/v1/arr/:id', { params: { id: instance.id } });
-      toasts.success(`${instance.name} removed`);
-      await instances.load({ silent: true });
-    } catch (error) {
-      toasts.error(error);
-    }
+    const removed = await attemptOk(() => api('DELETE /api/v1/arr/:id', { params: { id: instance.id } }), `${instance.name} removed`);
+    if (removed) await instances.load({ silent: true });
   }
 
   async function removeMapping(mapping: PathMapping): Promise<void> {
     if (!confirm(`Remove the mapping ${mapping.remotePath} → ${mapping.localPath}?`)) return;
-    try {
-      await api('DELETE /api/v1/pathmappings/:id', { params: { id: mapping.id } });
-      toasts.success('Path mapping removed');
-      await mappings.load({ silent: true });
-    } catch (error) {
-      toasts.error(error);
-    }
+    const removed = await attemptOk(() => api('DELETE /api/v1/pathmappings/:id', { params: { id: mapping.id } }), 'Path mapping removed');
+    if (removed) await mappings.load({ silent: true });
   }
 
   async function setRescan(rescanArr: boolean): Promise<void> {

@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { beforeNavigate } from '$app/navigation';
   import { api } from '#lib/api/client.ts';
+  import { attempt, attemptOk } from '#lib/attempt.ts';
   import { errorMessage } from '#lib/api/errorMessage.ts';
   import { live } from '#lib/api/live.svelte.ts';
   import Async from '#lib/components/Async.svelte';
@@ -17,7 +18,6 @@
   import { Resource } from '#lib/resource.svelte.ts';
   import { diffSettings } from '#lib/settings/diffSettings.ts';
   import { IMPORT_ACTIONS, type ArrQualityProfile, type ArrRootFolder, type ImportAction, type Library, type Settings } from '#lib/shared.ts';
-  import { toasts } from '#lib/toast.svelte.ts';
 
   const libraries = new Resource((signal) => api('GET /api/v1/libraries', { signal }));
   const profiles = new Resource((signal) => api('GET /api/v1/profiles', { signal }));
@@ -110,27 +110,17 @@
 
   async function removeLibrary(library: Library): Promise<void> {
     if (!confirm(`Remove the library "${library.name}"? Its files on disk are not touched; Wololo forgets their status.`)) return;
-    try {
-      await api('DELETE /api/v1/libraries/:id', { params: { id: library.id } });
-      toasts.success('Library removed');
-      await libraries.load({ silent: true });
-    } catch (error) {
-      toasts.error(error);
-    }
+    const removed = await attemptOk(() => api('DELETE /api/v1/libraries/:id', { params: { id: library.id } }), 'Library removed');
+    if (removed) await libraries.load({ silent: true });
   }
 
   async function save(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     if (!patch) return;
     saving = true;
-    try {
-      settings.set(await api('PUT /api/v1/settings', { body: patch }));
-      toasts.success('Settings saved');
-    } catch (error) {
-      toasts.error(error);
-    } finally {
-      saving = false;
-    }
+    const saved = await attempt(() => api('PUT /api/v1/settings', { body: patch }), 'Settings saved');
+    if (saved) settings.set(saved);
+    saving = false;
   }
 
   function discard(): void {

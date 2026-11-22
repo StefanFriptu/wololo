@@ -13,3 +13,11 @@ export async function attempt<T>(
     return undefined;
   }
 }
+
+export async function attemptOk(action: () => Promise<unknown>, success?: string): Promise<boolean> {
+  const done = await attempt(async () => {
+    await action();
+    return true;
+  }, success);
+  return done === true;
+}

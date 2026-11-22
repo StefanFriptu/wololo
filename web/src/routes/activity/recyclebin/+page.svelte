@@ -14,8 +14,7 @@
   import { href } from '#lib/paths.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import type { RecycleBinEntry } from '#lib/shared.ts';
-  import { attempt } from '#lib/attempt.ts';
-  import { toasts } from '#lib/toast.svelte.ts';
+  import { attempt, attemptOk } from '#lib/attempt.ts';
 
   const PAGE_SIZE = 50;
 
@@ -51,12 +50,7 @@
   async function remove(entry: RecycleBinEntry): Promise<void> {
     if (!confirm(`Delete the kept original of ${entry.originalPath} now? This cannot be undone.`)) return;
     busy = true;
-    try {
-      await api('DELETE /api/v1/recyclebin/:id', { params: { id: entry.id } });
-      toasts.success('Deleted');
-    } catch (error) {
-      toasts.error(error);
-    }
+    await attemptOk(() => api('DELETE /api/v1/recyclebin/:id', { params: { id: entry.id } }), 'Deleted');
     await entries.load({ silent: true });
     busy = false;
   }

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { api } from '#lib/api/client.ts';
+  import { attemptOk } from '#lib/attempt.ts';
   import { testConnection } from '#lib/api/testConnection.ts';
   import ConnectionTestAlert from '#lib/components/ConnectionTestAlert.svelte';
   import Modal from '#lib/components/Modal.svelte';
@@ -12,7 +13,6 @@
     type ConnectionTestResult,
     trimTrailingSlashes,
   } from '#lib/shared.ts';
-  import { toasts } from '#lib/toast.svelte.ts';
 
   let {
     open = $bindable(false),
@@ -63,17 +63,14 @@
     event.preventDefault();
     const body = { ...withKey(), name: form.name.trim(), url: trimTrailingSlashes(form.url.trim()) };
     busy = true;
-    try {
+    const saved = await attemptOk(async () => {
       if (instance) await api('PUT /api/v1/arr/:id', { params: { id: instance.id }, body });
       else await api('POST /api/v1/arr', { body });
-      toasts.success(`${label} saved`);
-      open = false;
-      onsaved();
-    } catch (error) {
-      toasts.error(error);
-    } finally {
-      busy = false;
-    }
+    }, `${label} saved`);
+    busy = false;
+    if (!saved) return;
+    open = false;
+    onsaved();
   }
 </script>
 
