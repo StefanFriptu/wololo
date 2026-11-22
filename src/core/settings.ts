@@ -6,6 +6,7 @@ import {
   DEFAULT_SETTINGS,
   type DeepPartial,
   IMPORT_ACTIONS,
+  SETUP_STEPS,
   type Settings,
   type SettingsSection,
 } from '../shared/settings.ts';
@@ -60,6 +61,11 @@ export const settingsSchema = z.object({
   }),
   notifications: z.object({
     rescanArr: z.boolean(),
+  }),
+  setup: z.object({
+    completed: z.boolean(),
+    step: z.enum(SETUP_STEPS),
+    dismissed: z.boolean(),
   }),
 }) satisfies z.ZodType<Settings>;
 
