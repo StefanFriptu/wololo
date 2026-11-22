@@ -4,9 +4,9 @@ import type { AppContext } from '../../app/context.ts';
 import type { DownloadClientService } from '../../contracts/integrations.ts';
 import { AppError, errorMessage } from '../../core/errors.ts';
 import type { DownloadClientInput } from '../../shared/api-types.ts';
-import type { DownloadClientConnection, TorrentInfo } from '../../shared/domain.ts';
+import type { ArrInstance, DownloadClientConnection, TorrentInfo } from '../../shared/domain.ts';
 import { trimTrailingSlashes } from '../../shared/trimTrailingSlashes.ts';
-import { createArrClient } from './arr-client.ts';
+import { type ArrClient, createArrClient } from './arr-client.ts';
 import type { IntegrationDeps } from './arr-service.ts';
 import { isSameOrInside, joinRemotePath } from './path-map.ts';
 import { type PathTranslator, pathTranslator } from './path-mapping-service.ts';
@@ -21,6 +21,12 @@ import {
 } from './seeding-query.ts';
 import { deleteDownloadClient, getDownloadClient, listArrInstances, saveDownloadClient } from './store.ts';
 import { matchTorrent, type TorrentMediaFile, torrentContentReplaced, toTorrentInfo } from './torrent.ts';
+
+interface ArrSource {
+  instance: ArrInstance;
+  client: ArrClient;
+  paths: PathTranslator;
+}
 
 function masked(connection: DownloadClientConnection): DownloadClientConnection {
   return { ...connection, password: maskSecret(connection.password) };
@@ -89,28 +95,58 @@ export function createDownloadClientService(ctx: AppContext, deps: IntegrationDe
     return names.map((name) => posix.normalize(paths.toLocal(joinRemotePath(remote.savePath, name))));
   };
 
+  const arrSources = (): ArrSource[] =>
+    listArrInstances(ctx.db)
+      .filter((instance) => instance.enabled)
+      .map((instance) => ({
+        instance,
+        client: createArrClient({ ...instance, fetch: deps.fetch, timeoutMs: deps.timeoutMs }),
+        paths: pathTranslator(ctx.db, { scope: instance.kind, instanceId: instance.id }),
+      }));
+
   /** Radarr/Sonarr import history of a download: local dropped path -> local imported library path. */
-  const importsOf = async (hash: string): Promise<Map<string, string>> => {
+  const importsOf = async (hash: string, sources: readonly ArrSource[]): Promise<Map<string, string>> => {
+    const settled = await Promise.allSettled(
+      sources.map(async ({ client, paths }) =>
+        (await client.imports(hash)).map(
+          (record) =>
+            [
+              posix.normalize(paths.toLocal(record.droppedPath)),
+              posix.normalize(paths.toLocal(record.importedPath)),
+            ] as const,
+        ),
+      ),
+    );
     const imports = new Map<string, string>();
-    for (const instance of listArrInstances(ctx.db).filter((candidate) => candidate.enabled)) {
-      try {
-        const client = createArrClient({ ...instance, fetch: deps.fetch, timeoutMs: deps.timeoutMs });
-        const records = await client.imports(hash);
-        const { toLocal } = pathTranslator(ctx.db, { scope: instance.kind, instanceId: instance.id });
-        for (const record of records) {
-          imports.set(posix.normalize(toLocal(record.droppedPath)), posix.normalize(toLocal(record.importedPath)));
-        }
-      } catch (error) {
-        log.warn('import history unavailable; relying on the recycle bin', { instance: instance.name, hash, error });
+    sources.forEach(({ instance }, position) => {
+      const result = settled[position];
+      if (result?.status === 'rejected') {
+        log.warn('import history unavailable; relying on the recycle bin', {
+          instance: instance.name,
+          hash,
+          error: result.reason,
+        });
+        return;
       }
-    }
+      for (const [dropped, imported] of result?.value ?? []) imports.set(dropped, imported);
+    });
     return imports;
   };
 
   /** True when every media file of the torrent has a library copy and at least one was replaced by an audio job. */
-  const contentReplaced = async (files: readonly string[], hash: string, bin: ReadonlySet<string>) => {
+  const contentReplaced = async ({
+    files,
+    hash,
+    bin,
+    sources,
+  }: {
+    files: readonly string[];
+    hash: string;
+    bin: ReadonlySet<string>;
+    sources: readonly ArrSource[];
+  }) => {
     const extensions = ctx.settings.section('media').extensions;
-    const imports = await importsOf(hash);
+    const imports = await importsOf(hash, sources);
     const media: TorrentMediaFile[] = [];
     for (const path of files) {
       if (!extensions.includes(extname(path).toLowerCase())) continue;
@@ -178,6 +214,7 @@ export function createDownloadClientService(ctx: AppContext, deps: IntegrationDe
       let removed = 0;
       let offered = 0;
       const paths = qbittorrentPaths();
+      const sources = arrSources();
       for (const remote of met) {
         const torrent = withLocalPaths(remote, paths);
         try {
@@ -192,7 +229,7 @@ export function createDownloadClientService(ctx: AppContext, deps: IntegrationDe
             }
           }
           if (rows.length > 0 || !connection.removeWhenGoalMet) continue;
-          if (!(await contentReplaced(files, remote.hash, bin))) continue;
+          if (!(await contentReplaced({ files, hash: remote.hash, bin, sources }))) continue;
           await deleteTorrent(torrent.hash, true);
           removed += 1;
         } catch (error) {
