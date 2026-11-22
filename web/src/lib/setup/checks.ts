@@ -1,5 +1,6 @@
 import { api } from '#lib/api/client.ts';
 import { errorMessage } from '#lib/api/errorMessage.ts';
+import { testConnection } from '#lib/api/testConnection.ts';
 import { formatBytes } from '#lib/format/formatBytes.ts';
 import { PATH_SCOPE_LABELS } from '#lib/labels.ts';
 import type { ArrInstance, PathMappingInput } from '#lib/shared.ts';
@@ -138,8 +139,8 @@ export async function arrChecks(instance: ArrInstance, options: ArrCheckOptions)
   const service = PATH_SCOPE_LABELS[instance.kind];
   const prefix = `arr-${instance.id}`;
   const params = { id: instance.id };
-  const connection = await api('POST /api/v1/arr/test', { body: { ...instance, id: instance.id } }).catch(
-    (error: unknown) => ({ ok: false, message: errorMessage(error), version: null }),
+  const connection = await testConnection(() =>
+    api('POST /api/v1/arr/test', { body: { ...instance, id: instance.id } }),
   );
   if (!connection.ok) {
     return {

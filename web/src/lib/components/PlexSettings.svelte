@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { api } from '#lib/api/client.ts';
   import { errorMessage } from '#lib/api/errorMessage.ts';
+  import { testConnection } from '#lib/api/testConnection.ts';
   import Async from '#lib/components/Async.svelte';
   import Badge from '#lib/components/Badge.svelte';
   import Icon from '#lib/components/Icon.svelte';
@@ -107,13 +108,8 @@
 
   async function runTest(): Promise<void> {
     busy = true;
-    try {
-      test = await api('POST /api/v1/plex/test');
-    } catch (error) {
-      test = { ok: false, message: errorMessage(error), version: null };
-    } finally {
-      busy = false;
-    }
+    test = await testConnection(() => api('POST /api/v1/plex/test'));
+    busy = false;
   }
 
   async function signOut(): Promise<void> {
