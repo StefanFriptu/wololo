@@ -488,6 +488,7 @@ export function createBdmvExecutor(
       await run.ensureFreeSpace(plan.rootFolderPath, plan.extractBytes + plan.estimatedOutputBytes);
       const library = await services.libraries.get(disc.row.libraryId);
       const profile = await services.rules.effectiveProfileForLibrary(disc.row.libraryId);
+      if (!profile) throw new AppError('unprocessable', 'the library has no player profile');
       const of = plan.titles.length;
 
       const work: TitleWork[] = [];

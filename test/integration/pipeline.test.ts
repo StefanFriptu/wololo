@@ -13,6 +13,7 @@ import type {
   QueueResponse,
 } from '../../src/shared/api-types.ts';
 import type { HistoryEntry, JobSummary, Library, RecycleBinEntry } from '../../src/shared/domain.ts';
+import { createTemplateProfile } from '../helpers/createTemplateProfile.ts';
 import { ensureFixtureCopy, FIXTURES, type FixtureSpec, ffmpegAvailable } from '../helpers/fixtures.ts';
 
 const EAC3_MP4: FixtureSpec = {
@@ -106,9 +107,8 @@ describe.skipIf(!ffmpegAvailable())('real services: dry run -> processing -> rec
     rmSync(dir, { recursive: true, force: true });
   });
 
-  test('step 1 - startup seeded the Samsung Tizen profile and every scheduled task, the queue reports dry run', async () => {
-    const profiles = await call<ProfileWithUsage[]>('/api/v1/profiles');
-    expect(profiles.map((profile) => profile.name)).toEqual(['Samsung Tizen']);
+  test('step 1 - startup seeded no profile but every scheduled task, the queue reports dry run', async () => {
+    expect(await call<ProfileWithUsage[]>('/api/v1/profiles')).toEqual([]);
     expect((await call<{ name: string }[]>('/api/v1/system/tasks')).map((task) => task.name).sort()).toEqual([
       'backup',
       'housekeeping',
@@ -121,7 +121,7 @@ describe.skipIf(!ffmpegAvailable())('real services: dry run -> processing -> rec
   });
 
   test('step 2 - a dry-run scan indexes media but never temp files or the recycle bin, and blocks unplayable video', async () => {
-    const tizen = (await call<ProfileWithUsage[]>('/api/v1/profiles'))[0] as ProfileWithUsage;
+    const tizen = await createTemplateProfile(call, 'basic', 'Living room TV');
     const hevcOnly = await call<ProfileWithUsage>('/api/v1/profiles', {
       method: 'POST',
       json: {
@@ -131,7 +131,7 @@ describe.skipIf(!ffmpegAvailable())('real services: dry run -> processing -> rec
     });
     await call<Library>('/api/v1/libraries', {
       method: 'POST',
-      json: { name: 'Movies', kind: 'movies', roots: [movies], profileIds: [] },
+      json: { name: 'Movies', kind: 'movies', roots: [movies], profileIds: [tizen.id] },
     });
     await call<Library>('/api/v1/libraries', {
       method: 'POST',

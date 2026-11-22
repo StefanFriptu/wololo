@@ -327,7 +327,7 @@ test('scan - queueing a large backlog lets the event loop run between slices', a
   } satisfies ProbeService;
   await runScan();
   expect(paths.map(statusOf).every((status) => status === 'needs_work')).toBe(true);
-  t.ctx.settings.update({ processing: { enabled: true } });
+  t.ctx.settings.update({ processing: { enabled: true }, media: { importAction: 'convert_strictest' } });
   const queue = jobs.service.enqueue;
   let queuedBeforeYield: number | null = null;
   t.ctx.services.jobs = stubService<JobsService>('jobs', {
@@ -394,7 +394,7 @@ describe.skipIf(!ffmpegAvailable())('scans over fixture files', () => {
   test('scan - with processing enabled, the dry-run backlog is queued once', async () => {
     await runScan();
     expect(jobs.calls).toEqual([]);
-    t.ctx.settings.update({ processing: { enabled: true } });
+    t.ctx.settings.update({ processing: { enabled: true }, media: { importAction: 'convert_strictest' } });
     const backlog = await runScan();
     expect(backlog.stats.jobsQueued).toBe(1);
     expect(jobs.calls).toMatchObject([{ type: 'audio', trigger: 'scan', title: 'Movie A (2020)' }]);
@@ -404,7 +404,7 @@ describe.skipIf(!ffmpegAvailable())('scans over fixture files', () => {
   });
 
   test('scan - new needs-work files are queued directly when processing is enabled', async () => {
-    t.ctx.settings.update({ processing: { enabled: true } });
+    t.ctx.settings.update({ processing: { enabled: true }, media: { importAction: 'convert_strictest' } });
     const finished = await runScan();
     expect(finished.stats.jobsQueued).toBe(1);
   });

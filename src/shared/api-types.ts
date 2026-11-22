@@ -36,6 +36,7 @@ import type {
   PlexSection,
   PlexServer,
   ProbeResult,
+  ProfileResult,
   QueueState,
   RecycleBinEntry,
   ScheduledTaskInfo,
@@ -236,6 +237,8 @@ export interface MediaFileSummary {
   subtitleLanguages: string[];
   failingCodecs: string[];
   planAction: PlanAction | null;
+  /** One entry per profile assigned to the library; null for discs and files not evaluated since profiles changed. */
+  profileResults: ProfileResult[] | null;
   lastJobId: number | null;
   probedAt: IsoDateTime | null;
   updatedAt: IsoDateTime;
@@ -364,6 +367,17 @@ export interface ProfileWithUsage extends DeviceProfile {
   libraryIds: number[];
 }
 
+export const PROFILE_TEMPLATE_IDS = ['basic', 'dolby', 'lossless', 'everything', 'blank'] as const;
+export type ProfileTemplateId = (typeof PROFILE_TEMPLATE_IDS)[number];
+
+/** A starting point for a new profile, named after the formats it plays, never after a device. */
+export interface ProfileTemplate {
+  id: ProfileTemplateId;
+  name: string;
+  description: string;
+  definition: DeviceProfileDefinition;
+}
+
 // ---------- jobs / queue / history / recycle bin ----------
 
 export interface QueueResponse {
@@ -388,6 +402,8 @@ export interface EnqueueRequest {
   priority?: number;
   /** Queue even when the file was evaluated as compatible (re-run rules). */
   force?: boolean;
+  /** Convert for this assigned profile alone; omitted = the strictest combination of the library's profiles. */
+  profileId?: number;
 }
 
 /** Same meaning as the MediaQuery fields of the same name, so a bulk action queues exactly what the list shows. */
@@ -735,6 +751,7 @@ export interface ApiRoutes {
   'GET /api/v1/profiles': { response: ProfileWithUsage[] };
   'POST /api/v1/profiles': { body: ProfileInput; response: ProfileWithUsage };
   'GET /api/v1/profiles/codecs': { response: CodecCatalog };
+  'GET /api/v1/profiles/templates': { response: ProfileTemplate[] };
   'GET /api/v1/profiles/:id': { params: IdParams; response: ProfileWithUsage };
   'PUT /api/v1/profiles/:id': {
     params: IdParams;

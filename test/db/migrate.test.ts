@@ -186,19 +186,22 @@ test('runMigrations - a failed upgrade deletes no pre-migration copy', () => {
   for (const name of OLD_COPIES) expect(left).toContain(name);
 });
 
+const REAL_MIGRATIONS = join(import.meta.dir, '..', '..', 'drizzle');
+
+/** A migrations folder holding the real migrations up to and including tag. */
+function upTo(tag: string): string {
+  const journal = JSON.parse(readFileSync(join(REAL_MIGRATIONS, 'meta', '_journal.json'), 'utf8')) as {
+    entries: { tag: string; when: number }[];
+  };
+  const entries = journal.entries.slice(0, journal.entries.findIndex((entry) => entry.tag === tag) + 1);
+  return migrationsFolder(
+    entries.map((entry) => ({ ...entry, sql: readFileSync(join(REAL_MIGRATIONS, `${entry.tag}.sql`), 'utf8') })),
+  );
+}
+
 test('0002_media_stream_codecs - backfills the codec of every probed stream from the stored probe', () => {
   const work = mkdtempSync(join(tmpdir(), 'wololo-db-'));
   dirs.push(work);
-  const real = join(import.meta.dir, '..', '..', 'drizzle');
-  const journal = JSON.parse(readFileSync(join(real, 'meta', '_journal.json'), 'utf8')) as {
-    entries: { tag: string; when: number }[];
-  };
-  const upTo = (tag: string) => {
-    const entries = journal.entries.slice(0, journal.entries.findIndex((entry) => entry.tag === tag) + 1);
-    return migrationsFolder(
-      entries.map((entry) => ({ ...entry, sql: readFileSync(join(real, `${entry.tag}.sql`), 'utf8') })),
-    );
-  };
   const handle = openDatabase(join(work, 'wololo.db'));
   try {
     runMigrations(handle, { migrationsFolder: upTo('0001_windy_masque') });
@@ -221,6 +224,54 @@ test('0002_media_stream_codecs - backfills the codec of every probed stream from
       { path: '/m/a.mkv', stream_codecs: '["h264","dts","hdmv_pgs_subtitle"]' },
       { path: '/m/b.mkv', stream_codecs: '[]' },
     ]);
+  } finally {
+    handle.close();
+  }
+});
+
+test('0006_player_profiles - libraries relying on the builtin default keep it; the builtin flag goes away', () => {
+  const work = mkdtempSync(join(tmpdir(), 'wololo-db-'));
+  dirs.push(work);
+  const handle = openDatabase(join(work, 'wololo.db'));
+  try {
+    runMigrations(handle, { migrationsFolder: upTo('0005_job_reference_indexes') });
+    handle.sqlite.run(
+      "INSERT INTO device_profiles (id, name, builtin, definition) VALUES (1, 'Samsung Tizen', 1, '{}'), (2, 'Bedroom', 0, '{}')",
+    );
+    handle.sqlite.run("INSERT INTO libraries (id, name) VALUES (1, 'Movies'), (2, 'Kids')");
+    handle.sqlite.run('INSERT INTO library_profiles (library_id, profile_id) VALUES (2, 2)');
+    handle.sqlite.run("INSERT INTO library_roots (id, library_id, path) VALUES (1, 1, '/m')");
+    handle.sqlite.run(
+      "INSERT INTO media_files (library_id, root_id, path, size_bytes, mtime_ms, rules_key) VALUES (1, 1, '/m/a.mkv', 1, 1, 'r1;p1@1')",
+    );
+
+    runMigrations(handle, { migrationsFolder: upTo('0006_player_profiles') });
+
+    expect(
+      handle.sqlite.query('SELECT library_id, profile_id FROM library_profiles ORDER BY library_id').all(),
+    ).toEqual([
+      { library_id: 1, profile_id: 1 },
+      { library_id: 2, profile_id: 2 },
+    ]);
+    const columns = handle.sqlite.query('SELECT name FROM pragma_table_info(?)').all('device_profiles');
+    expect(columns.map((column) => (column as { name: string }).name)).not.toContain('builtin');
+    expect(handle.sqlite.query('SELECT rules_key, profile_results FROM media_files').all()).toEqual([
+      { rules_key: null, profile_results: null },
+    ]);
+  } finally {
+    handle.close();
+  }
+});
+
+test('0006_player_profiles - a fresh database starts with no profile and no assignment', () => {
+  const work = mkdtempSync(join(tmpdir(), 'wololo-db-'));
+  dirs.push(work);
+  const handle = openDatabase(join(work, 'wololo.db'));
+  try {
+    runMigrations(handle, { migrationsFolder: REAL_MIGRATIONS });
+    handle.sqlite.run("INSERT INTO libraries (id, name) VALUES (1, 'Movies')");
+    expect(handle.sqlite.query('SELECT COUNT(*) AS total FROM device_profiles').get()).toEqual({ total: 0 });
+    expect(handle.sqlite.query('SELECT COUNT(*) AS total FROM library_profiles').get()).toEqual({ total: 0 });
   } finally {
     handle.close();
   }

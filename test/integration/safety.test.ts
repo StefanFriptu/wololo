@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { type FakeUpstream, startFakeUpstream } from '../../src/modules/integrations/fake-upstream.ts';
 import type { MediaFileSummary, Paginated, QueueResponse } from '../../src/shared/api-types.ts';
 import type { JobDetail, JobSummary, RecycleBinEntry } from '../../src/shared/domain.ts';
+import { createTemplateProfile } from '../helpers/createTemplateProfile.ts';
 import { ensureFixtureCopy, type FixtureSpec, ffmpegAvailable } from '../helpers/fixtures.ts';
 import {
   type ApiCall,
@@ -171,11 +172,15 @@ describe.skipIf(!ffmpegAvailable() || process.platform === 'win32')(
         }),
       });
       await boot();
-      await call('/api/v1/settings', { method: 'PUT', json: { processing: { enabled: true } } });
+      await call('/api/v1/settings', {
+        method: 'PUT',
+        json: { processing: { enabled: true }, media: { importAction: 'convert_strictest' } },
+      });
+      const tv = await createTemplateProfile(call, 'basic', 'Living room TV');
       movieLibraryId = (
         await call<{ id: number }>('/api/v1/libraries', {
           method: 'POST',
-          json: { name: 'Movies', kind: 'movies', roots: [movies], profileIds: [] },
+          json: { name: 'Movies', kind: 'movies', roots: [movies], profileIds: [tv.id] },
         })
       ).id;
       await call('/api/v1/plex', { method: 'PUT', json: { serverUrl: plex.url, serverToken: 'token', enabled: true } });

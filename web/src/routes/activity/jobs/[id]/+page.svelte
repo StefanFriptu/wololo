@@ -40,6 +40,7 @@
 
   const id = $derived(Number(page.params.id));
   const job = new Resource((signal) => api('GET /api/v1/jobs/:id', { params: { id }, signal }));
+  const profiles = new Resource((signal) => api('GET /api/v1/profiles', { signal }));
   const log: Resource<JobLogChunk> = new Resource(async (signal) => {
     const shown = log.data;
     const chunk = await api('GET /api/v1/jobs/:id/log/tail', { params: { id }, query: { from: shown?.end }, signal });
@@ -61,6 +62,10 @@
   });
 
   syncJobLog(job, log, LOG_POLL_MS);
+
+  $effect(() => {
+    if (job.data?.profileId != null) untrack(() => profiles.load({ silent: profiles.data !== undefined }));
+  });
 
   $effect(() => {
     void log.data;
@@ -165,6 +170,10 @@
         {#if data.outputPath}
           <dt>Output</dt>
           <dd class="break">{data.outputPath}</dd>
+        {/if}
+        {#if data.profileId !== null}
+          <dt>Converted for</dt>
+          <dd>{profiles.data?.find((profile) => profile.id === data.profileId)?.name ?? `Profile #${data.profileId}`}</dd>
         {/if}
         <dt>Trigger</dt>
         <dd>{JOB_TRIGGER_LABELS[data.trigger]}{attemptNumber(data) > 1 ? ` · attempt ${attemptNumber(data)}` : ''}</dd>

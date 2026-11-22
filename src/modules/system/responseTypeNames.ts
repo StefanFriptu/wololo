@@ -45,6 +45,7 @@ export const RESPONSE_TYPE_NAMES: { readonly [K in RouteKey]: string } = {
   'GET /api/v1/profiles': 'ProfileWithUsage[]',
   'POST /api/v1/profiles': 'ProfileWithUsage',
   'GET /api/v1/profiles/codecs': 'CodecCatalog',
+  'GET /api/v1/profiles/templates': 'ProfileTemplate[]',
   'GET /api/v1/profiles/:id': 'ProfileWithUsage',
   'PUT /api/v1/profiles/:id': 'ProfileWithUsage',
   'DELETE /api/v1/profiles/:id': 'NoContent',

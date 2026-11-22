@@ -208,19 +208,17 @@ export function createDryRunService(ctx: AppContext): DryRunService {
 
   const byProfile = async (libraries: Library[], profileId: number | undefined): Promise<DryRunProfileRow[]> => {
     try {
-      const fallback = libraries.some((library) => library.profileIds.length === 0)
-        ? await ctx.services.profiles.getDefault()
-        : null;
       const assigned = [...new Set(libraries.flatMap((library) => library.profileIds))];
-      const wanted =
-        profileId === undefined ? [...new Set([...assigned, ...(fallback ? [fallback.id] : [])])] : [profileId];
+      const wanted = profileId === undefined ? assigned : [profileId];
       const rows: DryRunProfileRow[] = [];
       for (const id of wanted.sort((a, b) => a - b)) {
-        const profile = id === fallback?.id ? fallback : await ctx.services.profiles.get(id);
-        const scope = libraries.filter(
-          (library) => library.profileIds.includes(id) || (library.profileIds.length === 0 && id === fallback?.id),
+        const profile = await ctx.services.profiles.get(id);
+        rows.push(
+          await profileRow(
+            profile,
+            libraries.filter((library) => library.profileIds.includes(id)),
+          ),
         );
-        rows.push(await profileRow(profile, scope));
       }
       return rows;
     } catch (error) {

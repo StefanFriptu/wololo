@@ -17,6 +17,7 @@ export function registerRulesFfmpegRoutes(app: ApiApp, ctx: AppContext): void {
     body: ProfileInputSchema,
   });
   route(app, 'GET /api/v1/profiles/codecs', () => profiles().codecCatalog());
+  route(app, 'GET /api/v1/profiles/templates', () => profiles().templates());
   route(app, 'GET /api/v1/profiles/:id', (c) => profiles().get(parseId(c)), { params: idParamSchema });
   route(
     app,

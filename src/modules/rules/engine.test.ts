@@ -11,8 +11,8 @@ import type {
   OtherStream,
   PlannedStream,
 } from '../../shared/domain.ts';
-import { samsungTizenDefinition } from '../profiles/defaults.ts';
-import { codecAllowed, computeRulesKey, planConversion, resolveEffectiveProfile } from './engine.ts';
+import { templateDefinition } from '../profiles/profileTemplates.ts';
+import { checkProfiles, codecAllowed, computeRulesKey, planConversion, resolveEffectiveProfile } from './engine.ts';
 
 const LIBRARY: LibraryRuleSettings = {
   mode: 'replace',
@@ -28,7 +28,6 @@ function deviceProfile(id: number, definition: DeviceProfileDefinition, version 
     name: `profile ${id}`,
     description: '',
     version,
-    builtin: id === 1,
     definition,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -36,11 +35,11 @@ function deviceProfile(id: number, definition: DeviceProfileDefinition, version 
 }
 
 function withAudio(audio: Partial<DeviceProfileDefinition['audio']>): DeviceProfileDefinition {
-  const base = samsungTizenDefinition();
+  const base = templateDefinition('basic');
   return { ...base, audio: { ...base.audio, ...audio } };
 }
 
-const TIZEN = resolveEffectiveProfile([deviceProfile(1, samsungTizenDefinition())]);
+const TIZEN = resolveEffectiveProfile([deviceProfile(1, templateDefinition('basic'))]);
 
 interface PlanOptions {
   library?: Partial<LibraryRuleSettings>;
@@ -752,7 +751,7 @@ test('planConversion - filled language tags count for the keep-list filter', () 
 test('planConversion - video outside the profile blocks the plan', () => {
   const profile = resolveEffectiveProfile([
     deviceProfile(2, {
-      ...samsungTizenDefinition(),
+      ...templateDefinition('basic'),
       video: { allowedCodecs: ['h264', 'hevc'], dolbyVision: 'drop_hdr10' },
     }),
   ]);
@@ -840,7 +839,7 @@ test('planConversion - is pure: identical input gives identical output', () => {
 });
 
 test('resolveEffectiveProfile - one profile keeps its definition', () => {
-  const definition = samsungTizenDefinition();
+  const definition = templateDefinition('basic');
   const result = resolveEffectiveProfile([deviceProfile(1, definition, 3)]);
   expect(result).toEqual({ profileIds: [1], versionKey: '1@3', definition });
 });
@@ -894,7 +893,7 @@ test.each([
 });
 
 test('resolveEffectiveProfile - intersects video and subtitle codecs', () => {
-  const base = samsungTizenDefinition();
+  const base = templateDefinition('basic');
   const strict: DeviceProfileDefinition = {
     ...base,
     video: { allowedCodecs: ['h264', 'hevc', 'av1'], dolbyVision: 'drop_hdr10' },
@@ -913,7 +912,10 @@ test('resolveEffectiveProfile - falls back to a target codec every profile allow
 
 test('resolveEffectiveProfile - strictest profile is what the engine applies', () => {
   const stereoOnly = withAudio({ maxChannels: 2 });
-  const profile = resolveEffectiveProfile([deviceProfile(1, samsungTizenDefinition()), deviceProfile(2, stereoOnly)]);
+  const profile = resolveEffectiveProfile([
+    deviceProfile(1, templateDefinition('basic')),
+    deviceProfile(2, stereoOnly),
+  ]);
   const result = plan([audioStream({ codec: 'dts', channels: 6 })], { profile });
   expect(onlyEncode(result)).toMatchObject({ channels: 2, bitrateKbps: 448 });
 });
@@ -982,4 +984,60 @@ test.each([
 
 test('computeRulesKey - changes with the profile version', () => {
   expect(computeRulesKey({ ...TIZEN, versionKey: '1@2' }, LIBRARY)).not.toBe(computeRulesKey(TIZEN, LIBRARY));
+});
+
+test('checkProfiles - one result per profile: the plan action alone and the streams it cannot decode', () => {
+  const probe = probeResult([
+    videoStream({ index: 0, codec: 'h264' }),
+    audioStream({ index: 1, codec: 'dts', channels: 6, language: 'eng' }),
+    audioStream({ index: 2, codec: 'ac3', channels: 2, language: 'eng', title: 'Commentary' }),
+    subtitleStream({ index: 3, codec: 'hdmv_pgs_subtitle', language: 'eng' }),
+  ]);
+  const everything = deviceProfile(2, templateDefinition('everything'));
+  const results = checkProfiles({
+    probe,
+    profiles: [deviceProfile(1, templateDefinition('basic')), everything],
+    library: LIBRARY,
+    originalLanguage: 'eng',
+  });
+  expect(results).toEqual([
+    { profileId: 1, action: 'convert', failingCodecs: ['dts'], failingStreams: [1, 3] },
+    { profileId: 2, action: 'skip', failingCodecs: [], failingStreams: [3] },
+  ]);
+});
+
+test('checkProfiles - a compatible track of the same programme lets the file play despite a failing one', () => {
+  const probe = probeResult([
+    videoStream({ index: 0, codec: 'hevc' }),
+    audioStream({ index: 1, codec: 'truehd', channels: 8, language: 'eng' }),
+    audioStream({ index: 2, codec: 'ac3', channels: 6, language: 'eng' }),
+  ]);
+  const [result] = checkProfiles({
+    probe,
+    profiles: [deviceProfile(1, templateDefinition('basic'))],
+    library: { ...LIBRARY, mode: 'keep_both' },
+    originalLanguage: 'eng',
+  });
+  expect(result?.failingStreams).toEqual([1]);
+  expect(result?.action).not.toBe('convert');
+});
+
+test('checkProfiles - video outside the profile blocks that profile only', () => {
+  const probe = probeResult([videoStream({ index: 0, codec: 'vp8' }), audioStream({ index: 1, codec: 'aac' })]);
+  const vp8 = withAudio({});
+  vp8.video.allowedCodecs.push('vp8');
+  const results = checkProfiles({
+    probe,
+    profiles: [deviceProfile(1, templateDefinition('basic')), deviceProfile(2, vp8)],
+    library: LIBRARY,
+    originalLanguage: null,
+  });
+  expect(results.map((result) => [result.profileId, result.action, result.failingStreams])).toEqual([
+    [1, 'blocked', [0]],
+    [2, 'skip', []],
+  ]);
+});
+
+test('checkProfiles - no profiles, no results', () => {
+  expect(checkProfiles({ probe: probeResult([]), profiles: [], library: LIBRARY, originalLanguage: null })).toEqual([]);
 });

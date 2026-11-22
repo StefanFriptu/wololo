@@ -3,16 +3,17 @@ import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
-import { insertJob, insertLibrary, insertMediaFile } from '../../../test/helpers/seed.ts';
+import { insertJob, insertLibrary, insertMediaFile, insertProfile } from '../../../test/helpers/seed.ts';
 import { stubService } from '../../../test/helpers/stubs.ts';
 import type { BdmvService } from '../../contracts/bdmv.ts';
 import type { PlexService } from '../../contracts/integrations.ts';
 import type { JobExecutor, JobOutcome } from '../../contracts/jobs.ts';
 import { AppError, type ErrorCode } from '../../core/errors.ts';
-import { jobHistory, mediaFiles, recycleBin } from '../../db/schema.ts';
+import { jobHistory, libraryProfiles, mediaFiles, recycleBin } from '../../db/schema.ts';
 import type { MediaFileDetail } from '../../shared/api-types.ts';
 import type { BdmvJobPlan, ConversionPlan, JobState, MediaFileStatus, QueueState } from '../../shared/domain.ts';
 import type { DeepPartial, Settings } from '../../shared/settings.ts';
+import { templateDefinition } from '../profiles/profileTemplates.ts';
 import { createJobsService } from './index.ts';
 import { getJobRow, updateJobRow } from './jobQueries.ts';
 import { type MediaRecorder, mediaDetail, recordingMediaService, waitForEvent } from './test-support.ts';
@@ -178,6 +179,28 @@ test('enqueueMany - ids: queues needs_work rows, skips others with a reason, for
   const forced = await t.ctx.services.jobs.enqueueMany({ mediaFileIds: [compatible], force: true, priority: 5 });
   expect(forced.jobs[0]).toMatchObject({ mediaFileId: compatible, priority: 5 });
   expect(getJobRow(t.ctx.db, result.jobs[1]?.id ?? 0)?.bdmvPlan).toEqual(DISC_PLAN);
+});
+
+test('enqueueMany - profileId converts files for that profile alone; discs and other libraries are handled', async () => {
+  const s = setup();
+  t = s.t;
+  const file = s.addFile('needs_work', 'file');
+  const disc = s.addFile('needs_work', 'bdmv');
+  const { libraryId } = await t.ctx.services.media.get(file);
+  const assigned = insertProfile(t.ctx.db, templateDefinition('basic'));
+  const unused = insertProfile(t.ctx.db, templateDefinition('dolby'));
+  t.ctx.db.insert(libraryProfiles).values({ libraryId, profileId: assigned }).run();
+
+  expect(await t.ctx.services.jobs.enqueueMany({ mediaFileIds: [file], profileId: unused })).toEqual({
+    jobs: [],
+    skipped: [{ mediaFileId: file, reason: `profile ${unused} is not assigned to this file's library` }],
+  });
+  const result = await t.ctx.services.jobs.enqueueMany({ mediaFileIds: [file, disc], profileId: assigned });
+  expect(result.jobs.map((job) => [job.mediaFileId, job.profileId])).toEqual([
+    [file, assigned],
+    [disc, null],
+  ]);
+  expect(getJobRow(t.ctx.db, result.jobs[0]?.id ?? 0)?.plan).toBeNull();
 });
 
 test('enqueueMany - a disc without a plan is skipped with the evaluation reason', async () => {

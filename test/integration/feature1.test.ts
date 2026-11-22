@@ -10,6 +10,7 @@ import type {
   ProfileWithUsage,
 } from '../../src/shared/api-types.ts';
 import type { HistoryEntry, JobSummary, Library } from '../../src/shared/domain.ts';
+import { createTemplateProfile } from '../helpers/createTemplateProfile.ts';
 import { ensureFixtureCopy, FIXTURES, type FixtureSpec, ffmpegAvailable } from '../helpers/fixtures.ts';
 import {
   type ApiCall,
@@ -103,10 +104,11 @@ describe.skipIf(!ffmpegAvailable())('real server: Feature 1 track rules across l
       () => server.base,
       () => server.apiKey,
     );
+    const tv = await createTemplateProfile(call, 'basic', 'Living room TV');
     const library = (name: string, root: string, extra: object = {}) =>
       call<Library>('/api/v1/libraries', {
         method: 'POST',
-        json: { name, kind: 'movies', roots: [join(media, root)], profileIds: [], ...extra },
+        json: { name, kind: 'movies', roots: [join(media, root)], profileIds: [tv.id], ...extra },
       });
     await library('Movies', 'movies');
     await library('Keep', 'keep', { mode: 'keep_both' });
@@ -206,7 +208,7 @@ describe.skipIf(!ffmpegAvailable())('real server: Feature 1 track rules across l
   test('step 9 - editing a profile re-checks only the files of libraries that use it', async () => {
     await call('/api/v1/queue/pause', { method: 'POST' });
     const [tizen] = await call<ProfileWithUsage[]>('/api/v1/profiles');
-    if (!tizen) throw new Error('no default profile');
+    if (!tizen) throw new Error('no profile from the first run');
     const strict = await call<ProfileWithUsage>('/api/v1/profiles', {
       method: 'POST',
       json: { name: 'No AAC', definition: tizen.definition },

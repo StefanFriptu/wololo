@@ -2,11 +2,12 @@ import { and, eq } from 'drizzle-orm';
 import { insertJob } from '../../../test/helpers/seed.ts';
 import { stubService } from '../../../test/helpers/stubs.ts';
 import type { JobsService, NewJob } from '../../contracts/jobs.ts';
-import type { RulesService } from '../../contracts/rules-ffmpeg.ts';
+import type { RulesInput, RulesService } from '../../contracts/rules-ffmpeg.ts';
 import type { Db } from '../../db/client.ts';
 import { jobs } from '../../db/schema.ts';
 import type {
   ConversionPlan,
+  DeviceProfile,
   DeviceProfileDefinition,
   EffectiveProfile,
   JobState,
@@ -35,36 +36,57 @@ export function fakeRules(state: { versionKey: string; definition?: DeviceProfil
     versionKey: state.versionKey,
     definition: state.definition ?? TEST_DEFINITION,
   });
+  const plan = ({ probe, profile, library }: RulesInput): ConversionPlan => {
+    const failing = probe.streams
+      .filter((stream) => stream.kind === 'audio' && !profile.definition.audio.allowedCodecs.includes(stream.codec))
+      .map((stream) => stream.codec);
+    const video = probe.streams.find((stream) => stream.kind === 'video');
+    const blocked = video !== undefined && !profile.definition.video.allowedCodecs.includes(video.codec);
+    const action = blocked ? 'blocked' : failing.length > 0 ? 'convert' : 'skip';
+    return {
+      action,
+      reasons: [
+        ...failing.map((codec) => `${codec} not decoded by profile`),
+        ...(blocked && video ? [`video ${video.codec} not supported`] : []),
+      ],
+      failingCodecs: [...new Set([...failing, ...(blocked && video ? [video.codec] : [])])],
+      streams: [],
+      dropped: [],
+      lostFeatures: [],
+      videoNotes: [],
+      estimatedOutputBytes: action === 'skip' ? null : Math.round(probe.sizeBytes * 0.9),
+      rulesKey: `${profile.versionKey}|${library.mode}`,
+    };
+  };
+  const profile = (): DeviceProfile => ({
+    id: 1,
+    name: 'Test profile',
+    description: '',
+    version: 1,
+    definition: state.definition ?? TEST_DEFINITION,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  });
   return stubService<RulesService>('rules', {
     effectiveProfileForLibrary: async () => effective(),
+    profilesForLibrary: async () => [profile()],
+    checkProfiles: ({ profiles, ...input }) =>
+      profiles.map((candidate) => {
+        const result = plan({ ...input, profile: { ...effective(), definition: candidate.definition } });
+        return {
+          profileId: candidate.id,
+          action: result.action,
+          failingCodecs: result.failingCodecs,
+          failingStreams: [],
+        };
+      }),
     rulesKey: (profile, library) => `${profile.versionKey}|${library.mode}|${library.keepLanguages.join(',')}`,
     resolveProfile: (profiles) => ({
       profileIds: profiles.map((profile) => profile.id),
       versionKey: profiles.map((profile) => `${profile.id}@${profile.version}`).join('+'),
       definition: profiles[0]?.definition ?? TEST_DEFINITION,
     }),
-    plan: ({ probe, profile, library }): ConversionPlan => {
-      const failing = probe.streams
-        .filter((stream) => stream.kind === 'audio' && !profile.definition.audio.allowedCodecs.includes(stream.codec))
-        .map((stream) => stream.codec);
-      const video = probe.streams.find((stream) => stream.kind === 'video');
-      const blocked = video !== undefined && !profile.definition.video.allowedCodecs.includes(video.codec);
-      const action = blocked ? 'blocked' : failing.length > 0 ? 'convert' : 'skip';
-      return {
-        action,
-        reasons: [
-          ...failing.map((codec) => `${codec} not decoded by profile`),
-          ...(blocked && video ? [`video ${video.codec} not supported`] : []),
-        ],
-        failingCodecs: [...new Set([...failing, ...(blocked && video ? [video.codec] : [])])],
-        streams: [],
-        dropped: [],
-        lostFeatures: [],
-        videoNotes: [],
-        estimatedOutputBytes: action === 'skip' ? null : Math.round(probe.sizeBytes * 0.9),
-        rulesKey: `${profile.versionKey}|${library.mode}`,
-      };
-    },
+    plan,
   });
 }
 

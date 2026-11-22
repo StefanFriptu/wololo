@@ -31,6 +31,7 @@ function summary(id: number, path: string): MediaFileSummary {
     audioCodecs: [],
     subtitleLanguages: [],
     failingCodecs: [],
+    profileResults: null,
     planAction: null,
     lastJobId: null,
     probedAt: null,

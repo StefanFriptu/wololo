@@ -171,10 +171,21 @@ export interface DeviceProfile {
   description: string;
   /** Increments on every edit; part of each media file's rules key so edits re-check only affected files. */
   version: number;
-  builtin: boolean;
   definition: DeviceProfileDefinition;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
+}
+
+/**
+ * How one assigned profile handles a file on its own: the plan action for that profile alone (skip = plays as is) and
+ * the source stream indexes it cannot decode. A failing stream does not mean the file fails: a compatible track of the
+ * same programme may cover it.
+ */
+export interface ProfileResult {
+  profileId: number;
+  action: PlanAction;
+  failingCodecs: string[];
+  failingStreams: number[];
 }
 
 /** The single profile the rules engine applies: the strictest combination of every profile assigned to a library. */
@@ -328,6 +339,8 @@ export interface JobSummary {
   trigger: JobTrigger;
   mediaFileId: number | null;
   libraryId: number | null;
+  /** The profile an audio job converts for alone; null = the strictest combination of the library's profiles. */
+  profileId: number | null;
   sourcePath: string;
   outputPath: string | null;
   title: string;

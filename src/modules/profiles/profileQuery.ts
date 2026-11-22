@@ -1,4 +1,4 @@
-import { asc, count, eq, notInArray } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import type { Db } from '../../db/client.ts';
 import { deviceProfiles, libraries, libraryProfiles } from '../../db/schema.ts';
 import type { DeviceProfile } from '../../shared/domain.ts';
@@ -10,15 +10,6 @@ export function profileQuery(db: Db) {
       db.select().from(deviceProfiles).where(eq(deviceProfiles.id, id)).get(),
     byName: (name: string): DeviceProfile | undefined =>
       db.select().from(deviceProfiles).where(eq(deviceProfiles.name, name)).get(),
-    firstBuiltin: (): DeviceProfile | undefined =>
-      db
-        .select()
-        .from(deviceProfiles)
-        .where(eq(deviceProfiles.builtin, true))
-        .orderBy(asc(deviceProfiles.id))
-        .limit(1)
-        .get(),
-    count: (): number => db.select({ total: count() }).from(deviceProfiles).get()?.total ?? 0,
     assignments: (): { libraryId: number; profileId: number }[] =>
       db.select().from(libraryProfiles).orderBy(asc(libraryProfiles.libraryId)).all(),
     libraryIdsOf: (profileId: number): number[] =>
@@ -40,13 +31,5 @@ export function profileQuery(db: Db) {
         .orderBy(asc(deviceProfiles.id))
         .all()
         .map((row) => row.profile),
-    librariesWithoutProfiles: (): number[] =>
-      db
-        .select({ id: libraries.id })
-        .from(libraries)
-        .where(notInArray(libraries.id, db.select({ id: libraryProfiles.libraryId }).from(libraryProfiles)))
-        .orderBy(asc(libraries.id))
-        .all()
-        .map((row) => row.id),
   };
 }

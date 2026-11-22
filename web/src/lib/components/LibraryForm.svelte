@@ -187,7 +187,7 @@
             <label class="check"><input type="checkbox" value={profile.id} bind:group={form.profileIds} /> {profile.name}</label>
           {/each}
         </div>
-        <span class="hint">Files are converted for the strictest selected profile. None selected: the built-in profile.</span>
+        <span class="hint">Files are converted for the strictest selected profile. None selected: no profile, and scans skip this library.</span>
       </div>
     </div>
     <div class="field" role="group" aria-labelledby="{uid}-converted-audio-label">

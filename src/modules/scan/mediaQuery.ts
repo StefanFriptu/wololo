@@ -1,6 +1,6 @@
-import { and, asc, count, desc, eq, gt, inArray, notExists, or, type SQL, sql, sum } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, inArray, type SQL, sql, sum } from 'drizzle-orm';
 import type { Db } from '../../db/client.ts';
-import { deviceProfiles, type JobRow, jobs, libraryProfiles, libraryRoots, mediaFiles } from '../../db/schema.ts';
+import { type JobRow, jobs, libraryProfiles, libraryRoots, mediaFiles } from '../../db/schema.ts';
 import type { MediaFileSummary, MediaQuery, MediaSortKey } from '../../shared/api-types.ts';
 import type { JobSummary, MediaFileStatus } from '../../shared/domain.ts';
 import { relativeToRoot } from './paths.ts';
@@ -23,6 +23,7 @@ const SUMMARY_COLUMNS = {
   subtitleLanguages: mediaFiles.subtitleLanguages,
   failingCodecs: mediaFiles.failingCodecs,
   planAction: mediaFiles.planAction,
+  profileResults: mediaFiles.profileResults,
   rulesKey: mediaFiles.rulesKey,
   lastJobId: mediaFiles.lastJobId,
   probedAt: mediaFiles.probedAt,
@@ -65,6 +66,7 @@ export type MediaSummaryRow = {
   subtitleLanguages: string[];
   failingCodecs: string[];
   planAction: MediaFileSummary['planAction'];
+  profileResults: MediaFileSummary['profileResults'];
   rulesKey: string | null;
   lastJobId: number | null;
   probedAt: string | null;
@@ -87,6 +89,7 @@ export function toSummary(row: MediaSummaryRow): MediaFileSummary {
     subtitleLanguages: row.subtitleLanguages,
     failingCodecs: row.failingCodecs,
     planAction: row.planAction,
+    profileResults: row.profileResults,
     lastJobId: row.lastJobId,
     probedAt: row.probedAt,
     updatedAt: row.updatedAt,
@@ -94,23 +97,10 @@ export function toSummary(row: MediaSummaryRow): MediaFileSummary {
 }
 
 function profileCondition(db: Db, profileId: number): SQL {
-  const assigned = inArray(
+  return inArray(
     mediaFiles.libraryId,
     db.select({ id: libraryProfiles.libraryId }).from(libraryProfiles).where(eq(libraryProfiles.profileId, profileId)),
   );
-  const profile = db
-    .select({ builtin: deviceProfiles.builtin })
-    .from(deviceProfiles)
-    .where(eq(deviceProfiles.id, profileId))
-    .get();
-  if (!profile?.builtin) return assigned;
-  const unassigned = notExists(
-    db
-      .select({ id: libraryProfiles.libraryId })
-      .from(libraryProfiles)
-      .where(eq(libraryProfiles.libraryId, mediaFiles.libraryId)),
-  );
-  return or(assigned, unassigned) as SQL;
 }
 
 function codecListCondition(
@@ -222,6 +212,7 @@ function toJobSummary(row: JobRow): JobSummary {
     trigger: row.trigger,
     mediaFileId: row.mediaFileId,
     libraryId: row.libraryId,
+    profileId: row.profileId,
     sourcePath: row.sourcePath,
     outputPath: row.outputPath,
     title: row.title,
@@ -256,6 +247,7 @@ const STORED_ENTRY_COLUMNS = {
   mtimeMs: mediaFiles.mtimeMs,
   rulesKey: mediaFiles.rulesKey,
   status: mediaFiles.status,
+  profileResults: mediaFiles.profileResults,
 };
 
 export function storedEntryQuery(db: Db, options: { rootId: number; path: string }) {

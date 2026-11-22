@@ -1,13 +1,12 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
-import { insertLibrary, insertProfile } from '../../../test/helpers/seed.ts';
+import { insertLibrary } from '../../../test/helpers/seed.ts';
 import { stubService } from '../../../test/helpers/stubs.ts';
 import type { MediaService } from '../../contracts/probe-scan.ts';
-import { DEFAULT_PROFILE_NAME } from '../../contracts/rules-ffmpeg.ts';
 import { AppError } from '../../core/errors.ts';
 import type { ProfileInput } from '../../shared/api-types.ts';
 import type { DeviceProfileDefinition } from '../../shared/domain.ts';
-import { samsungTizenDefinition } from './defaults.ts';
+import { templateDefinition } from './profileTemplates.ts';
 
 let t: TestContext;
 let invalidations: { libraryId?: number; profileId?: number }[];
@@ -34,11 +33,11 @@ afterEach(() => t.cleanup());
 const profiles = () => t.ctx.services.profiles;
 
 function stereoOnly(): DeviceProfileDefinition {
-  const base = samsungTizenDefinition();
+  const base = templateDefinition('basic');
   return { ...base, audio: { ...base.audio, maxChannels: 2 } };
 }
 
-function input(name: string, definition = samsungTizenDefinition()): ProfileInput {
+function input(name: string, definition = templateDefinition('basic')): ProfileInput {
   return { name, description: 'bedroom TV', definition };
 }
 
@@ -51,40 +50,16 @@ async function expectAppError(promise: Promise<unknown>, code: AppError['code'])
   expect((error as AppError).code).toBe(code);
 }
 
-test('profiles.ensureDefaults - seeds the builtin Samsung Tizen profile once', async () => {
-  await profiles().ensureDefaults();
-  await profiles().ensureDefaults();
-  const list = await profiles().list();
-  expect(list).toHaveLength(1);
-  expect(list[0]).toMatchObject({
-    name: DEFAULT_PROFILE_NAME,
-    builtin: true,
-    version: 1,
-    definition: samsungTizenDefinition(),
-    libraryIds: [],
-  });
+test('profiles.list - a fresh install has no profiles', async () => {
+  expect(await profiles().list()).toEqual([]);
 });
 
-test('profiles.ensureDefaults - leaves existing profiles alone', async () => {
-  insertProfile(t.ctx.db, stereoOnly(), { name: 'custom' });
-  await profiles().ensureDefaults();
-  expect((await profiles().list()).map((profile) => profile.name)).toEqual(['custom']);
-});
-
-test('profiles.getDefault - returns the builtin profile, seeding it when the table is empty', async () => {
-  const seeded = await profiles().getDefault();
-  expect(seeded).toMatchObject({ name: DEFAULT_PROFILE_NAME, builtin: true });
-  await profiles().create(input('Other'));
-  expect((await profiles().getDefault()).id).toBe(seeded.id);
-});
-
-test('profiles.create - stores a non-builtin profile at version 1', async () => {
+test('profiles.create - stores a profile at version 1', async () => {
   const created = await profiles().create(input('Bedroom', stereoOnly()));
   expect(created).toMatchObject({
     name: 'Bedroom',
     description: 'bedroom TV',
     version: 1,
-    builtin: false,
     definition: stereoOnly(),
     libraryIds: [],
   });
@@ -130,21 +105,20 @@ test('profiles.update - renaming keeps the version and invalidates nothing', asy
 
 test('profiles.update - key order of an equal definition is not a change', async () => {
   const created = await profiles().create(input('Bedroom'));
-  const { audio, video, subtitles, container } = samsungTizenDefinition();
+  const { audio, video, subtitles, container } = templateDefinition('basic');
   const reordered = { container, subtitles, video, audio: { ...audio } };
   expect((await profiles().update(created.id, input('Bedroom', reordered))).version).toBe(1);
 });
 
-test('profiles.update - editing the builtin default also invalidates libraries without profiles', async () => {
-  const builtin = await profiles().getDefault();
+test('profiles.update - a definition change invalidates only the libraries using that profile', async () => {
+  const edited = await profiles().create(input('Edited'));
   const other = await profiles().create(input('Other'));
-  const implicit = insertLibrary(t.ctx.db, { roots: ['/data/media/movies'] });
+  insertLibrary(t.ctx.db, { roots: ['/data/media/movies'] });
   insertLibrary(t.ctx.db, { roots: ['/data/media/tv'], profileIds: [other.id] });
-  const toggledFlac = samsungTizenDefinition();
+  const toggledFlac = templateDefinition('basic');
   toggledFlac.audio.allowedCodecs.push('flac');
-  const updated = await profiles().update(builtin.id, input(DEFAULT_PROFILE_NAME, toggledFlac));
-  expect(updated).toMatchObject({ builtin: true, version: 2 });
-  expect(invalidations).toEqual([{ profileId: builtin.id }, { libraryId: implicit.libraryId }]);
+  expect((await profiles().update(edited.id, input('Edited', toggledFlac))).version).toBe(2);
+  expect(invalidations).toEqual([{ profileId: edited.id }]);
 });
 
 test('profiles.update - a failing invalidation does not undo the saved edit', async () => {
@@ -175,11 +149,6 @@ test('profiles.remove - deletes an unassigned profile', async () => {
   await expectAppError(profiles().get(created.id), 'not_found');
 });
 
-test('profiles.remove - the builtin profile is a conflict', async () => {
-  const builtin = await profiles().getDefault();
-  await expectAppError(profiles().remove(builtin.id), 'conflict');
-});
-
 test('profiles.remove - an assigned profile is a conflict', async () => {
   const created = await profiles().create(input('Bedroom'));
   insertLibrary(t.ctx.db, { profileIds: [created.id] });
@@ -188,22 +157,29 @@ test('profiles.remove - an assigned profile is a conflict', async () => {
 });
 
 test('profiles.clone - copies the definition into a new editable profile', async () => {
-  const builtin = await profiles().getDefault();
-  const clone = await profiles().clone(builtin.id, 'Living room');
+  const source = await profiles().create(input('Living room TV', stereoOnly()));
+  const clone = await profiles().clone(source.id, 'Living room');
   expect(clone).toMatchObject({
     name: 'Living room',
-    description: builtin.description,
-    builtin: false,
+    description: source.description,
     version: 1,
-    definition: builtin.definition,
+    definition: source.definition,
     libraryIds: [],
   });
-  expect(clone.id).not.toBe(builtin.id);
+  expect(clone.id).not.toBe(source.id);
 });
 
 test('profiles.clone - a taken name is a conflict', async () => {
-  const builtin = await profiles().getDefault();
-  await expectAppError(profiles().clone(builtin.id, DEFAULT_PROFILE_NAME), 'conflict');
+  const source = await profiles().create(input('Bedroom'));
+  await expectAppError(profiles().clone(source.id, 'Bedroom'), 'conflict');
+});
+
+test('profiles.templates - offers the format templates, never a device', () => {
+  expect(
+    profiles()
+      .templates()
+      .map((template) => template.name),
+  ).toEqual(['Basic', 'Dolby', 'Lossless', 'Everything', 'Blank']);
 });
 
 test('profiles.codecCatalog - lists audio, video and subtitle codecs with the pcm wildcard', () => {

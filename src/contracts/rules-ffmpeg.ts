@@ -4,7 +4,7 @@
  * planConversion, resolveEffectiveProfile, buildAudioConversionArgs and createProgressParser are PURE
  * (no I/O, no clock, no randomness) and table-tested per codec and channel layout.
  */
-import type { CodecCatalog, ProfileInput, ProfileWithUsage } from '../shared/api-types.ts';
+import type { CodecCatalog, ProfileInput, ProfileTemplate, ProfileWithUsage } from '../shared/api-types.ts';
 import type {
   ConversionPlan,
   DeviceProfile,
@@ -12,11 +12,10 @@ import type {
   EffectiveProfile,
   LibraryRuleSettings,
   ProbeResult,
+  ProfileResult,
 } from '../shared/domain.ts';
 
 // ---------- profiles ----------
-
-export const DEFAULT_PROFILE_NAME = 'Samsung Tizen';
 
 export interface ProfileService {
   list(): Promise<ProfileWithUsage[]>;
@@ -24,18 +23,12 @@ export interface ProfileService {
   create(input: ProfileInput): Promise<ProfileWithUsage>;
   /** Bumps version when the definition changes, then calls media.invalidateRules({ profileId }). */
   update(id: number, input: ProfileInput): Promise<ProfileWithUsage>;
-  /** AppError('conflict') when assigned to a library or builtin. */
+  /** AppError('conflict') when assigned to a library. */
   remove(id: number): Promise<void>;
   clone(id: number, name: string): Promise<ProfileWithUsage>;
-  /** Seeds the builtin "Samsung Tizen" profile when no profile exists. Called once at startup; idempotent. */
-  ensureDefaults(): Promise<void>;
-  /** The builtin default profile, used for libraries without assigned profiles. */
-  getDefault(): Promise<DeviceProfile>;
   codecCatalog(): CodecCatalog;
+  templates(): ProfileTemplate[];
 }
-
-/** The "Samsung Tizen" definition from the spec's trigger table. */
-export type DefaultProfileDefinition = () => DeviceProfileDefinition;
 
 // ---------- rules engine ----------
 
@@ -79,6 +72,12 @@ export type PlanConversion = (input: RulesInput) => ConversionPlan;
  */
 export type ResolveEffectiveProfile = (profiles: DeviceProfile[]) => EffectiveProfile;
 
+/**
+ * Pure. One ProfileResult per profile, in input order: the plan action for that profile alone and the source streams
+ * it cannot decode (video and subtitle codecs it does not list, audio codecs it does not allow).
+ */
+export type CheckProfiles = (input: Omit<RulesInput, 'profile'> & { profiles: DeviceProfile[] }) => ProfileResult[];
+
 /** Pure. Stable key of effective profile versions + every LibraryRuleSettings field, stored as media_files.rules_key. */
 export type ComputeRulesKey = (profile: EffectiveProfile, library: LibraryRuleSettings) => string;
 
@@ -89,8 +88,14 @@ export interface RulesService {
   plan(input: RulesInput): ConversionPlan;
   resolveProfile(profiles: DeviceProfile[]): EffectiveProfile;
   rulesKey(profile: EffectiveProfile, library: LibraryRuleSettings): string;
-  /** Loads assigned profiles of a library (or the default profile) and resolves them. */
-  effectiveProfileForLibrary(libraryId: number): Promise<EffectiveProfile>;
+  checkProfiles: CheckProfiles;
+  /** The profiles assigned to a library, in id order; empty when it has none (the library is not checked). */
+  profilesForLibrary(libraryId: number): Promise<DeviceProfile[]>;
+  /**
+   * The strictest combination of a library's profiles, or profileId alone when given (a job converting for one
+   * player). null when the library has no profile. AppError('unprocessable') when profileId is not assigned to it.
+   */
+  effectiveProfileForLibrary(libraryId: number, profileId?: number | null): Promise<EffectiveProfile | null>;
 }
 
 // ---------- ffmpeg command builder + progress ----------

@@ -133,7 +133,8 @@ export function createAudioExecutor(deps: AudioExecutorDeps): JobExecutor {
     const expectedSource = fs.stat(sourcePath);
     const probe = await services.probe.probe(sourcePath, { signal: ctx.signal });
     const library = await services.libraries.get(media.libraryId);
-    const profile = await services.rules.effectiveProfileForLibrary(media.libraryId);
+    const profile = await services.rules.effectiveProfileForLibrary(media.libraryId, job.profileId);
+    if (!profile) throw new AppError('unprocessable', 'the library has no player profile');
     const plan = services.rules.plan({ probe, profile, library, originalLanguage: media.originalLanguage });
     deps.recordPlan(job.id, plan, probe.streams);
     ctx.log.line(`plan: ${plan.action}; ${plan.reasons.join('; ') || 'no reasons'}`);

@@ -4,14 +4,13 @@
   import { page } from '$app/state';
   import { api } from '#lib/api/client.ts';
   import Async from '#lib/components/Async.svelte';
-  import Badge from '#lib/components/Badge.svelte';
   import CodecPicker from '#lib/components/CodecPicker.svelte';
   import Icon from '#lib/components/Icon.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { href } from '#lib/paths.ts';
   import { audioProblems, maxBitrate } from '#lib/profiles/audioLimits.ts';
   import { Resource } from '#lib/resource.svelte.ts';
-  import { DOLBY_VISION_MODES, type DeviceProfileDefinition, type ProfileInput, type TargetAudioCodec } from '#lib/shared.ts';
+  import { DOLBY_VISION_MODES, type ProfileInput, type ProfileTemplate, type TargetAudioCodec } from '#lib/shared.ts';
   import { toasts } from '#lib/toast.svelte.ts';
 
   const TARGETS: { value: TargetAudioCodec; label: string }[] = [
@@ -24,27 +23,25 @@
     { value: 6, label: '5.1' },
     { value: 8, label: '7.1' },
   ];
-  const BLANK: DeviceProfileDefinition = {
-    audio: { allowedCodecs: [], targetCodec: 'ac3', bitrates: { mono: 192, stereo: 448, surround: 640 }, maxChannels: 6 },
-    video: { allowedCodecs: [], dolbyVision: 'drop_hdr10' },
-    subtitles: { allowedCodecs: [] },
-    container: 'mkv',
-  };
+  function blankInput(templates: ProfileTemplate[]): ProfileInput {
+    const blank = templates.find((template) => template.id === 'blank');
+    if (!blank) throw new Error('The blank profile template is missing');
+    return { name: '', description: '', definition: structuredClone(blank.definition) };
+  }
 
   const rawId = $derived(page.params.id ?? '');
   const isNew = $derived(rawId === 'new');
 
   const data = new Resource(async (signal) => {
-    const [catalog, profiles, libraries] = await Promise.all([
+    const [catalog, templates, libraries] = await Promise.all([
       api('GET /api/v1/profiles/codecs', { signal }),
-      api('GET /api/v1/profiles', { signal }),
+      api('GET /api/v1/profiles/templates', { signal }),
       api('GET /api/v1/libraries', { signal }),
     ]);
     const existing = isNew ? null : await api('GET /api/v1/profiles/:id', { params: { id: Number(rawId) }, signal });
-    const template = profiles.find((profile) => profile.builtin)?.definition ?? BLANK;
     const input: ProfileInput = existing
       ? { name: existing.name, description: existing.description, definition: existing.definition }
-      : { name: '', description: '', definition: structuredClone(template) };
+      : blankInput(templates);
     return { catalog, libraries, existing, input };
   });
 
@@ -119,13 +116,12 @@
     {@const existing = loaded.existing}
     <PageHeader title={isNew ? 'New profile' : (existing?.name ?? 'Profile')}>
       {#snippet actions()}
-        {#if existing?.builtin}<Badge tone="info" label="Built-in" />{/if}
         {#if existing}
           <span class="muted">Version {existing.version}</span>
           <button
             onclick={remove}
-            disabled={busy || existing.builtin || existing.libraryIds.length > 0}
-            title={existing.builtin ? 'The built-in profile cannot be deleted' : existing.libraryIds.length > 0 ? 'Assigned to a library' : undefined}
+            disabled={busy || existing.libraryIds.length > 0}
+            title={existing.libraryIds.length > 0 ? 'Assigned to a library' : undefined}
           >
             <Icon name="trash" size={16} /> Delete
           </button>
