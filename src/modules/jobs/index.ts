@@ -9,6 +9,7 @@ import { yieldToEventLoop } from '../../core/yieldToEventLoop.ts';
 import type { JobRow } from '../../db/schema.ts';
 import type { EnqueueRequest, EnqueueResponse, MediaFileSummary, PageQuery } from '../../shared/api-types.ts';
 import { isActiveJobState, JOB_STATES, type JobState, type JobSummary } from '../../shared/domain.ts';
+import { resolvePageWindow } from '../../shared/paging.ts';
 import { checkRecycleBinLocation, NODE_BIN_TRIAL_FS } from '../recycle-bin/checkRecycleBinLocation.ts';
 import { createAudioExecutor } from './audioExecutor.ts';
 import {
@@ -49,11 +50,7 @@ const JOB_LOG_NAME = /^(\d+)\.txt$/;
 const LOG_TAIL_BYTES = 256 * 1024;
 
 function pageWindow(query: PageQuery): PageWindow {
-  return {
-    page: Math.max(1, query.page ?? 1),
-    pageSize: Math.min(500, Math.max(1, query.pageSize ?? 50)),
-    sortDir: query.sortDir ?? 'desc',
-  };
+  return { ...resolvePageWindow(query), sortDir: query.sortDir ?? 'desc' };
 }
 
 function parseStates(value: string | undefined): JobState[] | undefined {

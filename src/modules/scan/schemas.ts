@@ -18,6 +18,7 @@ import {
   type MediaFileStatus,
   type TaskName,
 } from '../../shared/domain.ts';
+import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '../../shared/paging.ts';
 
 const id = z.coerce.number().int().positive();
 const queryBoolean = z
@@ -64,7 +65,7 @@ function parseList<T extends string>(allowed: readonly T[], value: string | unde
 
 export const MediaQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(500).default(50),
+  pageSize: z.coerce.number().int().min(1).max(MAX_PAGE_SIZE).default(DEFAULT_PAGE_SIZE),
   sortDir: z.enum(['asc', 'desc']).optional(),
   sortKey: z.enum(['path', 'size', 'status', 'updatedAt', 'duration']).optional(),
   status: commaList(MEDIA_FILE_STATUSES).optional(),
