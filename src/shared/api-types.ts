@@ -29,6 +29,7 @@ import type {
   MediaFileKind,
   MediaFileStatus,
   MediaSortKey,
+  MediaTorrent,
   MovieMatchCandidate,
   PathMapping,
   PathMappingScope,
@@ -43,6 +44,8 @@ import type {
   ScheduledTaskInfo,
   SortDir,
   TaskName,
+  TorrentRemoval,
+  TorrentRemovalCondition,
 } from './domain.ts';
 import type { ScanStats } from './events.ts';
 import type { DeepPartial, GeneralConfig, Settings } from './settings.ts';
@@ -256,6 +259,10 @@ export interface MediaFileDetail extends MediaFileSummary {
     fileId: number | null;
   } | null;
   jobs: JobSummary[];
+}
+
+export interface TorrentRemovalRequest {
+  condition: TorrentRemovalCondition;
 }
 
 export interface MediaIgnoreBody {
@@ -886,6 +893,13 @@ export interface ApiRoutes {
     response: DownloadClientConnection;
   };
   'DELETE /api/v1/downloadclient': { response: NoContent };
+  'GET /api/v1/media/:id/torrent': { params: IdParams; response: MediaTorrent | null };
+  'PUT /api/v1/media/:id/torrent/removal': {
+    params: IdParams;
+    body: TorrentRemovalRequest;
+    response: TorrentRemoval;
+  };
+  'DELETE /api/v1/media/:id/torrent/removal': { params: IdParams; response: NoContent };
   'POST /api/v1/downloadclient/test': {
     body: DownloadClientInput;
     response: ConnectionTestResult;

@@ -1,8 +1,8 @@
-import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNull, or, sql } from 'drizzle-orm';
 import { chunk, IN_LIST_CHUNK_SIZE } from '../../core/chunk.ts';
 import type { Db } from '../../db/client.ts';
 import { jobs, mediaFiles, recycleBin } from '../../db/schema.ts';
-import type { JobType, MediaFileKind } from '../../shared/domain.ts';
+import type { JobType, MediaFileKind, MediaFileStatus } from '../../shared/domain.ts';
 
 function likePrefix(path: string): string {
   const escaped = path.replace(/[\\%_]/g, (char) => `\\${char}`);
@@ -48,9 +48,9 @@ export function pathsReplacedByAudioJob(db: Db, paths: readonly string[]): Set<s
 }
 
 /** Recycle-bin copies (hard links) of originals replaced by a completed audio job and not restored or purged. */
-export function replacedOriginalPaths(db: Db): string[] {
+export function replacedOriginals(db: Db): { recyclePath: string; mediaFileId: number | null }[] {
   return db
-    .select({ recyclePath: recycleBin.recyclePath })
+    .select({ recyclePath: recycleBin.recyclePath, mediaFileId: recycleBin.mediaFileId })
     .from(recycleBin)
     .innerJoin(jobs, eq(jobs.id, recycleBin.jobId))
     .where(
@@ -61,6 +61,48 @@ export function replacedOriginalPaths(db: Db): string[] {
         eq(jobs.state, 'completed'),
       ),
     )
+    .all();
+}
+
+export const libraryCopiesAtQuery = (db: Db, paths: string[]) =>
+  db
+    .select({ id: mediaFiles.id, path: mediaFiles.path, status: mediaFiles.status })
+    .from(mediaFiles)
+    .where(inArray(mediaFiles.path, paths));
+
+/** media_files rows at exactly these paths. */
+export function libraryCopiesAt(
+  db: Db,
+  paths: readonly string[],
+): Map<string, { id: number; status: MediaFileStatus }> {
+  const found = new Map<string, { id: number; status: MediaFileStatus }>();
+  for (const part of chunk(paths, IN_LIST_CHUNK_SIZE)) {
+    for (const row of libraryCopiesAtQuery(db, part).all()) found.set(row.path, { id: row.id, status: row.status });
+  }
+  return found;
+}
+
+export const audioJobSourcePathsQuery = (db: Db, mediaFileId: number) =>
+  db
+    .selectDistinct({ sourcePath: jobs.sourcePath })
+    .from(jobs)
+    .where(and(eq(jobs.mediaFileId, mediaFileId), eq(jobs.type, 'audio'), eq(jobs.state, 'completed')));
+
+/** Source paths of a media file's completed audio jobs: where it lived before a conversion renamed it. */
+export function audioJobSourcePaths(db: Db, mediaFileId: number): string[] {
+  return audioJobSourcePathsQuery(db, mediaFileId)
     .all()
-    .map((row) => row.recyclePath);
+    .map((row) => row.sourcePath);
+}
+
+export const restoredSinceQuery = (db: Db, mediaFileIds: number[], sinceIso: string) =>
+  db
+    .select({ id: recycleBin.id })
+    .from(recycleBin)
+    .where(and(inArray(recycleBin.mediaFileId, mediaFileIds), gte(recycleBin.restoredAt, sinceIso)))
+    .limit(1);
+
+/** True when a recycle-bin entry of one of these media files was restored at or after sinceIso. */
+export function restoredSince(db: Db, mediaFileIds: readonly number[], sinceIso: string): boolean {
+  return chunk(mediaFileIds, IN_LIST_CHUNK_SIZE).some((part) => restoredSinceQuery(db, part, sinceIso).get() != null);
 }

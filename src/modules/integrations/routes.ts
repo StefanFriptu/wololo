@@ -9,9 +9,10 @@ import type {
   DownloadClientInput,
   PathMappingInput,
   PlexConnectionUpdate,
+  TorrentRemovalRequest,
   WebhookQuery,
 } from '../../shared/api-types.ts';
-import { ARR_KINDS, PATH_MAPPING_SCOPES } from '../../shared/domain.ts';
+import { ARR_KINDS, PATH_MAPPING_SCOPES, TORRENT_REMOVAL_CONDITIONS } from '../../shared/domain.ts';
 import { radarrWebhookSchema, sonarrWebhookSchema } from './webhook-payload.ts';
 
 const httpUrl = z
@@ -54,6 +55,10 @@ const plexUpdateSchema = z.object({
   partialScan: z.boolean().optional(),
   pauseWhileStreaming: z.boolean().optional(),
 }) satisfies z.ZodType<PlexConnectionUpdate>;
+
+const torrentRemovalSchema = z.object({
+  condition: z.enum(TORRENT_REMOVAL_CONDITIONS),
+}) satisfies z.ZodType<TorrentRemovalRequest>;
 
 const downloadClientSchema = z.object({
   kind: z.literal('qbittorrent').default('qbittorrent'),
@@ -172,6 +177,23 @@ export function registerIntegrationsRoutes(app: ApiApp, ctx: AppContext): void {
     'POST /api/v1/downloadclient/test',
     async (c) => services.downloadClient.test(await parseBody(c, downloadClientSchema)),
     { body: downloadClientSchema },
+  );
+
+  route(app, 'GET /api/v1/media/:id/torrent', (c) => services.downloadClient.torrentForMedia(parseId(c)), {
+    params: idParamSchema,
+  });
+  route(
+    app,
+    'PUT /api/v1/media/:id/torrent/removal',
+    async (c) =>
+      services.downloadClient.requestRemoval(parseId(c), (await parseBody(c, torrentRemovalSchema)).condition),
+    { params: idParamSchema, body: torrentRemovalSchema },
+  );
+  route(
+    app,
+    'DELETE /api/v1/media/:id/torrent/removal',
+    (c) => noContent(services.downloadClient.cancelRemoval(parseId(c))),
+    { params: idParamSchema },
   );
 
   route(app, 'GET /api/v1/pathmappings', () => services.pathMappings.list());

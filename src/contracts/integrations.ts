@@ -1,6 +1,6 @@
 /**
  * Contract: integrations module (src/modules/integrations).
- * Owns writes to: arr_instances, plex_connection, download_client, path_mappings.
+ * Owns writes to: arr_instances, plex_connection, download_client, path_mappings, torrent_removals.
  * All HTTP calls use fetch with a timeout (default 15 s) and throw AppError('upstream') on failure.
  */
 import type {
@@ -26,6 +26,7 @@ import type {
   ArrInstance,
   ArrItemRef,
   DownloadClientConnection,
+  MediaTorrent,
   MovieMatchCandidate,
   PathMapping,
   PathMappingScope,
@@ -33,6 +34,8 @@ import type {
   PlexSection,
   PlexServer,
   TorrentInfo,
+  TorrentRemoval,
+  TorrentRemovalCondition,
 } from '../shared/domain.ts';
 
 export interface ArrService {
@@ -144,6 +147,23 @@ export interface DownloadClientService {
    *   here).
    */
   checkSeedingGoals(): Promise<string>;
+  /**
+   * The torrent a library file was imported from: the Radarr/Sonarr item history (GET /api/v3/history/movie or
+   * history/series) names the download hash for the file's path (or the source path of its completed audio job), matched
+   * against qBittorrent. Null without a client, a Radarr/Sonarr item, or a matching torrent.
+   */
+  torrentForMedia(mediaFileId: number): Promise<MediaTorrent | null>;
+  /** Saves (or restarts) the removal request of the file's torrent, keyed by hash; not_found when it has none. */
+  requestRemoval(mediaFileId: number, condition: TorrentRemovalCondition): Promise<TorrentRemoval>;
+  /** Cancels the pending removal request of the file's torrent; no-op when there is none. */
+  cancelRemoval(mediaFileId: number): Promise<void>;
+  /**
+   * Pending removal requests, after each completed audio job and in seeding_check (one run at a time): cancelled when a
+   * file of the torrent was restored since the request; kept while any torrent file is a library file, while
+   * torrentConversionProgress is not allConverted, or (converted_and_seeded) before goalMet; otherwise
+   * deleteTorrent(hash, true). A torrent gone from qBittorrent ends as missing.
+   */
+  processRemovals(): Promise<string>;
 }
 
 export interface PathMappingService {

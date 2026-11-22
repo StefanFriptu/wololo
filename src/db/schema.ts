@@ -27,6 +27,8 @@ import type {
   ProbeResult,
   ProfileResult,
   TaskName,
+  TorrentRemovalCondition,
+  TorrentRemovalState,
   VerificationResult,
 } from '../shared/domain.ts';
 
@@ -293,6 +295,21 @@ export const downloadClient = sqliteTable('download_client', {
   updatedAt: updatedAt(),
 });
 
+export const torrentRemovals = sqliteTable(
+  'torrent_removals',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    hash: text('hash').notNull(),
+    name: text('name').notNull(),
+    condition: text('condition').$type<TorrentRemovalCondition>().notNull(),
+    state: text('state').$type<TorrentRemovalState>().notNull().default('pending'),
+    reason: text('reason'),
+    createdAt: createdAt(),
+    finishedAt: text('finished_at'),
+  },
+  (t) => [uniqueIndex('torrent_removals_hash_idx').on(t.hash), index('torrent_removals_state_idx').on(t.state)],
+);
+
 export const pathMappings = sqliteTable('path_mappings', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   scope: text('scope').$type<PathMappingScope>().notNull(),
@@ -347,5 +364,6 @@ export type RecycleBinRow = typeof recycleBin.$inferSelect;
 export type PlexConnectionRow = typeof plexConnection.$inferSelect;
 export type DownloadClientRow = typeof downloadClient.$inferSelect;
 export type PathMappingRow = typeof pathMappings.$inferSelect;
+export type TorrentRemovalRow = typeof torrentRemovals.$inferSelect;
 export type BdmvDecisionRow = typeof bdmvDecisions.$inferSelect;
 export type ScheduledTaskRow = typeof scheduledTasks.$inferSelect;

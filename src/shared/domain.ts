@@ -575,6 +575,42 @@ export interface TorrentInfo {
   goalMet: boolean;
 }
 
+/** converted: once every media file of the torrent is done; converted_and_seeded: also waits for its seeding goal. */
+export const TORRENT_REMOVAL_CONDITIONS = ['converted', 'converted_and_seeded'] as const;
+export type TorrentRemovalCondition = (typeof TORRENT_REMOVAL_CONDITIONS)[number];
+
+/** missing: the torrent left qBittorrent before Wololo removed it; cancelled: kept, or a file of it was restored. */
+export const TORRENT_REMOVAL_STATES = ['pending', 'removed', 'cancelled', 'missing'] as const;
+export type TorrentRemovalState = (typeof TORRENT_REMOVAL_STATES)[number];
+
+/** A request to remove a torrent and its files from qBittorrent, one per torrent hash. */
+export interface TorrentRemoval {
+  hash: string;
+  name: string;
+  condition: TorrentRemovalCondition;
+  state: TorrentRemovalState;
+  /** Why the last check kept a pending torrent, or why it was cancelled. */
+  reason: string | null;
+  createdAt: IsoDateTime;
+  finishedAt: IsoDateTime | null;
+}
+
+/** The qBittorrent torrent a library file was imported from (Radarr/Sonarr history), with its conversion progress. */
+export interface MediaTorrent {
+  hash: string;
+  name: string;
+  goalMet: boolean;
+  /** Media files in the torrent. */
+  total: number;
+  /** Of those, converted by Wololo or needing no work (compatible, ignored, blocked). */
+  done: number;
+  /** Torrent media files without a library copy; they keep the torrent. */
+  unaccounted: string[];
+  /** The torrent may go once its seeding condition holds. */
+  allConverted: boolean;
+  removal: TorrentRemoval | null;
+}
+
 /**
  * main_title: several playlists within ambiguityPercent of the longest.
  * movie_match: Radarr lookup score below minMatchScore (or no result).
