@@ -172,7 +172,7 @@ describe.skipIf(!ffmpegAvailable())('createVerifier on real files', () => {
       ...['-f', 'lavfi', '-i', 'testsrc=size=160x120:rate=24:duration=2'],
       ...['-f', 'lavfi', '-i', 'sine=frequency=440:duration=2', '-i', cover],
       ...['-map', '0', '-map', '1', '-map', '2', '-c:v:0', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p'],
-      ...['-c:v:1', 'mjpeg', '-disposition:v:1', 'attached_pic', '-c:a', 'aac', mp4],
+      ...['-c:v:1', 'copy', '-disposition:v:1', 'attached_pic', '-c:a', 'aac', mp4],
     ]);
     const probeRun = await runProcess({ command: 'ffprobe', args: buildProbeArgs(mp4) });
     const probe = parseFfprobeOutput(JSON.parse(probeRun.stdout), mp4, statSync(mp4).size, new Date().toISOString());
