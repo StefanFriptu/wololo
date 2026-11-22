@@ -32,6 +32,19 @@ export type AuthenticationMode = (typeof AUTHENTICATION_MODES)[number];
 export const IMPORT_ACTIONS = ['check_only', 'convert_strictest', 'convert_for_profile'] as const;
 export type ImportAction = (typeof IMPORT_ACTIONS)[number];
 
+/** The guided setup's steps, in order. plex and downloadClient may be skipped. */
+export const SETUP_STEPS = [
+  'welcome',
+  'players',
+  'media',
+  'arr',
+  'plex',
+  'downloadClient',
+  'imports',
+  'check',
+] as const;
+export type SetupStep = (typeof SETUP_STEPS)[number];
+
 /** Runtime settings, stored in the settings KV table, one row per top-level section. */
 export interface Settings {
   processing: {
@@ -101,6 +114,14 @@ export interface Settings {
   notifications: {
     rescanArr: boolean;
   };
+  /** Guided setup progress. A fresh install opens it; existing installs get a banner until completed or dismissed. */
+  setup: {
+    completed: boolean;
+    /** Step to resume at. */
+    step: SetupStep;
+    /** The owner hid the "Run setup" banner. */
+    dismissed: boolean;
+  };
 }
 
 export type SettingsSection = keyof Settings;
@@ -143,4 +164,5 @@ export const DEFAULT_SETTINGS: Settings = {
     qualityProfileId: null,
   },
   notifications: { rescanArr: true },
+  setup: { completed: false, step: 'welcome', dismissed: false },
 };
