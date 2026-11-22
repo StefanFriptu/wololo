@@ -1,5 +1,5 @@
 /**
- * End to end: author a 30 s Blu-ray with tsMuxeR (folder and .iso), convert it with the real bdmv executor, mkvmerge,
+ * End to end: author a 190 s Blu-ray with tsMuxeR (folder and .iso), convert it with the real bdmv executor, mkvmerge,
  * ffmpeg (libbluray) and 7z, and check languages, chapters and the untouched video. Skips when a tool is missing, unless
  * WOLOLO_REQUIRE_BDMV_E2E=1 (CI): then missing tools or a disc authored without subtitles fail the run.
  */
@@ -41,7 +41,8 @@ test.if(REQUIRED)('bdmv e2e - every tool is installed when the end-to-end run is
       .map(([name]) => name),
   ).toEqual([]);
 });
-const DURATION = 30;
+/** ffmpeg's bluray protocol only opens titles of at least 180 s (MIN_PLAYLIST_LENGTH, not configurable). */
+const DURATION = 190;
 const PLAYLIST = '00000.mpls';
 
 function exec(argv: string[], cwd?: string): string {
