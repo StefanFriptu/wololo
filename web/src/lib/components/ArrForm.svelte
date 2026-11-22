@@ -1,7 +1,8 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { api } from '#lib/api/client.ts';
-  import { errorMessage } from '#lib/api/errorMessage.ts';
+  import { testConnection } from '#lib/api/testConnection.ts';
+  import ConnectionTestAlert from '#lib/components/ConnectionTestAlert.svelte';
   import Modal from '#lib/components/Modal.svelte';
   import { secretForForm, secretForRequest } from '#lib/settings/secretField.ts';
   import {
@@ -54,13 +55,8 @@
 
   async function runTest(): Promise<void> {
     testing = true;
-    try {
-      test = await api('POST /api/v1/arr/test', { body: { ...withKey(), id: instance?.id } });
-    } catch (error) {
-      test = { ok: false, message: errorMessage(error), version: null };
-    } finally {
-      testing = false;
-    }
+    test = await testConnection(() => api('POST /api/v1/arr/test', { body: { ...withKey(), id: instance?.id } }));
+    testing = false;
   }
 
   async function save(event: SubmitEvent): Promise<void> {
@@ -113,9 +109,7 @@
       <div class="control"><label class="check"><input type="checkbox" bind:checked={form.enabled} /> Use this instance</label></div>
     </div>
     {#if test}
-      <p class="alert tone-{test.ok ? 'success' : 'danger'}" role="status">
-        {test.message}{test.version ? ` (version ${test.version})` : ''}
-      </p>
+      <ConnectionTestAlert result={test} />
     {/if}
   </form>
   {#snippet footer()}

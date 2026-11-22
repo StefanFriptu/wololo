@@ -1,8 +1,9 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { api } from '#lib/api/client.ts';
-  import { errorMessage } from '#lib/api/errorMessage.ts';
+  import { testConnection } from '#lib/api/testConnection.ts';
   import Async from '#lib/components/Async.svelte';
+  import ConnectionTestAlert from '#lib/components/ConnectionTestAlert.svelte';
   import { href } from '#lib/paths.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import { secretForForm, secretForRequest } from '#lib/settings/secretField.ts';
@@ -42,13 +43,8 @@
 
   async function runTest(): Promise<void> {
     busy = true;
-    try {
-      test = await api('POST /api/v1/downloadclient/test', { body: requestBody() });
-    } catch (error) {
-      test = { ok: false, message: errorMessage(error), version: null };
-    } finally {
-      busy = false;
-    }
+    test = await testConnection(() => api('POST /api/v1/downloadclient/test', { body: requestBody() }));
+    busy = false;
   }
 
   async function save(event: SubmitEvent): Promise<void> {
@@ -147,9 +143,7 @@
         </div>
       </div>
       {#if test}
-        <p class="alert tone-{test.ok ? 'success' : 'danger'}" role="status">
-          {test.message}{test.version ? ` (version ${test.version})` : ''}
-        </p>
+        <ConnectionTestAlert result={test} />
       {/if}
       <div class="toolbar">
         <button type="button" onclick={runTest} disabled={busy || !form.url}>Test</button>
