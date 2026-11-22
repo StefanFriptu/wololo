@@ -2,7 +2,8 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { createTestContext, type TestContext } from '../../../test/helpers/context.ts';
 import { insertArrInstance } from '../../../test/helpers/seed.ts';
 import type { PathMapping } from '../../shared/domain.ts';
-import { applicableMappings } from './path-mapping-service.ts';
+import { mapPath } from './path-map.ts';
+import { applicableMappings, pathTranslator } from './path-mapping-service.ts';
 
 let t: TestContext;
 
@@ -100,6 +101,63 @@ test('applicableMappings - instance-specific first, other instances and scopes e
   ];
   expect(applicableMappings(mappings, 'radarr', 5).map((m) => m.id)).toEqual([2, 1]);
   expect(applicableMappings(mappings, 'radarr', null).map((m) => m.id)).toEqual([1]);
+});
+
+test('pathTranslator - equals the per-call translation over a table of mappings and paths', async () => {
+  const radarrId = insertArrInstance(t.ctx.db, { kind: 'radarr' });
+  const otherId = insertArrInstance(t.ctx.db, { kind: 'radarr' });
+  const created = [
+    { scope: 'radarr', remotePath: '/vault', localPath: '/data' },
+    { scope: 'radarr', instanceId: radarrId, remotePath: '/vault', localPath: '/uhd' },
+    { scope: 'radarr', instanceId: radarrId, remotePath: '/vault/kids', localPath: '/kids' },
+    { scope: 'radarr', instanceId: otherId, remotePath: '/vault', localPath: '/other' },
+    { scope: 'qbittorrent', remotePath: 'D:\\Downloads', localPath: '/data/dl' },
+    { scope: 'qbittorrent', remotePath: '/downloads', localPath: '/data/dl2' },
+    { scope: 'plex', remotePath: '/media', localPath: '/data' },
+  ] as const;
+  for (const input of created) await t.ctx.services.pathMappings.create(input);
+  const all = await t.ctx.services.pathMappings.list();
+  const paths = [
+    '/vault/a.mkv',
+    '/vault/kids/b.mkv',
+    '/vault',
+    '/vaulted/c.mkv',
+    '/data/a.mkv',
+    '/uhd/a.mkv',
+    '/kids/b.mkv',
+    'D:\\Downloads\\x\\y.mkv',
+    'd:/downloads/x/y.mkv',
+    '/downloads/z.mkv',
+    '/data/dl/z.mkv',
+    '/unmapped/file.mkv',
+    '',
+  ];
+  const targets = [
+    { scope: 'radarr', instanceId: null },
+    { scope: 'radarr', instanceId: radarrId },
+    { scope: 'radarr', instanceId: otherId },
+    { scope: 'sonarr', instanceId: null },
+    { scope: 'qbittorrent', instanceId: null },
+    { scope: 'plex', instanceId: null },
+  ] as const;
+  for (const { scope, instanceId } of targets) {
+    const applicable = applicableMappings(all, scope, instanceId);
+    const translator = pathTranslator(t.ctx.db, { scope, instanceId });
+    for (const path of paths) {
+      const local = mapPath(
+        path,
+        applicable.map((m) => ({ from: m.remotePath, to: m.localPath })),
+      );
+      const remote = mapPath(
+        path,
+        applicable.map((m) => ({ from: m.localPath, to: m.remotePath })),
+      );
+      expect(translator.toLocal(path)).toBe(local);
+      expect(translator.toRemote(path)).toBe(remote);
+      expect(await t.ctx.services.pathMappings.toLocal(scope, path, instanceId ?? undefined)).toBe(local);
+      expect(await t.ctx.services.pathMappings.toRemote(scope, path, instanceId ?? undefined)).toBe(remote);
+    }
+  }
 });
 
 test('pathmappings routes - CRUD over HTTP with validation', async () => {
