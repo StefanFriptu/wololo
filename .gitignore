@@ -10,3 +10,4 @@ test/.cache/
 .env
 .env.*
 coverage/
+.scratch/
