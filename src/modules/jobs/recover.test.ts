@@ -54,7 +54,7 @@ function setup(): Setup {
         list: async () => [
           {
             ...(await tools.libraries.get(1)),
-            roots: [{ id: 1, path: holder.root, freeBytes: null, accessible: true }],
+            roots: [{ id: 1, path: holder.root, freeBytes: null, accessible: true, writable: true }],
           },
         ],
         findRootForPath: async () => ({ library: await tools.libraries.get(1), rootId: 1, rootPath: holder.root }),
