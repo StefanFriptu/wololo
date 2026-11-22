@@ -103,7 +103,7 @@ Path mapping between containers (/vault/media on the host vs /data/media in Plex
 
 ## Feature 1: audio transcoding
 Any audio track the device profile cannot decode is converted to AC3, at 640 kbps for 5.1 sources. Video, subtitles, chapters and compatible audio tracks are copied untouched.
-Trigger codecs (default "Samsung Tizen" profile)
+Trigger codecs (the "Basic" capability template, which matches Samsung Tizen TVs)
 Source codec (ffprobe name)
 Default action
 Why
@@ -339,7 +339,7 @@ TypeScript on Bun, Hono HTTP server, SQLite via bun:sqlite + Drizzle
 Frontend
 SvelteKit static SPA, served by the backend on one port
 Default device profile
-Samsung Tizen, as in Feature 1's trigger table
+None. New installs start with no profile; capability templates (Basic, Dolby, Lossless, Everything, Blank) are named after formats, never devices. Basic matches Feature 1's trigger table
 5.1 / stereo target
 AC3 640 kbps / AC3 448 kbps
 Original track
@@ -363,7 +363,7 @@ M0 Skeleton. Repo, Bun + Hono API, SvelteKit SPA, SQLite migrations, settings, A
 
 Done when: the image runs on the Pi, the UI loads, /health returns 200.
 
-M1 Probe, profiles, dry run. ffprobe -show_streams -show_format -of json into a typed stream model; profile CRUD with the Tizen default; scan of configured roots; dry-run report.
+M1 Probe, profiles, dry run. ffprobe -show_streams -show_format -of json into a typed stream model; profile CRUD with capability templates; scan of configured roots; dry-run report.
 
 Done when: a dry run over the owner's library lists files per failing codec with estimated time and space, and writes nothing.
 
