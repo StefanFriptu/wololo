@@ -1,7 +1,8 @@
 import { afterAll, expect, test } from 'bun:test';
 import { createTestContext } from '../../../test/helpers/context.ts';
 import { insertJob } from '../../../test/helpers/seed.ts';
-import { existingJobIdsQuery, JOB_ID_CHUNK_SIZE } from './existingJobIdsQuery.ts';
+import { IN_LIST_CHUNK_SIZE } from '../../core/chunk.ts';
+import { existingJobIdsQuery } from './existingJobIdsQuery.ts';
 
 const t = createTestContext();
 afterAll(() => t.cleanup());
@@ -14,9 +15,9 @@ test('existingJobIdsQuery - selects job ids in the given set', () => {
 });
 
 test('existingJobIdsQuery - splits more than 500 ids into chunks', () => {
-  const ids = Array.from({ length: JOB_ID_CHUNK_SIZE * 2 + 1 }, (_, index) => index + 1);
+  const ids = Array.from({ length: IN_LIST_CHUNK_SIZE * 2 + 1 }, (_, index) => index + 1);
   const params = existingJobIdsQuery(t.ctx.db, ids).map((query) => query.toSQL().params);
-  expect(params.map((chunk) => chunk.length)).toEqual([JOB_ID_CHUNK_SIZE, JOB_ID_CHUNK_SIZE, 1]);
+  expect(params.map((chunk) => chunk.length)).toEqual([IN_LIST_CHUNK_SIZE, IN_LIST_CHUNK_SIZE, 1]);
   expect(params.flat()).toEqual(ids);
 });
 
@@ -27,7 +28,7 @@ test('existingJobIdsQuery - no ids means no query', () => {
 test('existingJobIdsQuery - finds rows across chunks', () => {
   const first = insertJob(t.ctx.db, { sourcePath: '/data/media/a.mkv' });
   const last = insertJob(t.ctx.db, { sourcePath: '/data/media/b.mkv' });
-  const ids = [first.id, ...Array.from({ length: JOB_ID_CHUNK_SIZE }, (_, index) => 900_000 + index), last.id];
+  const ids = [first.id, ...Array.from({ length: IN_LIST_CHUNK_SIZE }, (_, index) => 900_000 + index), last.id];
   const found = existingJobIdsQuery(t.ctx.db, ids).flatMap((query) => query.all().map((row) => row.id));
   expect(found.sort((a, b) => a - b)).toEqual([first.id, last.id]);
 });

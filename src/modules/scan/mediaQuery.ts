@@ -1,4 +1,5 @@
 import { and, asc, count, desc, eq, gt, inArray, type SQL, sql, sum } from 'drizzle-orm';
+import { chunk, IN_LIST_CHUNK_SIZE } from '../../core/chunk.ts';
 import type { Db } from '../../db/client.ts';
 import { type JobRow, jobs, libraryProfiles, libraryRoots, mediaFiles } from '../../db/schema.ts';
 import type { MediaFileSummary, MediaQuery, MediaSortKey } from '../../shared/api-types.ts';
@@ -270,12 +271,11 @@ export function rootEntriesPageQuery(db: Db, options: { rootId: number; afterId:
 
 export function activeJobMediaIdsQuery(db: Db, mediaFileIds: readonly number[]): Set<number> {
   const ids = new Set<number>();
-  for (let start = 0; start < mediaFileIds.length; start += 500) {
-    const chunk = mediaFileIds.slice(start, start + 500);
+  for (const part of chunk(mediaFileIds, IN_LIST_CHUNK_SIZE)) {
     const rows = db
       .select({ mediaFileId: jobs.mediaFileId })
       .from(jobs)
-      .where(and(inArray(jobs.mediaFileId, chunk), inArray(jobs.state, ['queued', 'running'])))
+      .where(and(inArray(jobs.mediaFileId, part), inArray(jobs.state, ['queued', 'running'])))
       .all();
     for (const row of rows) if (row.mediaFileId !== null) ids.add(row.mediaFileId);
   }
