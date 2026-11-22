@@ -88,12 +88,16 @@ export function createProfileService(ctx: AppContext): ProfileService {
     update: async (id, input) => {
       const existing = requireProfile(id);
       assertNameFree(input.name, id);
+      const description = input.description ?? existing.description;
       const definitionChanged = !sameDefinition(existing.definition, input.definition);
+      if (!definitionChanged && input.name === existing.name && description === existing.description) {
+        return withUsage(existing);
+      }
       const [updated] = ctx.db
         .update(deviceProfiles)
         .set({
           name: input.name,
-          description: input.description ?? existing.description,
+          description,
           definition: input.definition,
           version: definitionChanged ? existing.version + 1 : existing.version,
           updatedAt: new Date().toISOString(),
