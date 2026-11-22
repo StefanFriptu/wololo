@@ -74,7 +74,7 @@ function prunePreMigrationCopies(backupDir: string): void {
   for (const name of copies.slice(0, -PRE_MIGRATION_COPIES_KEPT)) rmSync(join(backupDir, name), { force: true });
 }
 
-function latestJournalMillis(migrationsFolder: string): number {
+export function latestJournalMillis(migrationsFolder: string): number {
   const journal = JSON.parse(readFileSync(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as {
     entries: { when: number }[];
   };

@@ -12,7 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openDatabase, runMigrations } from '../../src/db/client.ts';
+import { latestJournalMillis, openDatabase, runMigrations } from '../../src/db/client.ts';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -52,6 +52,16 @@ function migrationsFolder(migrations: { tag: string; sql: string; when: number }
   );
   return dir;
 }
+
+test('latestJournalMillis - the newest migration timestamp, 0 for an empty journal', () => {
+  const some = migrationsFolder([
+    { tag: '0000_init', sql: INIT, when: 1000 },
+    { tag: '0001_rebuild', sql: REBUILD, when: 3000 },
+    { tag: '0002_other', sql: REBUILD, when: 2000 },
+  ]);
+  expect(latestJournalMillis(some)).toBe(3000);
+  expect(latestJournalMillis(migrationsFolder([]))).toBe(0);
+});
 
 test('a drizzle-kit table rebuild keeps child rows, backs up first and re-enables foreign keys', () => {
   const work = mkdtempSync(join(tmpdir(), 'wololo-db-'));
