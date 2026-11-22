@@ -19,15 +19,24 @@ RUN bun install --frozen-lockfile --production --ignore-scripts
 
 FROM oven/bun:${BUN_VERSION}-slim AS bun
 
+# Official 7-Zip instead of Debian's 25.01, which cannot open some UDF Blu-ray images (tsMuxeR on Linux).
+FROM debian:${DEBIAN_RELEASE}-slim AS sevenzip
+ADD --checksum=sha256:2b539cf067b2ad48e1baa5093dbaa8818b73542d1222a0ffde9dc5f2922ea62e https://github.com/ip7z/7zip/releases/download/26.06/7z2606-linux-x64.tar.xz /7z-amd64.tar.xz
+ADD --checksum=sha256:edcc408aacce77da5223728f2eceb5e9f6dc713b8a9df934ad21e2a7f7560627 https://github.com/ip7z/7zip/releases/download/26.06/7z2606-linux-arm64.tar.xz /7z-arm64.tar.xz
+RUN apt-get update && apt-get install -y --no-install-recommends xz-utils \
+ && mkdir /out && tar -xJf "/7z-$(dpkg --print-architecture).tar.xz" -C /out 7zz
+
 FROM debian:${DEBIAN_RELEASE}-slim
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg mkvtoolnix 7zip ca-certificates tzdata \
+ && apt-get install -y --no-install-recommends ffmpeg mkvtoolnix ca-certificates tzdata \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --gid 1000 wololo \
  && useradd --uid 1000 --gid 1000 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin wololo \
  && mkdir -p /config /data
 
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
+COPY --from=sevenzip --chmod=0755 /out/7zz /usr/local/bin/7zz
+RUN ln -s /usr/local/bin/7zz /usr/local/bin/7z
 
 # Fails the build when a tool the jobs depend on is missing (ffmpeg must read Blu-ray structures through libbluray).
 RUN bun --version \
