@@ -42,6 +42,7 @@ src/
     api-types.ts           ApiRoutes: every REST route with params/query/body/response types
     api-routes.ts          API_ROUTE_META: owner module, auth, response type, summary per route
     language.ts            normalizeLanguage / sameLanguage (ISO 639-2/B)
+    paging.ts              DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, resolvePageWindow (clamp page and page size)
     audioRules.ts          codecAllowed, AC3_MAX_KBPS / MAX_AUDIO_KBPS, maxBitrateKbps (engine, profile schema, web editor)
   contracts/               service interfaces + pure function signatures per module
   modules/

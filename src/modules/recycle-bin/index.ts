@@ -16,6 +16,7 @@ import { AppError, errorMessage, notFound } from '../../core/errors.ts';
 import { isNormalizedAbsolutePath, isRecyclePath } from '../../core/recyclePaths.ts';
 import type { RecycleBinRow } from '../../db/schema.ts';
 import type { RecycleBinEntry } from '../../shared/domain.ts';
+import { resolvePageWindow } from '../../shared/paging.ts';
 import { isLinkUnsupported } from '../jobs/isLinkUnsupported.ts';
 import { toRecycleBinEntry } from '../jobs/mappers.ts';
 import { checkRecycleBinLocation } from './checkRecycleBinLocation.ts';
@@ -195,8 +196,7 @@ export function createRecycleBinService(ctx: AppContext, options: RecycleBinOpti
 
   return {
     list: async (query) => {
-      const page = Math.max(1, query.page ?? 1);
-      const pageSize = Math.min(500, Math.max(1, query.pageSize ?? 50));
+      const { page, pageSize } = resolvePageWindow(query);
       const { rows, total } = listActiveRecycleRows(db, { page, pageSize, sortDir: query.sortDir ?? 'desc' });
       return { page, pageSize, total, items: rows.map(toRecycleBinEntry) };
     },

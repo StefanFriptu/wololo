@@ -5,6 +5,7 @@ import { AppError, errorMessage, notFound } from '../../core/errors.ts';
 import { mediaFiles } from '../../db/schema.ts';
 import type { MediaFileDetail } from '../../shared/api-types.ts';
 import { MEDIA_FILE_STATUSES, type MediaFileStatus } from '../../shared/domain.ts';
+import { DEFAULT_PAGE_SIZE } from '../../shared/paging.ts';
 import { statEntry } from './entries.ts';
 import { summarizeProbe } from './evaluation.ts';
 import { libraryQuery } from './libraryQuery.ts';
@@ -32,7 +33,12 @@ export function createMediaService(ctx: AppContext): MediaService {
   const service: MediaService = {
     list: async (query) => {
       const { total, rows } = listMediaQuery(ctx.db, query);
-      return { page: query.page ?? 1, pageSize: query.pageSize ?? 50, total, items: rows.map(toSummary) };
+      return {
+        page: query.page ?? 1,
+        pageSize: query.pageSize ?? DEFAULT_PAGE_SIZE,
+        total,
+        items: rows.map(toSummary),
+      };
     },
 
     listAfterPath: async (query, cursor) => mediaAfterPathQuery(ctx.db, query, cursor).map(toSummary),

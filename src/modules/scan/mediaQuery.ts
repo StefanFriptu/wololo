@@ -4,6 +4,7 @@ import type { Db } from '../../db/client.ts';
 import { type JobRow, jobs, libraryProfiles, libraryRoots, mediaFiles } from '../../db/schema.ts';
 import type { MediaFileSummary, MediaQuery, MediaSortKey } from '../../shared/api-types.ts';
 import { ACTIVE_JOB_STATES, type JobSummary, type MediaFileStatus } from '../../shared/domain.ts';
+import { DEFAULT_PAGE_SIZE } from '../../shared/paging.ts';
 import { relativeToRoot } from './paths.ts';
 import { parseKindList, parseStatusList } from './schemas.ts';
 
@@ -131,7 +132,7 @@ export function mediaConditions(db: Db, query: MediaQuery): SQL[] {
 export function listMediaQuery(db: Db, query: MediaQuery): { total: number; rows: MediaSummaryRow[] } {
   const where = and(...mediaConditions(db, query));
   const page = query.page ?? 1;
-  const pageSize = query.pageSize ?? 50;
+  const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
   const column = SORT_COLUMNS[query.sortKey ?? 'path'];
   const direction = query.sortDir === 'desc' ? desc : asc;
   const total = db.select({ value: count() }).from(mediaFiles).where(where).get()?.value ?? 0;
