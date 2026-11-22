@@ -10,6 +10,7 @@
   import Pagination from '#lib/components/Pagination.svelte';
   import { pageInRange } from '#lib/pageInRange.ts';
   import { formatBytes } from '#lib/format/formatBytes.ts';
+  import { fileName } from '#lib/format/fileName.ts';
   import { formatDateTime } from '#lib/format/formatDateTime.ts';
   import { formatRelativeTime } from '#lib/format/formatRelativeTime.ts';
   import { HISTORY_EVENT_LABELS, HISTORY_EVENT_TONES } from '#lib/labels.ts';
@@ -53,8 +54,6 @@
   );
   $effect(() => () => clearTimeout(refreshTimer));
   $effect(() => live.onReconnect(() => history.load({ silent: true })));
-
-  const fileName = (path: string): string => path.split('/').filter(Boolean).at(-1) ?? path;
 </script>
 
 <PageHeader title="History">
@@ -109,7 +108,7 @@
                   <div>{entry.message}</div>
                   {#if info?.lostFeatures?.length}
                     <div class="chips">
-                      {#each info.lostFeatures as feature, index (index)}<span class="badge tone-warning">{feature}</span>{/each}
+                      {#each info.lostFeatures as feature, index (index)}<Badge tone="warning" label={feature} />{/each}
                     </div>
                   {/if}
                   {#if info?.bytesBefore != null && info.bytesAfter != null}

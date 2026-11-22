@@ -5,6 +5,7 @@
   import { testConnection } from '#lib/api/testConnection.ts';
   import ConnectionTestAlert from '#lib/components/ConnectionTestAlert.svelte';
   import Modal from '#lib/components/Modal.svelte';
+  import { PATH_SCOPE_LABELS } from '#lib/labels.ts';
   import { secretForForm, secretForRequest } from '#lib/settings/secretField.ts';
   import {
     type ArrInstance,
@@ -30,7 +31,7 @@
   let testing = $state(false);
   let busy = $state(false);
 
-  const label = $derived(form.kind === 'radarr' ? 'Radarr' : 'Sonarr');
+  const label = $derived(PATH_SCOPE_LABELS[form.kind]);
 
   $effect(() => {
     if (!open) return;
@@ -43,7 +44,7 @@
         ? { kind: source.kind, name: source.name, url: source.url, apiKey: secretForForm(source.apiKey), enabled: source.enabled }
         : {
             kind: fallbackKind,
-            name: fallbackKind === 'radarr' ? 'Radarr' : 'Sonarr',
+            name: PATH_SCOPE_LABELS[fallbackKind],
             url: `http://localhost:${DEFAULT_PORTS[fallbackKind]}`,
             apiKey: '',
             enabled: true,

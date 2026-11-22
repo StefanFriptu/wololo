@@ -118,7 +118,7 @@
           <li>
             <div class="row">
               <strong>{instance.name}</strong>
-              <Badge tone="info" label={instance.kind === 'radarr' ? 'Radarr' : 'Sonarr'} />
+              <Badge tone="info" label={PATH_SCOPE_LABELS[instance.kind]} />
               {#if !instance.enabled}<Badge label="Disabled" />{/if}
               <span class="muted break">{instance.url}</span>
               <span class="spacer"></span>

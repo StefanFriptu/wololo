@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import Badge from '#lib/components/Badge.svelte';
   import { parseList } from '#lib/parseList.ts';
   import { partitionCodecs } from '#lib/profiles/partitionCodecs.ts';
   import { type CodecInfo, codecAllowed } from '#lib/shared.ts';
@@ -41,7 +42,7 @@
           onchange={(event) => toggle(info.codec, event.currentTarget.checked)}
         />
         <span>{info.label}</span>
-        {#if info.lossless}<span class="badge tone-neutral">lossless</span>{/if}
+        {#if info.lossless}<Badge label="lossless" />{/if}
         {#if viaWildcard}<span class="muted small">(wildcard)</span>{/if}
       </label>
     {/each}

@@ -12,6 +12,7 @@
   import PageHeader from '#lib/components/PageHeader.svelte';
   import StreamCompare from '#lib/components/StreamCompare.svelte';
   import { formatBytes } from '#lib/format/formatBytes.ts';
+  import { fileName } from '#lib/format/fileName.ts';
   import { formatDateTime } from '#lib/format/formatDateTime.ts';
   import { formatDuration } from '#lib/format/formatDuration.ts';
   import {
@@ -23,6 +24,7 @@
     MEDIA_KIND_LABELS,
     MEDIA_STATUS_LABELS,
     MEDIA_STATUS_TONES,
+    PATH_SCOPE_LABELS,
     PLAN_ACTION_LABELS,
     PLAN_ACTION_TONES,
   } from '#lib/labels.ts';
@@ -100,8 +102,6 @@
   );
   $effect(() => live.onReconnect(refreshSoon));
   $effect(() => () => clearTimeout(refreshTimer));
-
-  const fileName = (path: string): string => path.split('/').filter(Boolean).at(-1) ?? path;
 
   async function reprobe(): Promise<void> {
     busy = true;
@@ -197,7 +197,7 @@
         <dt>Original language</dt>
         <dd>{file.originalLanguage ?? 'unknown'}</dd>
         {#if file.arr}
-          <dt>{file.arr.kind === 'radarr' ? 'Radarr' : 'Sonarr'}</dt>
+          <dt>{PATH_SCOPE_LABELS[file.arr.kind]}</dt>
           <dd>{file.arr.kind === 'radarr' ? 'Movie' : 'Series'} #{file.arr.itemId} on instance #{file.arr.instanceId}</dd>
         {/if}
         <dt>Last checked</dt>
