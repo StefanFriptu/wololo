@@ -3,7 +3,7 @@ import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 import type { AppContext } from '../app/context.ts';
 import { isLocalBindAddress, isValidBindAddress, isValidUrlBase } from '../core/config.ts';
-import { AppError } from '../core/errors.ts';
+import { AppError, notFound } from '../core/errors.ts';
 import type { GeneralConfigView } from '../shared/api-types.ts';
 import type { ServerEvent, StreamHello } from '../shared/events.ts';
 import { AUTHENTICATION_MODES, type GeneralConfig } from '../shared/settings.ts';
@@ -149,7 +149,7 @@ export function registerCoreRoutes(app: ApiApp, ctx: AppContext): void {
   route(app, 'GET /api/v1/system/logs/files/:name', (c) => {
     const name = basename(c.req.param('name') ?? '');
     const file = ctx.logs.listFiles().find((entry) => entry.name === name);
-    if (!file) throw new AppError('not_found', 'log file not found');
+    if (!file) throw notFound('log file');
     ctx.logs.flush();
     return new Response(Bun.file(file.path), {
       headers: {

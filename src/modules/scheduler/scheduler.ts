@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import type { AppContext } from '../../app/context.ts';
 import type { SchedulerService, TaskDefinition } from '../../contracts/probe-scan.ts';
-import { AppError, errorMessage } from '../../core/errors.ts';
+import { AppError, errorMessage, notFound } from '../../core/errors.ts';
 import { type ScheduledTaskRow, scheduledTasks } from '../../db/schema.ts';
 import type { ScheduledTaskInfo, TaskName } from '../../shared/domain.ts';
 import { dueTasks, nextRunAt } from './schedule.ts';
@@ -31,7 +31,7 @@ export function createScheduler(ctx: AppContext, options: SchedulerOptions): Sch
 
   const definition = (name: TaskName): TaskDefinition => {
     const task = definitions.get(name);
-    if (!task) throw new AppError('not_found', `task ${name} not found`);
+    if (!task) throw notFound(`task ${name}`);
     return task;
   };
 
@@ -70,7 +70,7 @@ export function createScheduler(ctx: AppContext, options: SchedulerOptions): Sch
     definition(name);
     ensureRows();
     const found = ctx.db.select().from(scheduledTasks).where(eq(scheduledTasks.name, name)).get();
-    if (!found) throw new AppError('not_found', `task ${name} not found`);
+    if (!found) throw notFound(`task ${name}`);
     return found;
   };
 
