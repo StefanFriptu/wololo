@@ -76,10 +76,17 @@ The image bundles ffmpeg (with libbluray), MKVToolNix and 7-Zip. It drops root o
 
 1. Open `http://<host>:8585`.
 2. From your home network the UI opens straight away. From anywhere else, it asks for the API key.
-3. Find the API key under **Settings > General**, or in `/config/config.json`. Radarr and Sonarr need it for the webhook.
-4. Add a library under **Settings > Media**: one entry per media folder, e.g. `/data/media/movies`, using the path inside the container.
+3. A fresh install opens the **guided setup**: Welcome, Players, Media folders, Sonarr/Radarr, Plex (optional), qBittorrent (optional), New imports, Check everything. Each step tests itself before you move on, and progress is saved, so closing the tab loses nothing.
+   - The Sonarr/Radarr step adds a webhook named "Wololo" in their **Settings > Connect** for you (untick the box to add it by hand), checks a real file is visible through the path mappings (and offers the missing mapping), and makes Sonarr/Radarr send their test event to prove they can reach Wololo.
+   - **Check everything** re-runs every test. Anything red has a plain explanation and a **Fix** button that opens the step.
+   - Existing installs get a **Run setup** banner instead; **System > Status > Run setup again** opens it any time.
+
+The steps below are what the setup does, for doing them by hand.
+
+4. Find the API key under **Settings > General**, or in `/config/config.json`. Radarr and Sonarr need it for the webhook.
+5. Add a library under **Settings > Media**: one entry per media folder, e.g. `/data/media/movies`, using the path inside the container.
    - To find Blu-ray downloads, add the download folder (e.g. `/data/torrents/movies`) as its own library and tick **Only convert discs**. Wololo then indexes only disc folders and `.iso` images there, so the files your torrents are seeding are never touched.
-5. Look at **System > Status**. It lists the bundled tools and any health warnings (missing tools, unreachable folders, low disk space).
+6. Look at **System > Status**. It lists the bundled tools and any health warnings (missing tools, unreachable folders, low disk space).
 
 ## Connect Radarr and Sonarr
 

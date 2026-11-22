@@ -136,3 +136,22 @@ confirm).
 | `Settings.media.importAction` replaces automatic conversion               | applied: `check_only` (default), `convert_strictest`, `convert_for_profile` + `importProfileId`. Covers webhook imports, `checkPath` and the scan backlog. **Behaviour change**: existing installs stop auto-converting until the owner opts in                            |
 | Convert for one profile                                                   | applied for audio jobs (`jobs.profile_id`, `EnqueueRequest.profileId`, `NewJob.profileId`); the executor re-plans for that profile alone. A profile not assigned to the file's library is skipped with a reason. BDMV jobs always use the strictest combination (deferred) |
 | Per-codec test clips that build a profile from what played on the real TV | deferred to a follow-up                                                                                                                                                                                                                                                    |
+
+## Guided setup
+
+- **W1, webhook added for you**: applied. `PUT /api/v1/arr/:id/webhook` creates (from `/api/v3/notification/schema`)
+  or updates the Webhook whose URL is Wololo's webhook path with `?instance=<id>`, named "Wololo", POST, On Import
+  and On Upgrade. The setup does it behind a checkbox that is on by default; unticked, it shows the URL to paste.
+- **W2, existing installs**: applied. Only an install with no library and no Radarr/Sonarr opens the setup by itself;
+  others get a dismissable banner (`settings.setup.dismissed`), and System > Status links to it.
+- **Test event round trip**: the webhook emits `webhook.test`; `testWebhook` listens while Radarr/Sonarr run their
+  own notification test, which POSTs before it answers. Their failure text is read from the 400 body
+  (`UpstreamRequest.keepErrorBody`).
+- **Writable roots**: `LibraryRoot.writable` (W_OK on the root). A read-only root is a warning, not a failure: dry
+  run works without writing.
+- **New imports** sets `media.importAction` (and `importProfileId`); a convert choice also turns
+  `processing.enabled` on, since a job is queued only when both say so.
+- **Deferred**: the Players step lists the profiles and links to Profiles to add one from a template (embedding
+  `PlayerSetup` in the step is a follow-up); the sample is the library's status counts, not 20 files per player.
+  Matching Plex sections against library folders is deferred too: the Plex check reports reachability and the
+  movie/TV sections.

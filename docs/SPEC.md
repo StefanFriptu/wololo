@@ -293,6 +293,8 @@ UI (arr-style, modern)
 
 Left sidebar like Radarr: Library, Activity (Queue, History), Profiles, Settings (Media, Connect, Plex, Download clients, General), System (Status, Tasks, Logs, Backup).
 
+Guided setup: a fresh install opens an 8-step setup (Welcome, Players, Media folders, Sonarr/Radarr, Plex and qBittorrent optional, New imports, Check everything) that tests each part as it goes and saves progress in `settings.setup`. Wololo adds its own webhook in Sonarr/Radarr (opt-out), matches path mappings against a real file and confirms the test event arrives. Existing installs get a banner, never a forced wizard.
+
 Library view: every file with a status (Compatible, Needs work, Processing, Failed, Ignored) and filters by codec, profile and library.
 
 File detail: streams before and after, side by side, with what changed and what was lost.
