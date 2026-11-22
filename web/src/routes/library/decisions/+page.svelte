@@ -1,22 +1,34 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { page } from '$app/state';
   import { api } from '#lib/api/client.ts';
   import { live } from '#lib/api/live.svelte.ts';
   import Async from '#lib/components/Async.svelte';
   import Badge from '#lib/components/Badge.svelte';
   import DecisionCard from '#lib/components/DecisionCard.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
+  import { href } from '#lib/paths.ts';
+  import { queryString } from '#lib/queryParams.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import type { BdmvDecisionState } from '#lib/shared.ts';
 
-  const STATES: { value: BdmvDecisionState | undefined; label: string }[] = [
-    { value: 'pending', label: 'Waiting' },
-    { value: 'resolved', label: 'Resolved' },
-    { value: 'dismissed', label: 'Dismissed' },
-    { value: undefined, label: 'All' },
+  interface StateTab {
+    param: string | undefined;
+    value: BdmvDecisionState | undefined;
+    label: string;
+  }
+
+  const WAITING: StateTab = { param: undefined, value: 'pending', label: 'Waiting' };
+  const STATES: StateTab[] = [
+    WAITING,
+    { param: 'resolved', value: 'resolved', label: 'Resolved' },
+    { param: 'dismissed', value: 'dismissed', label: 'Dismissed' },
+    { param: 'all', value: undefined, label: 'All' },
   ];
 
-  let state = $state<BdmvDecisionState | undefined>('pending');
+  const tab = $derived(STATES.find((option) => option.param === (page.url.searchParams.get('state') ?? undefined)) ?? WAITING);
+  const state = $derived(tab.value);
 
   const decisions = new Resource((signal) => api('GET /api/v1/bdmv/decisions', { query: { state }, signal }));
   const arr = new Resource((signal) => api('GET /api/v1/arr', { signal }));
@@ -28,6 +40,10 @@
   $effect(() => {
     untrack(() => arr.load());
   });
+
+  function showState(option: StateTab): void {
+    goto(href(`/library/decisions${queryString({ state: option.param })}`), { replace: true, reset: false });
+  }
 
   $effect(() =>
     live.on((event) => {
@@ -41,7 +57,7 @@
 
 <div class="toolbar tabs" role="group" aria-label="Show decisions">
   {#each STATES as option (option.label)}
-    <button class="small" aria-pressed={state === option.value} onclick={() => (state = option.value)}>{option.label}</button>
+    <button class="small" aria-pressed={tab === option} onclick={() => showState(option)}>{option.label}</button>
   {/each}
   {#if decisions.data && state === 'pending'}
     <Badge tone={decisions.data.length > 0 ? 'warning' : 'success'} label="{decisions.data.length} waiting" />
