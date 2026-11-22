@@ -5,6 +5,7 @@ import type { DownloadClientService } from '../../contracts/integrations.ts';
 import { AppError, errorMessage } from '../../core/errors.ts';
 import type { DownloadClientInput } from '../../shared/api-types.ts';
 import type { DownloadClientConnection, TorrentInfo } from '../../shared/domain.ts';
+import { trimTrailingSlashes } from '../../shared/trimTrailingSlashes.ts';
 import { createArrClient } from './arr-client.ts';
 import type { IntegrationDeps } from './arr-service.ts';
 import { isSameOrInside, joinRemotePath } from './path-map.ts';
@@ -67,7 +68,7 @@ export function createDownloadClientService(ctx: AppContext, deps: IntegrationDe
       url: input.url,
       label: 'password',
     });
-    return { ...input, url: input.url.trim().replace(/\/+$/, ''), password: password ?? '' };
+    return { ...input, url: trimTrailingSlashes(input.url.trim()), password: password ?? '' };
   };
 
   const replacedInodes = async (): Promise<Set<string>> => {

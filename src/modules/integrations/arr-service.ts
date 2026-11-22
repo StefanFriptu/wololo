@@ -5,6 +5,7 @@ import { AppError, errorMessage, notFound } from '../../core/errors.ts';
 import type { ArrInstanceInput } from '../../shared/api-types.ts';
 import type { ArrInstance, ArrKind, MovieMatchCandidate } from '../../shared/domain.ts';
 import { normalizeLanguage } from '../../shared/language.ts';
+import { trimTrailingSlashes } from '../../shared/trimTrailingSlashes.ts';
 import { type ArrClient, type ArrLookupMovie, createArrClient } from './arr-client.ts';
 import { createArrSetup } from './arr-setup.ts';
 import { movieMatchScore, parseTitleYear } from './movie-match.ts';
@@ -292,7 +293,7 @@ export function createArrService(ctx: AppContext, deps: IntegrationDeps = {}): A
     return {
       kind: input.kind,
       name,
-      url: input.url.trim().replace(/\/+$/, ''),
+      url: trimTrailingSlashes(input.url.trim()),
       apiKey,
       enabled: input.enabled ?? existing?.enabled ?? true,
     };

@@ -4,7 +4,13 @@
   import { errorMessage } from '#lib/api/errorMessage.ts';
   import Modal from '#lib/components/Modal.svelte';
   import { secretForForm, secretForRequest } from '#lib/settings/secretField.ts';
-  import type { ArrInstance, ArrInstanceInput, ArrKind, ConnectionTestResult } from '#lib/shared.ts';
+  import {
+    type ArrInstance,
+    type ArrInstanceInput,
+    type ArrKind,
+    type ConnectionTestResult,
+    trimTrailingSlashes,
+  } from '#lib/shared.ts';
   import { toasts } from '#lib/toast.svelte.ts';
 
   let {
@@ -59,7 +65,7 @@
 
   async function save(event: SubmitEvent): Promise<void> {
     event.preventDefault();
-    const body = { ...withKey(), name: form.name.trim(), url: form.url.trim().replace(/\/+$/, '') };
+    const body = { ...withKey(), name: form.name.trim(), url: trimTrailingSlashes(form.url.trim()) };
     busy = true;
     try {
       if (instance) await api('PUT /api/v1/arr/:id', { params: { id: instance.id }, body });

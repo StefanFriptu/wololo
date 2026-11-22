@@ -1,3 +1,5 @@
+import { trimTrailingSlashes } from '#lib/shared.ts';
+
 const STORAGE_KEY = 'wololo-webhook-address';
 const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['localhost', '[::1]']);
 
@@ -14,7 +16,7 @@ export function loadWebhookAddress(storage: () => AddressStorage, origin: string
 
 /** Forgets the address when it is empty or the browser's origin, so the default follows the browser. */
 export function saveWebhookAddress(storage: () => AddressStorage, address: string, origin: string): void {
-  const value = address.trim().replace(/\/+$/, '');
+  const value = trimTrailingSlashes(address.trim());
   try {
     if (!value || value === origin) storage().removeItem(STORAGE_KEY);
     else storage().setItem(STORAGE_KEY, value);

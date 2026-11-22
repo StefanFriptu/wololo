@@ -7,7 +7,13 @@
   import Icon from '#lib/components/Icon.svelte';
   import { PATH_SCOPE_LABELS } from '#lib/labels.ts';
   import { runtimeConfig } from '#lib/runtime.ts';
-  import { type ArrInstance, type ArrKind, type PathMappingInput, webhookUrl } from '#lib/shared.ts';
+  import {
+    type ArrInstance,
+    type ArrKind,
+    type PathMappingInput,
+    trimTrailingSlashes,
+    webhookUrl,
+  } from '#lib/shared.ts';
   import { toasts } from '#lib/toast.svelte.ts';
   import { isLoopbackAddress, loadWebhookAddress, saveWebhookAddress } from '#lib/webhookAddress.ts';
   import CheckList from './CheckList.svelte';
@@ -23,7 +29,7 @@
   let formKind = $state<ArrKind>('sonarr');
   let running = $state(false);
 
-  const origin = $derived(address.trim().replace(/\/+$/, '') || location.origin);
+  const origin = $derived(trimTrailingSlashes(address.trim()) || location.origin);
 
   async function checkOne(instance: ArrInstance): Promise<void> {
     results[instance.id] = {

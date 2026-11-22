@@ -6,7 +6,7 @@
   import { href } from '#lib/paths.ts';
   import { Resource } from '#lib/resource.svelte.ts';
   import { secretForForm, secretForRequest } from '#lib/settings/secretField.ts';
-  import type { ConnectionTestResult, DownloadClientInput } from '#lib/shared.ts';
+  import { type ConnectionTestResult, type DownloadClientInput, trimTrailingSlashes } from '#lib/shared.ts';
   import { toasts } from '#lib/toast.svelte.ts';
 
   const BLANK: DownloadClientInput = {
@@ -55,7 +55,7 @@
     event.preventDefault();
     busy = true;
     try {
-      const body = { ...requestBody(), url: form.url.trim().replace(/\/+$/, ''), category: form.category?.trim() || null };
+      const body = { ...requestBody(), url: trimTrailingSlashes(form.url.trim()), category: form.category?.trim() || null };
       client.set(await api('PUT /api/v1/downloadclient', { body }));
       toasts.success('qBittorrent saved');
     } catch (error) {

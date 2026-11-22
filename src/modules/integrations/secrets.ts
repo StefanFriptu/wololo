@@ -1,4 +1,5 @@
 import { AppError } from '../../core/errors.ts';
+import { trimTrailingSlashes } from '../../shared/trimTrailingSlashes.ts';
 
 /** What API responses show instead of a stored secret; sending it back on update/test keeps the stored value. */
 export const SECRET_MASK = '********';
@@ -8,10 +9,10 @@ export function maskSecret(value: string): string {
 }
 
 function endpointKey(url: string): string {
-  const trimmed = url.trim().replace(/\/+$/, '');
+  const trimmed = trimTrailingSlashes(url.trim());
   try {
     const parsed = new URL(trimmed);
-    return `${parsed.protocol}//${parsed.host}${parsed.pathname.replace(/\/+$/, '')}`;
+    return `${parsed.protocol}//${parsed.host}${trimTrailingSlashes(parsed.pathname)}`;
   } catch {
     return trimmed;
   }

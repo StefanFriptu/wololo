@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { ArrKind } from '../../shared/domain.ts';
+import { trimTrailingSlashes } from '../../shared/trimTrailingSlashes.ts';
 import { type FetchLike, upstreamJson } from './upstream.ts';
 
 const SERVICE_NAME: Readonly<Record<ArrKind, string>> = { radarr: 'Radarr', sonarr: 'Sonarr' };
@@ -114,7 +115,7 @@ export type ArrClient = ReturnType<typeof createArrClient>;
 
 /** Radarr/Sonarr API v3 (X-Api-Key). Every response is validated; failures throw AppError('upstream'). */
 export function createArrClient(options: ArrClientOptions) {
-  const base = options.url.trim().replace(/\/+$/, '');
+  const base = trimTrailingSlashes(options.url.trim());
   const service = SERVICE_NAME[options.kind];
 
   const call = <T extends z.ZodType>(
