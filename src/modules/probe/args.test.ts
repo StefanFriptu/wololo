@@ -15,10 +15,6 @@ test('buildProbeArgs - file probe with chapters', () => {
   ]);
 });
 
-test('buildProbeArgs - without chapters', () => {
-  expect(buildProbeArgs('/m/a.mkv', { withChapters: false })).not.toContain('-show_chapters');
-});
-
 test('buildProbeArgs - playlist probes the disc through bluray:', () => {
   expect(buildProbeArgs('/d/Disc', { playlist: '00800.mpls' }).slice(-4)).toEqual([
     '-playlist',

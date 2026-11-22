@@ -31,8 +31,6 @@ import type {
 
 export interface ProbeOptions {
   signal?: AbortSignal;
-  /** Also count chapters and read format tags (default true). */
-  withChapters?: boolean;
   /**
    * Probe one playlist of a disc instead of a file: path is the disc folder or .iso and ffprobe runs
    * `-playlist <n> bluray:<path>` (n = "00800.mpls" -> 800). Streams then carry their PID in streamId.

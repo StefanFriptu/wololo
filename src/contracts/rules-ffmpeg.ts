@@ -81,9 +81,6 @@ export type CheckProfiles = (input: Omit<RulesInput, 'profile'> & { profiles: De
 /** Pure. Stable key of effective profile versions + every LibraryRuleSettings field, stored as media_files.rules_key. */
 export type ComputeRulesKey = (profile: EffectiveProfile, library: LibraryRuleSettings) => string;
 
-/** Pure. Does a codec name match an allowed list entry (supports "pcm_*" prefix wildcards)? */
-export type CodecAllowed = (codec: string, allowed: readonly string[]) => boolean;
-
 export interface RulesService {
   plan(input: RulesInput): ConversionPlan;
   resolveProfile(profiles: DeviceProfile[]): EffectiveProfile;
