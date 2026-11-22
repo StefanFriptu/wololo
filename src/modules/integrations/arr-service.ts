@@ -311,12 +311,12 @@ export function createArrService(ctx: AppContext, deps: IntegrationDeps = {}): A
     };
   };
 
-  const radarrMovieIdFor = async (instance: ArrInstance, movie: ArrLookupMovie): Promise<number | null> => {
+  const radarrMovieIdFor = async (
+    movie: ArrLookupMovie,
+    libraryIndex: () => Promise<InstanceIndex | null>,
+  ): Promise<number | null> => {
     if (movie.id != null && movie.id > 0) return movie.id;
-    const index = await indexFor(instance).catch((error: unknown) => {
-      log.warn('could not read the Radarr library for a lookup', { instance: instance.name, error });
-      return null;
-    });
+    const index = await libraryIndex();
     return index?.entries.find((entry) => entry.tmdbId === movie.tmdbId)?.itemId ?? null;
   };
 
@@ -385,6 +385,12 @@ export function createArrService(ctx: AppContext, deps: IntegrationDeps = {}): A
       const results = tmdb
         ? [await client.lookupTmdb(Number(tmdb[1]))]
         : await client.lookupMovies(wanted.year ? `${wanted.title} (${wanted.year})` : wanted.title);
+      let library: Promise<InstanceIndex | null> | null = null;
+      const libraryIndex = () =>
+        (library ??= indexFor(instance).catch((error: unknown) => {
+          log.warn('could not read the Radarr library for a lookup', { instance: instance.name, error });
+          return null;
+        }));
       const candidates: MovieMatchCandidate[] = [];
       for (const movie of results) {
         if (movie.tmdbId <= 0) continue;
@@ -394,7 +400,7 @@ export function createArrService(ctx: AppContext, deps: IntegrationDeps = {}): A
           tmdbId: movie.tmdbId,
           imdbId: movie.imdbId ?? null,
           score: tmdb ? 1 : movieMatchScore(wanted, { ...movie, year: movie.year ?? null }),
-          radarrMovieId: await radarrMovieIdFor(instance, movie),
+          radarrMovieId: await radarrMovieIdFor(movie, libraryIndex),
         });
       }
       return candidates.sort((a, b) => b.score - a.score).slice(0, MAX_LOOKUP_RESULTS);

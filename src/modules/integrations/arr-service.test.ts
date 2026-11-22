@@ -335,6 +335,21 @@ test('arr.lookupMovie - scores locally, sorts, drops invalid ids and finds libra
   expect(radarr.requestsTo('GET /api/v3/movie/lookup')[0]?.query.get('term')).toBe('Jamon Jamon (1992)');
 });
 
+test('arr.lookupMovie - an unreadable library is read and logged once for the whole lookup', async () => {
+  radarr.on('GET /api/v3/movie', () => new Response('down', { status: 503 }));
+  const created = await addRadarr();
+  const results = await t.ctx.services.arr.lookupMovie(created.id, 'Jamon Jamon', 1992);
+  expect(results.map((movie) => [movie.tmdbId, movie.radarrMovieId])).toEqual([
+    [3576, null],
+    [1, null],
+  ]);
+  expect(radarr.requestsTo('GET /api/v3/movie')).toHaveLength(1);
+  const warnings = t.ctx.logs
+    .entries({ module: 'arr', level: 'warn' })
+    .filter((entry) => entry.message === 'could not read the Radarr library for a lookup');
+  expect(warnings).toHaveLength(1);
+});
+
 test('arr.lookupMovie - tmdb: term resolves one id with score 1', async () => {
   const created = await addRadarr();
   const results = await t.ctx.services.arr.lookupMovie(created.id, 'tmdb:949');
