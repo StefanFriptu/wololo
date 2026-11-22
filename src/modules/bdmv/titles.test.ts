@@ -9,7 +9,6 @@ import {
   detectEncryption,
   hasLoops,
   pickMainTitle,
-  playlistNumber,
   titleCandidate,
 } from './titles.ts';
 
@@ -333,16 +332,4 @@ test.each([
   ],
 ] as const)('defaultEditionNames - %j', (input, expected) => {
   expect(defaultEditionNames(input.map(([name, durationSec]) => ({ name, durationSec })))).toEqual(expected);
-});
-
-test.each([
-  ['00800.mpls', 800],
-  ['00000.MPLS', 0],
-  ['12345.mpls', 12345],
-])('playlistNumber - %s', (name, number) => {
-  expect(playlistNumber(name)).toBe(number);
-});
-
-test('playlistNumber - rejects other names', () => {
-  expect(() => playlistNumber('index.bdmv')).toThrow('not a playlist');
 });

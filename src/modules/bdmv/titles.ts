@@ -226,10 +226,3 @@ export function defaultEditionNames(
   });
   return names;
 }
-
-/** "00800.mpls" -> 800, the number ffmpeg's bluray protocol takes as -playlist. */
-export function playlistNumber(name: string): number {
-  const match = /^(\d{1,5})\.mpls$/i.exec(name);
-  if (!match) throw new Error(`not a playlist file name: ${name}`);
-  return Number(match[1]);
-}

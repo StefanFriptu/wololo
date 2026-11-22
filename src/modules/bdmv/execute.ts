@@ -4,6 +4,7 @@ import type { AppContext } from '../../app/context.ts';
 import type { MkvmergeOutputTrack, MplsPlaylist } from '../../contracts/bdmv.ts';
 import type { JobExecutor, JobOutcome, JobRunContext } from '../../contracts/jobs.ts';
 import { TEMP_FILE_MARKER } from '../../contracts/jobs.ts';
+import { blurayInput, playlistArgs } from '../../core/bluray.ts';
 import { AppError, errnoCode, errorMessage } from '../../core/errors.ts';
 import type { Logger } from '../../core/logger.ts';
 import type { RunResult } from '../../core/process.ts';
@@ -20,14 +21,10 @@ import type {
 import { createIsoReader } from './iso.ts';
 import { buildMkvmergeArgs, mkvmergeSucceeded, parseMkvmergeIdentify, parseMkvmergeProgress } from './mkvmerge.ts';
 import { type DiscPlanner, loadDiscRow, withPlaylistLanguages } from './planner.ts';
-import { countForcedPgsCompositions, playlistNumber } from './titles.ts';
+import { countForcedPgsCompositions } from './titles.ts';
 
 const PGS_CODEC = 'hdmv_pgs_subtitle';
 const DURATION_TOLERANCE_SEC = 0.5;
-
-export function blurayInput(discPath: string): string {
-  return `bluray:${discPath}`;
-}
 
 function findStream(probe: ProbeResult, sourceIndex: number): MediaStream | undefined {
   return probe.streams.find((stream) => stream.index === sourceIndex);
@@ -58,8 +55,7 @@ export function buildSupExtractArgs(
     '-hide_banner',
     '-nostdin',
     '-y',
-    '-playlist',
-    String(playlistNumber(playlist)),
+    ...playlistArgs(playlist),
     '-i',
     blurayInput(discPath),
     ...targets.flatMap((target) => ['-map', `0:${target.sourceIndex}`, '-c', 'copy', '-f', 'sup', target.path]),
@@ -70,8 +66,7 @@ export function buildPacketCountArgs(discPath: string, playlist: string): string
   return [
     '-v',
     'error',
-    '-playlist',
-    String(playlistNumber(playlist)),
+    ...playlistArgs(playlist),
     '-select_streams',
     'v:0',
     '-count_packets',
@@ -251,7 +246,7 @@ export function createBdmvExecutor(
         command: tools().ffmpeg,
         args: services.ffmpeg.buildAudioConversionArgs({
           inputPath: blurayInput(disc),
-          inputOptions: ['-playlist', String(playlistNumber(work.title.playlist))],
+          inputOptions: playlistArgs(work.title.playlist),
           outputPath,
           probe: work.probe,
           plan: sideFilePlan(work.plan, stream),

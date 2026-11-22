@@ -13,7 +13,6 @@ import type { RulesInput } from '../../contracts/rules-ffmpeg.ts';
 import type { RunOptions, RunResult } from '../../core/process.ts';
 import type { ConversionPlan, PlannedStream } from '../../shared/domain.ts';
 import {
-  blurayInput,
   buildPacketCountArgs,
   buildSupExtractArgs,
   forcedScanTargets,
@@ -59,10 +58,6 @@ const FEATURE_PLAN = plan([
   planned(1, { op: 'encode', codec: 'ac3', encode: ENCODE, language: 'spa', default: true }),
   planned(2, { kind: 'subtitle', codec: 'hdmv_pgs_subtitle', language: 'eng' }),
 ]);
-
-test('blurayInput - libbluray protocol URL', () => {
-  expect(blurayInput('/data/Disc')).toBe('bluray:/data/Disc');
-});
 
 test('forcedScanTargets - only PGS tracks of languages with several planned subtitles', () => {
   const probe = probeResult([
