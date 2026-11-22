@@ -56,8 +56,12 @@ export type ProcessRunner = (options: RunOptions) => Promise<RunResult>;
 
 export interface SevenZipIsoReader extends IsoReader {
   entries(isoPath: string): Promise<DiscEntry[]>;
-  /** Extracts several files in one 7z call; keys are the requested paths. Missing files are left out. */
-  readFiles(isoPath: string, innerPaths: readonly string[]): Promise<Map<string, Uint8Array>>;
+  /** Extracts several files in one 7z call; keys are the requested paths. Missing files are left out. Pass the listing already held to skip listing again. */
+  readFiles(
+    isoPath: string,
+    innerPaths: readonly string[],
+    listing?: readonly DiscEntry[],
+  ): Promise<Map<string, Uint8Array>>;
 }
 
 const SEVEN_ZIP_OK_EXIT_CODES = [0, 1] as const;
@@ -88,8 +92,8 @@ export function createIsoReader(deps: { sevenZip: string; run: ProcessRunner; te
     }
   };
 
-  const readFiles = async (isoPath: string, innerPaths: readonly string[]) => {
-    const listing = await entries(isoPath);
+  const readFiles = async (isoPath: string, innerPaths: readonly string[], known?: readonly DiscEntry[]) => {
+    const listing = known ?? (await entries(isoPath));
     const resolved = innerPaths
       .map((path) => ({ path, entry: findEntry(listing, path) }))
       .filter((item): item is { path: string; entry: DiscEntry } => item.entry !== null && !item.entry.directory);
@@ -122,7 +126,7 @@ export function createIsoReader(deps: { sevenZip: string; run: ProcessRunner; te
       const listing = await entries(isoPath);
       const playlistEntry = findEntry(listing, `BDMV/PLAYLIST/${playlist}`);
       if (!playlistEntry) throw new AppError('not_found', `${playlist} not found in ${isoPath}`);
-      const mpls = (await readFiles(isoPath, [playlistEntry.path])).get(playlistEntry.path);
+      const mpls = (await readFiles(isoPath, [playlistEntry.path], listing)).get(playlistEntry.path);
       if (!mpls) throw new AppError('not_found', `${playlist} could not be read from ${isoPath}`);
       const clipIds = parseMpls(playlist, mpls).playItems.flatMap((item) => [item.clipId, ...item.angleClipIds]);
       const paths = muxFilesForPlaylist(clipIds, playlist)
