@@ -1,6 +1,6 @@
 import { constants } from 'node:fs';
 import { access, stat } from 'node:fs/promises';
-import { errorMessage } from '../../core/errors.ts';
+import { errnoCode, errorMessage } from '../../core/errors.ts';
 import { withTimeout } from './withTimeout.ts';
 
 export interface RootProbeDeps {
@@ -19,7 +19,7 @@ async function probe(path: string, deps: RootProbeDeps): Promise<string | null> 
     await deps.access(path, constants.R_OK | constants.X_OK);
     return null;
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code ?? errorMessage(error);
+    return errnoCode(error) ?? errorMessage(error);
   }
 }
 

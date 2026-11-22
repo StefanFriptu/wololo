@@ -4,7 +4,7 @@ import type { AppContext } from '../../app/context.ts';
 import type { MkvmergeOutputTrack, MplsPlaylist } from '../../contracts/bdmv.ts';
 import type { JobExecutor, JobOutcome, JobRunContext } from '../../contracts/jobs.ts';
 import { TEMP_FILE_MARKER } from '../../contracts/jobs.ts';
-import { AppError, errorMessage } from '../../core/errors.ts';
+import { AppError, errnoCode, errorMessage } from '../../core/errors.ts';
 import type { Logger } from '../../core/logger.ts';
 import type { RunResult } from '../../core/process.ts';
 import type {
@@ -198,7 +198,7 @@ export async function placeFile(from: string, to: string): Promise<void> {
   try {
     await link(from, to);
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code ?? '';
+    const code = errnoCode(error) ?? '';
     if (code === 'EEXIST') throw new AppError('conflict', `output already exists: ${to}`);
     if (!NO_HARD_LINKS.has(code)) throw error;
     if (await exists(to)) throw new AppError('conflict', `output already exists: ${to}`);

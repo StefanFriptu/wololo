@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import type { AppContext } from '../../app/context.ts';
 import type { ScanService } from '../../contracts/probe-scan.ts';
-import { errorMessage, notFound } from '../../core/errors.ts';
+import { errnoCode, errorMessage, notFound } from '../../core/errors.ts';
 import { isWithin } from '../../core/isWithin.ts';
 import { yieldToEventLoop } from '../../core/yieldToEventLoop.ts';
 import type { ScanRequest, ScanStatus } from '../../shared/api-types.ts';
@@ -35,7 +35,7 @@ async function presenceOf(path: string): Promise<Presence> {
     await stat(path);
     return 'present';
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
+    const code = errnoCode(error);
     return code === 'ENOENT' || code === 'ENOTDIR' ? 'missing' : 'unknown';
   }
 }
