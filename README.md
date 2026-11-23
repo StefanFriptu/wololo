@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/assets/banner.svg" alt="Wololo: DTS, TrueHD, E-AC3 and PCM audio become AC3 so the TV direct-plays" width="100%"></p>
+<p align="center"><img src="docs/assets/banner.svg" alt="Wololo: audio, video, subtitle and disc formats become files the TV direct-plays" width="100%"></p>
 
 # Wololo
 
